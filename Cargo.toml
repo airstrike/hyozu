@@ -1,0 +1,15 @@
+[package]
+name = "hyozu"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+iced_core = { git = "https://github.com/iced-rs/iced.git", branch = "master" }
+iced_widget = { git = "https://github.com/iced-rs/iced.git", branch = "master", features = ["canvas"] }
+jiff = "0.2"
+
+[dev-dependencies]
+iced = { git = "https://github.com/iced-rs/iced.git", branch = "master", features = ["debug"] }
+
+[workspace]
+members = ["examples/*"]

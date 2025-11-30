@@ -1,0 +1,30 @@
+[package]
+name = "btc_stream"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+chrono = "0.4"
+hyozu = { path = "../.." }
+iced = { git = "https://github.com/iced-rs/iced.git", branch = "master", features = [
+    "tokio",
+    "sipper",
+] }
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = [
+    "client",
+    "client-legacy",
+    "tokio",
+    "http1",
+] }
+hyper-rustls = { version = "0.27", default-features = false, features = [
+    "ring",
+    "http1",
+    "tls12",
+    "webpki-tokio",
+] }
+http-body-util = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["time"] }
