@@ -13,3 +13,12 @@ iced = { git = "https://github.com/iced-rs/iced.git", branch = "master", feature
 
 [workspace]
 members = ["examples/*"]
+
+# For testing local iced changes
+[patch."https://github.com/iced-rs/iced.git"]
+iced.path = "../iced"
+iced_core.path = "../iced/core"
+iced_widget.path = "../iced/widget"
+
+[patch."https://github.com/iced-rs/winit.git"]
+winit.path = "../winit"
