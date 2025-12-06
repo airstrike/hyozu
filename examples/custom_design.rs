@@ -10,6 +10,7 @@ use iced::widget::{button, center, column, container, row, space, text};
 use iced::{Color, Task};
 
 use hyozu::{chart, data, line, lines};
+use hyozu::line::marker::Shape;
 
 use theme::Theme; // custom theme type. see end of file.
 
@@ -51,7 +52,14 @@ impl App {
         let series3 = [10.0, 35.0, 25.0, 50.0, 30.0, 45.0];
         let series4 = [40.0, 30.0, 45.0, 35.0, 55.0, 60.0];
 
-        let data = lines![series1, series2, series3, series4].into();
+        // Each series gets a different marker shape
+        let data = lines![
+            line(series1).markers(Shape::Circle),
+            line(series2).markers(Shape::Square),
+            line(series3).markers(Shape::Diamond),
+            line(series4).markers(Shape::Triangle),
+        ]
+        .into();
 
         // this would also work
         // let data = data(vec![

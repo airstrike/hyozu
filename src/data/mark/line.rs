@@ -1,4 +1,5 @@
 pub mod label;
+pub mod marker;
 
 use crate::color::Color;
 use crate::data::axis::{self, Axis, Kind, Orientation, Placement};
@@ -31,6 +32,8 @@ pub struct Line {
     pub(crate) width: f32,
     /// Data label configuration
     pub(crate) label: Option<label::Label>,
+    /// Marker configuration
+    pub(crate) marker: Option<marker::Marker>,
 }
 
 /// Creates a line chart mark from data points.
@@ -57,6 +60,7 @@ pub fn line(data: impl IntoDatums) -> Line {
         color: None,
         width: 2.0,
         label: None,
+        marker: None,
     }
 }
 
@@ -113,6 +117,30 @@ impl Line {
     /// Returns a mutable reference to the label configuration.
     pub fn label_mut(&mut self) -> Option<&mut label::Label> {
         self.label.as_mut()
+    }
+
+    /// Configure markers for the line points.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use hyozu::line;
+    /// use hyozu::line::marker::{Shape, Show};
+    ///
+    /// // All points with circle markers
+    /// let mark = line([1, 2, 3, 4]).markers(Shape::Circle);
+    ///
+    /// // Only first and last with diamond markers
+    /// let mark = line([1, 2, 3, 4]).markers(Shape::Diamond + Show::FirstAndLast);
+    /// ```
+    pub fn markers(mut self, marker: impl Into<Option<marker::Marker>>) -> Self {
+        self.marker = marker.into();
+        self
+    }
+
+    /// Returns a mutable reference to the marker configuration.
+    pub fn marker_mut(&mut self) -> Option<&mut marker::Marker> {
+        self.marker.as_mut()
     }
 
     // === Axis factory methods ===

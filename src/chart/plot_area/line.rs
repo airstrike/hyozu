@@ -9,6 +9,7 @@ use crate::widget::renderer::geometry;
 
 use crate::core::{Point, Rectangle};
 use crate::line::label::{Position, Show};
+use crate::line::marker::{self, Shape};
 
 /// State for a Line - stores positioned line points and label info
 pub struct State {
@@ -273,6 +274,168 @@ where
                 renderer.draw_geometry(geometry);
             },
         );
+
+        // Draw markers if configured
+        if let Some(marker_config) = &self.data.marker {
+            let marker_color = if let Some(marker_color_spec) = marker_config.color {
+                marker_color_spec.resolve(background, text_pair, None)
+            } else {
+                color
+            };
+
+            let num_points = state.pixel_points.len();
+
+            // Find min/max Y indices for MinMax modes
+            let minmax_indices: Vec<usize> = match marker_config.show {
+                marker::Show::MinMaxFirst | marker::Show::MinMaxAll | marker::Show::MinMaxLast => {
+                    let (min_val, max_val) = self.data.points.iter().fold(
+                        (f64::INFINITY, f64::NEG_INFINITY),
+                        |(min, max), p| (min.min(p.y), max.max(p.y)),
+                    );
+
+                    match marker_config.show {
+                        marker::Show::MinMaxFirst => {
+                            let min_idx = self.data.points.iter().position(|p| p.y == min_val);
+                            let max_idx = self.data.points.iter().position(|p| p.y == max_val);
+                            [min_idx, max_idx].into_iter().flatten().collect()
+                        }
+                        marker::Show::MinMaxLast => {
+                            let min_idx = self.data.points.iter().rposition(|p| p.y == min_val);
+                            let max_idx = self.data.points.iter().rposition(|p| p.y == max_val);
+                            [min_idx, max_idx].into_iter().flatten().collect()
+                        }
+                        marker::Show::MinMaxAll => self
+                            .data
+                            .points
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, p)| p.y == min_val || p.y == max_val)
+                            .map(|(i, _)| i)
+                            .collect(),
+                        _ => vec![],
+                    }
+                }
+                _ => vec![],
+            };
+
+            // Create a frame for markers
+            let mut marker_frame = Frame::new(renderer, layout_bounds.size());
+
+            for (idx, pixel_point) in state.pixel_points.iter().enumerate() {
+                // Check if this point should show a marker
+                let should_show = match marker_config.show {
+                    marker::Show::Any => true,
+                    marker::Show::FirstOnly => idx == 0,
+                    marker::Show::LastOnly => idx == num_points - 1,
+                    marker::Show::FirstAndLast => idx == 0 || idx == num_points - 1,
+                    marker::Show::MinMaxFirst
+                    | marker::Show::MinMaxAll
+                    | marker::Show::MinMaxLast => minmax_indices.contains(&idx),
+                };
+
+                if !should_show {
+                    continue;
+                }
+
+                let size = marker_config.size;
+                let half = size / 2.0;
+
+                // Build path for the marker shape
+                let path = Path::new(|builder| {
+                    match marker_config.shape {
+                        Shape::Circle => {
+                            builder.circle(*pixel_point, half);
+                        }
+                        Shape::Square => {
+                            builder.rectangle(
+                                Point::new(pixel_point.x - half, pixel_point.y - half),
+                                crate::core::Size::new(size, size),
+                            );
+                        }
+                        Shape::Diamond => {
+                            builder.move_to(Point::new(pixel_point.x, pixel_point.y - half));
+                            builder.line_to(Point::new(pixel_point.x + half, pixel_point.y));
+                            builder.line_to(Point::new(pixel_point.x, pixel_point.y + half));
+                            builder.line_to(Point::new(pixel_point.x - half, pixel_point.y));
+                            builder.close();
+                        }
+                        Shape::Triangle => {
+                            // Pointing up
+                            builder.move_to(Point::new(pixel_point.x, pixel_point.y - half));
+                            builder.line_to(Point::new(pixel_point.x + half, pixel_point.y + half));
+                            builder.line_to(Point::new(pixel_point.x - half, pixel_point.y + half));
+                            builder.close();
+                        }
+                        Shape::TriangleDown => {
+                            // Pointing down
+                            builder.move_to(Point::new(pixel_point.x, pixel_point.y + half));
+                            builder.line_to(Point::new(pixel_point.x + half, pixel_point.y - half));
+                            builder.line_to(Point::new(pixel_point.x - half, pixel_point.y - half));
+                            builder.close();
+                        }
+                        Shape::Cross => {
+                            // Plus sign (+)
+                            let arm = half * 0.3;
+                            builder.move_to(Point::new(pixel_point.x - arm, pixel_point.y - half));
+                            builder.line_to(Point::new(pixel_point.x + arm, pixel_point.y - half));
+                            builder.line_to(Point::new(pixel_point.x + arm, pixel_point.y - arm));
+                            builder.line_to(Point::new(pixel_point.x + half, pixel_point.y - arm));
+                            builder.line_to(Point::new(pixel_point.x + half, pixel_point.y + arm));
+                            builder.line_to(Point::new(pixel_point.x + arm, pixel_point.y + arm));
+                            builder.line_to(Point::new(pixel_point.x + arm, pixel_point.y + half));
+                            builder.line_to(Point::new(pixel_point.x - arm, pixel_point.y + half));
+                            builder.line_to(Point::new(pixel_point.x - arm, pixel_point.y + arm));
+                            builder.line_to(Point::new(pixel_point.x - half, pixel_point.y + arm));
+                            builder.line_to(Point::new(pixel_point.x - half, pixel_point.y - arm));
+                            builder.line_to(Point::new(pixel_point.x - arm, pixel_point.y - arm));
+                            builder.close();
+                        }
+                        Shape::X => {
+                            // X shape - draw as two crossing rectangles
+                            let arm = half * 0.25;
+                            let diag = half * 0.707; // cos(45°)
+                            // We'll draw a simplified X using lines
+                            builder.move_to(Point::new(pixel_point.x - diag, pixel_point.y - diag));
+                            builder.line_to(Point::new(pixel_point.x + diag, pixel_point.y + diag));
+                            builder.move_to(Point::new(pixel_point.x + diag, pixel_point.y - diag));
+                            builder.line_to(Point::new(pixel_point.x - diag, pixel_point.y + diag));
+                        }
+                    }
+                });
+
+                // Fill the marker (except for X which is stroke-only)
+                if marker_config.shape != Shape::X {
+                    marker_frame.fill(&path, marker_color);
+                }
+
+                // Stroke the marker if configured
+                if let Some(stroke_color_spec) = marker_config.stroke {
+                    let stroke_color = stroke_color_spec.resolve(background, text_pair, None);
+                    marker_frame.stroke(
+                        &path,
+                        Stroke::default()
+                            .with_width(marker_config.stroke_width)
+                            .with_color(stroke_color),
+                    );
+                } else if marker_config.shape == Shape::X {
+                    // X shape needs stroke to be visible
+                    marker_frame.stroke(
+                        &path,
+                        Stroke::default()
+                            .with_width(marker_config.stroke_width.max(2.0))
+                            .with_color(marker_color),
+                    );
+                }
+            }
+
+            let marker_geometry = marker_frame.into_geometry();
+            renderer.with_translation(
+                crate::core::Vector::new(layout_bounds.x, layout_bounds.y),
+                |renderer| {
+                    renderer.draw_geometry(marker_geometry);
+                },
+            );
+        }
 
         // Draw data labels from state
         if let Some(label_config) = &self.data.label {
