@@ -391,8 +391,6 @@ where
                             builder.close();
                         }
                         Shape::X => {
-                            // X shape - draw as two crossing rectangles
-                            let arm = half * 0.25;
                             let diag = half * 0.707; // cos(45°)
                             // We'll draw a simplified X using lines
                             builder.move_to(Point::new(pixel_point.x - diag, pixel_point.y - diag));
