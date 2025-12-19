@@ -434,6 +434,7 @@ where
                             ),
                             shaping: crate::core::text::Shaping::Basic,
                             wrapping: crate::core::text::Wrapping::None,
+                            hint_factor: renderer.scale_factor(),
                         },
                         crate::core::Point::new(label_x, label_y),
                         label_color,
