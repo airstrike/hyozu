@@ -41,6 +41,9 @@ pub struct Data {
 
     /// Optional palette strategy override
     pub(crate) palette: Option<crate::palette::Palette>,
+
+    /// Currently selected chart element
+    pub(crate) selection: Option<crate::target::Target>,
 }
 
 /// Returns the default axis pair for a given mark type.
@@ -99,6 +102,7 @@ impl IntoData for Mark {
             secondary: Area::empty(),
             title: None,
             palette: None,
+            selection: None,
         }
     }
 }
@@ -146,6 +150,7 @@ impl IntoData for Vec<Mark> {
             secondary: Area::empty(),
             title: None,
             palette: None,
+            selection: None,
         }
     }
 }
@@ -345,6 +350,23 @@ impl Data {
     pub fn y_axis_mut(&mut self) -> Option<&mut Axis> {
         self.primary.y_axis_mut()
     }
+
+    // === Selection ===
+
+    /// Returns the current selection target.
+    pub fn selection(&self) -> Option<&crate::target::Target> {
+        self.selection.as_ref()
+    }
+
+    /// Sets the selection to a target.
+    pub fn select(&mut self, target: crate::target::Target) {
+        self.selection = Some(target);
+    }
+
+    /// Clears the selection.
+    pub fn deselect(&mut self) {
+        self.selection = None;
+    }
 }
 
 /// Actions that can be performed on chart data.
@@ -354,6 +376,8 @@ impl Data {
 pub enum Action {
     /// Set a property on a chart item.
     Set(crate::item::Item),
+    /// A chart element was clicked.
+    Clicked(crate::target::Target),
 }
 
 impl Data {
@@ -382,6 +406,41 @@ impl Data {
                         property.apply(line);
                     }
                 }
+                Item::Pie(index, property) => {
+                    if let Some(Mark::Pie(pie)) =
+                        self.primary.marks.get_mut(index)
+                    {
+                        property.apply(pie);
+                    }
+                }
+                Item::Gauge(index, property) => {
+                    if let Some(Mark::Gauge(gauge)) =
+                        self.primary.marks.get_mut(index)
+                    {
+                        property.apply(gauge);
+                    }
+                }
+                Item::Waterfall(index, property) => {
+                    if let Some(Mark::Waterfall(wf)) =
+                        self.primary.marks.get_mut(index)
+                    {
+                        property.apply(wf);
+                    }
+                }
+                Item::Xy(index, property) => {
+                    if let Some(Mark::Xy(xy)) =
+                        self.primary.marks.get_mut(index)
+                    {
+                        property.apply(xy);
+                    }
+                }
+                Item::Rule(index, property) => {
+                    if let Some(Mark::Rule(rule)) =
+                        self.primary.marks.get_mut(index)
+                    {
+                        property.apply(rule);
+                    }
+                }
                 Item::XAxis(property) => {
                     if let Some(axis) = &mut self.primary.x_axis {
                         property.apply(axis);
@@ -392,7 +451,17 @@ impl Data {
                         property.apply(axis);
                     }
                 }
+                Item::Palette(palette) => {
+                    self.palette = Some(palette);
+                }
+                Item::Selection(target) => {
+                    self.selection = target;
+                }
             },
+            Action::Clicked(_) => {
+                // Clicked actions are reported to the application via on_action.
+                // The application decides how to handle them (e.g., update selection).
+            }
         }
     }
 }

@@ -9,7 +9,8 @@ use std::borrow::Cow;
 
 use crate::core::widget::{Tree, tree};
 use crate::core::{
-    Element, Layout, Length, Padding, Rectangle, Size, Widget, layout, mouse,
+    Element, Event, Layout, Length, Padding, Rectangle, Size, Widget, layout,
+    mouse,
 };
 use crate::widget::Renderer;
 
@@ -40,7 +41,9 @@ pub struct Chart<
 /// Internal state for the chart widget.
 #[derive(Default)]
 struct State {
-    // cache: canvas::Cache<Renderer>,
+    is_pressed: bool,
+    /// Absolute screen-space bounds of the plot area (stored during layout).
+    plot_area_bounds: Option<Rectangle>,
 }
 
 /// Creates a chart widget from data.
@@ -188,10 +191,135 @@ where
             &layout::Limits::new(Size::ZERO, inner_size),
         );
 
+        // Store plot area bounds from the plane (in plot-area-local coords)
+        // and offset to screen space using the scene layout
+        let state = tree.state.downcast_mut::<State>();
+        let plot_area_state = scene_tree.children[6]
+            .state
+            .downcast_ref::<plot_area::State>();
+        state.plot_area_bounds = plot_area_state.plane.as_ref().map(|plane| {
+            // Find the plot area position within the scene layout
+            // The plot area node in the scene is the one matching the plane bounds size
+            let plot_area_offset = self.scene.plot_area_offset();
+
+            Rectangle {
+                x: self.padding.left + plot_area_offset.x + plane.bounds.x,
+                y: self.padding.top + plot_area_offset.y + plane.bounds.y,
+                width: plane.bounds.width,
+                height: plane.bounds.height,
+            }
+        });
+
         // Position scene node with padding offset
         layout::Node::with_children(size, vec![
             scene_node.move_to(Point::new(self.padding.left, self.padding.top)),
         ])
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut Tree,
+        event: &Event,
+        _layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        _renderer: &Renderer,
+        shell: &mut crate::core::Shell<'_, Message>,
+        _viewport: &Rectangle,
+    ) {
+        if shell.is_event_captured() {
+            return;
+        }
+
+        let Some(on_action) = &self.on_action else {
+            return;
+        };
+
+        let state = tree.state.downcast_mut::<State>();
+
+        match event {
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                if let Some(plot_bounds) = &state.plot_area_bounds
+                    && cursor.is_over(*plot_bounds)
+                {
+                    state.is_pressed = true;
+                    shell.capture_event();
+                }
+            }
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                if state.is_pressed {
+                    state.is_pressed = false;
+                    shell.capture_event();
+
+                    let Some(plot_bounds) = state.plot_area_bounds else {
+                        return;
+                    };
+
+                    let Some(cursor_pos) = cursor.position() else {
+                        return;
+                    };
+
+                    if !plot_bounds.contains(cursor_pos) {
+                        // Clicked outside plot area — report empty click
+                        shell.publish(on_action(Action::Clicked(
+                            crate::target::Target::Mark(usize::MAX),
+                        )));
+                        return;
+                    }
+
+                    // Translate cursor to plot-area-local coordinates
+                    let local = crate::core::Point::new(
+                        cursor_pos.x - plot_bounds.x,
+                        cursor_pos.y - plot_bounds.y,
+                    );
+
+                    // Hit-test against bar rects in the tree
+                    // Tree: chart[0] → scene[6] → plot_area children (per mark)
+                    let scene_tree = &tree.children[0];
+                    let plot_area_tree = &scene_tree.children[6];
+
+                    // Walk each mark's series looking for a hit
+                    let bars_tag = tree::Tag::of::<plot_area::bars::State>();
+
+                    for (mark_idx, series_tree) in
+                        plot_area_tree.children.iter().enumerate()
+                    {
+                        // Check if this is a bars series by matching tree tag
+                        if series_tree.tag == bars_tag {
+                            let bars_state = series_tree
+                                .state
+                                .downcast_ref::<plot_area::bars::State>(
+                            );
+
+                            for (series_idx, rects) in
+                                bars_state.series_rects.iter().enumerate()
+                            {
+                                for (bar_idx, rect) in rects.iter().enumerate()
+                                {
+                                    if rect.contains(local) {
+                                        shell.publish(on_action(
+                                            Action::Clicked(
+                                                crate::target::Target::Entry {
+                                                    mark: mark_idx,
+                                                    series: series_idx,
+                                                    index: bar_idx,
+                                                },
+                                            ),
+                                        ));
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // No specific element hit — report empty click
+                    shell.publish(on_action(Action::Clicked(
+                        crate::target::Target::Mark(usize::MAX),
+                    )));
+                }
+            }
+            _ => {}
+        }
     }
 
     fn draw(

@@ -8,6 +8,7 @@ pub mod item;
 pub mod map;
 pub mod palette;
 pub mod props;
+pub mod target;
 pub mod theme;
 
 // Make our imports look like iced's built-in widgets
@@ -22,6 +23,7 @@ pub use color::{Color, Pair};
 pub use data::{Action, Data, Datum};
 pub use design::Design;
 pub use palette::{Palette, Resolved};
+pub use target::Target;
 
 pub use data::data;
 

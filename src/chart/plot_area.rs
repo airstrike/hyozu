@@ -409,6 +409,7 @@ where
         cursor: crate::core::mouse::Cursor,
         viewport: &crate::core::Rectangle,
         palette: &crate::palette::Resolved,
+        selection: &Option<crate::target::Target>,
     ) where
         D: crate::design::Design + ?Sized,
     {
@@ -444,6 +445,8 @@ where
                         viewport,
                         color_offset,
                         palette,
+                        i,
+                        selection,
                     );
                     color_offset += bars.data.series.len();
                 }

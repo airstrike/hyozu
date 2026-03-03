@@ -26,6 +26,10 @@ where
     plot_area: PlotArea<'a, Message, Renderer>,     // plot area with series
     palette: Palette,
     color_slots: usize,
+    /// Plot area offset within the scene, computed during layout.
+    plot_area_offset: crate::core::Point,
+    /// Current selection (borrowed from Data).
+    selection: &'a Option<crate::target::Target>,
 }
 
 impl<'a, Message, Renderer> Scene<'a, Message, Renderer>
@@ -221,13 +225,20 @@ where
             plot_area: PlotArea::new(marks),
             palette: palette_strategy,
             color_slots,
+            plot_area_offset: crate::core::Point::ORIGIN,
+            selection: &data.selection,
         }
+    }
+
+    /// Returns the plot area offset within the scene (stored during layout).
+    pub(crate) fn plot_area_offset(&self) -> crate::core::Point {
+        self.plot_area_offset
     }
 
     /// Layout the scene with proper tree delegation to 7 pieces.
     /// This is where the actual recursive layout happens.
     pub(crate) fn layout(
-        &self,
+        &mut self,
         tree: &mut Tree,
         renderer: &Renderer,
         limits: &crate::core::layout::Limits,
@@ -448,10 +459,9 @@ where
         }
 
         // Plot area at (left_width, title_height + legend_height + top_height)
-        layout_children.push(plot_area_node.move_to(Point::new(
-            left_width,
-            title_height + legend_height + top_height,
-        )));
+        self.plot_area_offset =
+            Point::new(left_width, title_height + legend_height + top_height);
+        layout_children.push(plot_area_node.move_to(self.plot_area_offset));
 
         // Bottom axis at (left_width, title + legend + top + plot_height)
         if let Some(node) = bottom_axis_node {
@@ -551,6 +561,7 @@ where
             cursor,
             viewport,
             &resolved,
+            self.selection,
         );
 
         // Bottom axis

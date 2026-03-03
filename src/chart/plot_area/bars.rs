@@ -244,6 +244,8 @@ where
         _viewport: &crate::core::Rectangle,
         color_offset: usize,
         palette: &crate::palette::Resolved,
+        mark_index: usize,
+        selection: &Option<crate::target::Target>,
     ) where
         Theme: crate::design::Design + ?Sized,
     {
@@ -408,7 +410,84 @@ where
             }
         }
 
-        // Draw all bars, then all labels on top
+        // Draw selection highlights
+        let mut selection_frame = Frame::new(renderer, layout_bounds.size());
+
+        if let Some(target) = selection {
+            use crate::target::Target;
+            use crate::widget::canvas::Stroke;
+
+            let inner_color = crate::core::Color::from_rgba(0.0, 0.0, 0.0, 0.5);
+            let outer_color = crate::core::Color::from_rgba(1.0, 1.0, 1.0, 0.6);
+
+            let should_highlight =
+                |series_idx: usize, bar_idx: usize| -> bool {
+                    match target {
+                        Target::Mark(m) => *m == mark_index,
+                        Target::Series { mark, series } => {
+                            *mark == mark_index && *series == series_idx
+                        }
+                        Target::Entry {
+                            mark,
+                            series,
+                            index,
+                        } => {
+                            *mark == mark_index
+                                && *series == series_idx
+                                && *index == bar_idx
+                        }
+                        _ => false,
+                    }
+                };
+
+            for (series_idx, rects) in state.series_rects.iter().enumerate() {
+                for (bar_idx, rect) in rects.iter().enumerate() {
+                    if should_highlight(series_idx, bar_idx) {
+                        // Outer white stroke on expanded rect
+                        let outer_rect = Rectangle {
+                            x: rect.x - 1.0,
+                            y: rect.y - 1.0,
+                            width: rect.width + 2.0,
+                            height: rect.height + 2.0,
+                        };
+                        let outer_path = Path::new(|b| {
+                            b.rectangle(
+                                crate::core::Point::new(
+                                    outer_rect.x,
+                                    outer_rect.y,
+                                ),
+                                crate::core::Size::new(
+                                    outer_rect.width,
+                                    outer_rect.height,
+                                ),
+                            );
+                        });
+                        selection_frame.stroke(
+                            &outer_path,
+                            Stroke::default()
+                                .with_color(outer_color)
+                                .with_width(1.0),
+                        );
+
+                        // Inner black stroke on exact rect
+                        let inner_path = Path::new(|b| {
+                            b.rectangle(
+                                crate::core::Point::new(rect.x, rect.y),
+                                crate::core::Size::new(rect.width, rect.height),
+                            );
+                        });
+                        selection_frame.stroke(
+                            &inner_path,
+                            Stroke::default()
+                                .with_color(inner_color)
+                                .with_width(1.0),
+                        );
+                    }
+                }
+            }
+        }
+
+        // Draw all bars, then all labels, then selection on top
         let translation =
             crate::core::Vector::new(layout_bounds.x, layout_bounds.y);
 
@@ -420,6 +499,11 @@ where
         let label_geometry = label_frame.into_geometry();
         renderer.with_translation(translation, |renderer| {
             renderer.draw_geometry(label_geometry);
+        });
+
+        let selection_geometry = selection_frame.into_geometry();
+        renderer.with_translation(translation, |renderer| {
+            renderer.draw_geometry(selection_geometry);
         });
     }
 }

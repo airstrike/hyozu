@@ -2,7 +2,7 @@ use crate::color::Color;
 use crate::data::mark::Mark;
 
 /// Strategy for selecting data visualization colors.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Palette {
     /// Distinct hues for categorical data (pie, multi-series).
     Categorical,

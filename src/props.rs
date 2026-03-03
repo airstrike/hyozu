@@ -17,4 +17,9 @@
 
 pub mod axis;
 pub mod bar;
+pub mod gauge;
 pub mod line;
+pub mod pie;
+pub mod rule;
+pub mod waterfall;
+pub mod xy;
