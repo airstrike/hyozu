@@ -289,6 +289,11 @@ impl Data {
         self
     }
 
+    /// Returns the current palette override, if any.
+    pub fn get_palette(&self) -> Option<&crate::palette::Palette> {
+        self.palette.as_ref()
+    }
+
     /// Returns a reference to the marks in the primary area.
     pub fn marks(&self) -> &[Mark] {
         self.primary.marks()

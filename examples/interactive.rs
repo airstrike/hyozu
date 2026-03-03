@@ -9,7 +9,7 @@ use iced::{Center, Fill, Function, Subscription, Task, Theme, keyboard};
 
 pub fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
-        .window_size([1000.0, 650.0])
+        .window_size([1050.0, 700.0])
         .settings(iced::Settings {
             default_text_size: 13.into(),
             default_font: iced::Font::with_name("GT Pressura Mono"),
@@ -38,6 +38,18 @@ enum Message {
     LastTheme,
 }
 
+const SERIES_NAMES: [&str; 4] = ["North", "South", "East", "West"];
+
+const PRESET_COLORS: [(&str, Option<iced::Color>); 7] = [
+    ("Auto", None),
+    ("Red", Some(iced::Color::from_rgb(0.85, 0.2, 0.2))),
+    ("Blue", Some(iced::Color::from_rgb(0.2, 0.4, 0.85))),
+    ("Green", Some(iced::Color::from_rgb(0.2, 0.7, 0.3))),
+    ("Orange", Some(iced::Color::from_rgb(0.9, 0.55, 0.1))),
+    ("Purple", Some(iced::Color::from_rgb(0.6, 0.3, 0.75))),
+    ("Teal", Some(iced::Color::from_rgb(0.15, 0.65, 0.6))),
+];
+
 fn currency(value: f64) -> String {
     let whole = value as i64;
     let s = whole.abs().to_string();
@@ -60,16 +72,18 @@ fn currency(value: f64) -> String {
 
 impl App {
     fn new() -> (Self, Task<Message>) {
-        let bars = bars!([1500, 1600, 1800, 1900, 2100, 2000], [
-            800, 1200, 1000, 1400, 900, 1100
-        ],)
+        // 4 series (regions) × 4 categories (quarters)
+        let bars = bars([
+            bar([4200, 3800, 4500, 5100]).with_name("North"),
+            bar([2800, 3200, 2600, 3400]).with_name("South"),
+            bar([3100, 2900, 3600, 3300]).with_name("East"),
+            bar([1900, 2400, 2100, 2800]).with_name("West"),
+        ])
         .data_labels(bar::label::Position::End + currency);
 
         let data = Data::from(bars)
-            .title("Monthly Revenue by Channel")
-            .x_axis_labels(
-                Placement::OnTicks + ["Jan", "Feb", "Mar", "Apr", "May", "Jun"],
-            )
+            .title("Quarterly Revenue by Region")
+            .x_axis_labels(Placement::OnTicks + ["Q1", "Q2", "Q3", "Q4"])
             .y_axis_labels(|v: f64| currency(v));
 
         (
@@ -89,11 +103,43 @@ impl App {
             }
             Message::Action(action) => match &action {
                 Action::Clicked(target) => {
-                    // Toggle selection: click same or empty → deselect
-                    let should_deselect = *target == Target::Mark(usize::MAX)
-                        || self.data.selection() == Some(target);
+                    // Sentinel = clicked empty area
+                    if *target == Target::Mark(usize::MAX) {
+                        self.data.deselect();
+                        return Task::none();
+                    }
 
-                    if should_deselect {
+                    // Two-level selection:
+                    // 1) Nothing/different-series selected -> select series
+                    // 2) Same series selected -> select specific entry
+                    // 3) Same entry selected -> deselect
+                    if let Target::Entry {
+                        mark,
+                        series,
+                        index,
+                    } = target
+                    {
+                        match self.data.selection() {
+                            Some(Target::Entry {
+                                mark: m,
+                                series: s,
+                                index: i,
+                            }) if m == mark && s == series && i == index => {
+                                self.data.deselect();
+                            }
+                            Some(Target::Series { mark: m, series: s })
+                                if m == mark && s == series =>
+                            {
+                                self.data.select(target.clone());
+                            }
+                            _ => {
+                                self.data.select(Target::Series {
+                                    mark: *mark,
+                                    series: *series,
+                                });
+                            }
+                        }
+                    } else if self.data.selection() == Some(target) {
                         self.data.deselect();
                     } else {
                         self.data.select(target.clone());
@@ -170,25 +216,27 @@ impl App {
             .map(|b| b.layout())
             .unwrap_or(bar::Layout::Grouped);
 
-        let label_position =
-            (|| Some(self.data.bars(0)?.series(0)?.label()?.position()))()
-                .unwrap_or(bar::label::Position::End);
-
         let x_placement = (|| self.data.x_axis_ref()?.placement())()
             .unwrap_or(Placement::OnTicks);
 
-        // Selection display
+        // Selection info
+        let selected_series_idx = match self.data.selection() {
+            Some(Target::Series { series, .. }) => Some(*series),
+            Some(Target::Entry { series, .. }) => Some(*series),
+            _ => None,
+        };
+
         let selection_text = match self.data.selection() {
-            None => "None".to_string(),
-            Some(Target::Entry {
-                mark,
-                series,
-                index,
-            }) => format!("Bar [{mark}][{series}][{index}]"),
-            Some(Target::Series { mark, series }) => {
-                format!("Series [{mark}][{series}]")
+            None => "Click a bar to select".to_string(),
+            Some(Target::Series { series, .. }) => {
+                let name = SERIES_NAMES.get(*series).unwrap_or(&"?");
+                format!("{name} (series)")
             }
-            Some(Target::Mark(m)) => format!("Mark [{m}]"),
+            Some(Target::Entry { series, index, .. }) => {
+                let name = SERIES_NAMES.get(*series).unwrap_or(&"?");
+                let quarter = index + 1;
+                format!("{name} Q{quarter}")
+            }
             Some(other) => format!("{other:?}"),
         };
 
@@ -212,13 +260,6 @@ impl App {
                 .map(Message::Set)
         };
 
-        let on_label_pos = |p| {
-            props::bar::label::Position(p)
-                .map(props::bar::Label)
-                .map(item::Bars.with(0))
-                .map(Message::Set)
-        };
-
         let on_x_placement =
             |p| props::axis::Placement(p).map(item::XAxis).map(Message::Set);
 
@@ -231,22 +272,67 @@ impl App {
             Message::Set(item::Palette(palette))
         };
 
-        let current_palette = self
-            .data
-            .primary()
-            .marks()
-            .first()
-            .map(|_| {
-                // Infer from data's palette or the default
-                "Auto"
-            })
-            .unwrap_or("Auto");
+        let current_palette = match self.data.get_palette() {
+            Some(Palette::Categorical) => "Categorical",
+            Some(Palette::Sequential) => "Sequential",
+            Some(Palette::Gradient(_)) => "Gradient",
+            None => "Auto",
+        };
 
-        // --- Sidebar controls ---
+        // --- Sidebar sections ---
 
         let selection_section =
             column![text("Selection").size(14), text(selection_text).size(12),]
                 .spacing(4);
+
+        // Series color section (only shown when a series is selected)
+        let color_section: iced::Element<'_, Message> =
+            if let Some(si) = selected_series_idx {
+                // Get current color for this series
+                let current_color = self
+                    .data
+                    .bars(0)
+                    .and_then(|b| b.series(si))
+                    .and_then(|s| s.color())
+                    .and_then(|c| match c {
+                        hyozu::Color::Fixed(fc) => Some(*fc),
+                        _ => None,
+                    });
+
+                let current_label = PRESET_COLORS
+                    .iter()
+                    .find(|(_, c)| *c == current_color)
+                    .map(|(name, _)| *name)
+                    .unwrap_or("Custom");
+
+                let color_radios = PRESET_COLORS.iter().fold(
+                    column![].spacing(3),
+                    |col, (name, _)| {
+                        col.push(radio(
+                            *name,
+                            *name,
+                            Some(current_label),
+                            move |selected_name: &str| {
+                                let color_opt = PRESET_COLORS
+                                    .iter()
+                                    .find(|(n, _)| *n == selected_name)
+                                    .and_then(|(_, c)| *c)
+                                    .map(hyozu::Color::Fixed);
+                                props::bar::series::Color(color_opt)
+                                    .map(props::bar::Series(si))
+                                    .map(item::Bars.with(0))
+                                    .map(Message::Set)
+                            },
+                        ))
+                    },
+                );
+
+                column![text("Series Color").size(14), color_radios,]
+                    .spacing(4)
+                    .into()
+            } else {
+                column![].into()
+            };
 
         let size_section = column![
             text("Bar Size").size(14),
@@ -277,35 +363,6 @@ impl App {
             radio("Grouped", bar::Layout::Grouped, Some(layout), on_layout),
             radio("Stacked", bar::Layout::Stacked, Some(layout), on_layout),
             radio("Overlaid", bar::Layout::Overlaid, Some(layout), on_layout),
-        ]
-        .spacing(4);
-
-        let label_section = column![
-            text("Label Position").size(14),
-            radio(
-                "Above",
-                bar::label::Position::Above,
-                Some(label_position),
-                on_label_pos,
-            ),
-            radio(
-                "End",
-                bar::label::Position::End,
-                Some(label_position),
-                on_label_pos,
-            ),
-            radio(
-                "Center",
-                bar::label::Position::Center,
-                Some(label_position),
-                on_label_pos,
-            ),
-            radio(
-                "Base",
-                bar::label::Position::Base,
-                Some(label_position),
-                on_label_pos,
-            ),
         ]
         .spacing(4);
 
@@ -357,10 +414,10 @@ impl App {
         let sidebar = container(
             column![
                 selection_section,
+                color_section,
                 size_section,
                 spacing_section,
                 layout_section,
-                label_section,
                 axis_section,
                 palette_section,
                 theme_section,
