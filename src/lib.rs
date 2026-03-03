@@ -24,6 +24,9 @@ pub use design::Design;
 pub use data::data;
 
 pub use data::axis::{self, Axis, Orientation};
-pub use data::mark::{self, Bars, Line, Mark, bar, bars, line};
+pub use data::mark::{
+    self, Bars, Gauge, LegendEntry, Line, Mark, Pie, Rule, Waterfall, Xy, bar,
+    bars, gauge, line, pie, rule, waterfall, xy,
+};
 
 pub use map::Map;

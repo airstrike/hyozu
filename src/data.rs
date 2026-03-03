@@ -6,7 +6,10 @@ pub mod mark;
 pub use area::Area;
 pub use axis::{Axis, Orientation};
 pub use datum::{Datum, IntoDatums};
-pub use mark::{Bars, Line, Mark, bar, bars, line};
+pub use mark::{
+    Bars, Gauge, LegendEntry, Line, Mark, Pie, Rule, Waterfall, Xy, bar, bars,
+    gauge, line, pie, rule, waterfall, xy,
+};
 
 /// Trait for types that can be converted into chart Data.
 ///
@@ -38,13 +41,24 @@ pub struct Data {
     // TODO: Add legend in future
 }
 
+/// Returns the default axis pair for a given mark type.
+fn axes_for_mark(mark: &Mark) -> (Option<Axis>, Option<Axis>) {
+    match mark {
+        Mark::Bars(_) => (Some(Bars::x_axis()), Some(Bars::y_axis())),
+        Mark::Line(_) => (Some(Line::x_axis()), Some(Line::y_axis())),
+        Mark::Pie(_) => (Pie::x_axis(), Pie::y_axis()),
+        Mark::Gauge(_) => (Gauge::x_axis(), Gauge::y_axis()),
+        Mark::Waterfall(_) => {
+            (Some(Waterfall::x_axis()), Some(Waterfall::y_axis()))
+        }
+        Mark::Xy(_) => (Some(Xy::x_axis()), Some(Xy::y_axis())),
+        Mark::Rule(_) => (Rule::x_axis(), Rule::y_axis()),
+    }
+}
+
 impl From<Mark> for Area {
     fn from(mark: Mark) -> Self {
-        // Configure axes based on mark type using the mark's factory methods
-        let (x_axis, y_axis) = match &mark {
-            Mark::Bars(_) => (Some(Bars::x_axis()), Some(Bars::y_axis())),
-            Mark::Line(_) => (Some(Line::x_axis()), Some(Line::y_axis())),
-        };
+        let (x_axis, y_axis) = axes_for_mark(&mark);
 
         Self {
             marks: vec![mark],
@@ -60,12 +74,13 @@ impl From<Vec<Mark>> for Area {
             return Self::empty();
         }
 
-        // Configure axes based on first mark type using mark factory methods
-        let (x_axis, y_axis) = match marks.first() {
-            Some(Mark::Bars(_)) => (Some(Bars::x_axis()), Some(Bars::y_axis())),
-            Some(Mark::Line(_)) => (Some(Line::x_axis()), Some(Line::y_axis())),
-            None => (None, None), // shouldn't happen
-        };
+        // Configure axes based on first non-Rule mark (rules inherit axes)
+        let (x_axis, y_axis) = marks
+            .iter()
+            .find(|m| !matches!(m, Mark::Rule(_)))
+            .or(marks.first())
+            .map(axes_for_mark)
+            .unwrap_or((None, None));
 
         Self {
             marks,
@@ -92,6 +107,30 @@ impl IntoData for Bars {
 }
 
 impl IntoData for Line {
+    fn into_data(self) -> Data {
+        Mark::from(self).into_data()
+    }
+}
+
+impl IntoData for Pie {
+    fn into_data(self) -> Data {
+        Mark::from(self).into_data()
+    }
+}
+
+impl IntoData for Gauge {
+    fn into_data(self) -> Data {
+        Mark::from(self).into_data()
+    }
+}
+
+impl IntoData for Waterfall {
+    fn into_data(self) -> Data {
+        Mark::from(self).into_data()
+    }
+}
+
+impl IntoData for Xy {
     fn into_data(self) -> Data {
         Mark::from(self).into_data()
     }

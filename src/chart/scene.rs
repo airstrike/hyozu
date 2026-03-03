@@ -171,10 +171,23 @@ where
 
     /// Create a new scene from Data, borrowing everything for lifetime 'a.
     pub fn new(data: &'a crate::Data) -> Self {
+        // Extract legend entries from all marks in the primary area
+        let entries: Vec<crate::data::mark::LegendEntry> = data
+            .primary
+            .marks()
+            .iter()
+            .flat_map(|m| m.legend_entries())
+            .collect();
+
+        let legend = if entries.is_empty() {
+            None
+        } else {
+            Some(Legend::new(entries))
+        };
+
         Self {
-            // Borrow the 7 pieces from Data
             title: data.title.as_deref().map(Title::new),
-            legend: None, // TODO: Create from data when legend support is added
+            legend,
             top_axis: data
                 .secondary
                 .x_axis
@@ -216,7 +229,7 @@ where
         // Tree indices: [0: title, 1: legend, 2: top, 3: right, 4: bottom, 5: left, 6: plot]
 
         // Phase 1: Layout top decorations (title, legend)
-        let (title_height, title_node, legend_height) = {
+        let (title_height, title_node, legend_height, legend_node) = {
             // Layout title if it exists
             let (title_height, title_node) = if let Some(title) = &self.title {
                 if let Some(title_tree) = tree.children.get_mut(0) {
@@ -237,10 +250,31 @@ where
                 (0.0, None)
             };
 
-            // TODO: Layout legend when implemented
-            let legend_height = 0.0;
+            // Layout legend if it exists
+            let (legend_height, legend_node) =
+                if let Some(legend) = &self.legend {
+                    if let Some(legend_tree) = tree.children.get_mut(1) {
+                        let node = legend.layout(
+                            legend_tree,
+                            renderer,
+                            &crate::core::layout::Limits::new(
+                                Size::ZERO,
+                                Size::new(
+                                    available.width,
+                                    available.height - title_height,
+                                ),
+                            ),
+                        );
+                        let height = node.size().height;
+                        (height, Some(node))
+                    } else {
+                        (0.0, None)
+                    }
+                } else {
+                    (0.0, None)
+                };
 
-            (title_height, title_node, legend_height)
+            (title_height, title_node, legend_height, legend_node)
         };
 
         let top_height = 0.0; // TODO: top axis
@@ -388,6 +422,11 @@ where
             layout_children.push(node.move_to(Point::new(0.0, 0.0)));
         }
 
+        // Legend at (0, title_height)
+        if let Some(node) = legend_node {
+            layout_children.push(node.move_to(Point::new(0.0, title_height)));
+        }
+
         // Left axis at (0, title_height + legend_height + top_height)
         if let Some(node) = left_axis_node {
             layout_children.push(node.move_to(Point::new(
@@ -446,6 +485,21 @@ where
                 design,
                 style,
                 title_layout,
+                cursor,
+                viewport,
+            );
+        }
+
+        // Legend
+        if let Some(legend) = &self.legend {
+            let legend_layout =
+                children_layouts.next().expect("legend layout must exist");
+            legend.draw(
+                &tree.children[1],
+                renderer,
+                design,
+                style,
+                legend_layout,
                 cursor,
                 viewport,
             );

@@ -33,6 +33,8 @@ pub struct Line {
     pub(crate) label: Option<label::Label>,
     /// Marker configuration
     pub(crate) marker: Option<marker::Marker>,
+    /// Optional name for this line (used in legends).
+    pub(crate) name: Option<String>,
 }
 
 /// Creates a line chart mark from data points.
@@ -60,6 +62,7 @@ pub fn line(data: impl IntoDatums) -> Line {
         width: 2.0,
         label: None,
         marker: None,
+        name: None,
     }
 }
 
@@ -105,6 +108,17 @@ impl Line {
     pub fn width(mut self, width: f32) -> Self {
         self.width = width;
         self
+    }
+
+    /// Sets the name for this line (used in legends).
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+
+    /// Returns the name of this line.
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
     }
 
     /// Configure data labels for the line points.

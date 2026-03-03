@@ -11,6 +11,8 @@ pub struct Series {
     pub(crate) color: Option<Color>,
     /// Optional data labels for this series.
     pub(crate) label: Option<Label>,
+    /// Optional name for this series (used in legends).
+    pub(crate) name: Option<String>,
 }
 
 impl Series {
@@ -20,6 +22,7 @@ impl Series {
             points: data.into_datums(),
             color: None,
             label: Some(Label::default()),
+            name: None,
         }
     }
 
@@ -44,7 +47,18 @@ impl Series {
         }
     }
 
+    /// Sets the name for this series (used in legends).
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+
     // === Property getters ===
+
+    /// Returns the name of this series.
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
 
     /// Returns a reference to the label configuration.
     pub fn label(&self) -> Option<&Label> {
