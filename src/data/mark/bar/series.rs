@@ -9,6 +9,9 @@ pub struct Series {
     pub(crate) points: Vec<Datum>,
     /// Optional color for this series.
     pub(crate) color: Option<Color>,
+    /// Per-point color overrides. Empty = no overrides.
+    /// When `point_colors[i]` is `Some(color)`, that bar uses it instead of the series color.
+    pub(crate) point_colors: Vec<Option<Color>>,
     /// Optional data labels for this series.
     pub(crate) label: Option<Label>,
     /// Optional name for this series (used in legends).
@@ -21,6 +24,7 @@ impl Series {
         Self {
             points: data.into_datums(),
             color: None,
+            point_colors: Vec::new(),
             label: Some(Label::default()),
             name: None,
         }
@@ -73,6 +77,24 @@ impl Series {
     /// Returns a reference to the data points.
     pub fn points(&self) -> &[Datum] {
         &self.points
+    }
+
+    /// Returns the per-point color override for a given index, if any.
+    pub fn point_color(&self, index: usize) -> Option<&Color> {
+        self.point_colors.get(index).and_then(|c| c.as_ref())
+    }
+
+    /// Sets a per-point color override. Grows the vec with `None` if needed.
+    pub fn set_point_color(&mut self, index: usize, color: Option<Color>) {
+        if index >= self.point_colors.len() {
+            self.point_colors.resize(index + 1, None);
+        }
+        self.point_colors[index] = color;
+    }
+
+    /// Returns true if any per-point color overrides are set.
+    pub fn has_point_colors(&self) -> bool {
+        self.point_colors.iter().any(|c| c.is_some())
     }
 }
 

@@ -262,6 +262,9 @@ where
         // Single frame for all labels
         let mut label_frame = Frame::new(renderer, layout_bounds.size());
 
+        // Resolve all bar colors: per-point override → series color → palette
+        let mut all_bar_colors: Vec<Vec<crate::core::Color>> = Vec::new();
+
         // Draw each series
         for (series_idx, (series, rects)) in self
             .data
@@ -270,33 +273,60 @@ where
             .zip(state.series_rects.iter())
             .enumerate()
         {
-            // Determine color for this series
-            let color = if let Some(series_color) = series.color {
-                // Use series-specific color
+            // Determine base color for this series
+            let base_color = if let Some(series_color) = series.color {
                 series_color.resolve(background, text_pair, None)
             } else {
-                // Use color from palette based on color_offset + series index
                 palette
                     .get(color_offset + series_idx)
                     .resolve(background, text_pair, None)
             };
 
-            // Draw each bar in this series
-            let path = Path::new(|builder| {
-                for rect in rects {
-                    builder.rectangle(
-                        crate::core::Point::new(rect.x, rect.y),
-                        crate::core::Size::new(rect.width, rect.height),
-                    );
+            // Resolve per-bar colors
+            let bar_colors: Vec<crate::core::Color> = rects
+                .iter()
+                .enumerate()
+                .map(|(i, _)| {
+                    if let Some(pc) = series.point_color(i) {
+                        pc.resolve(background, text_pair, None)
+                    } else {
+                        base_color
+                    }
+                })
+                .collect();
+
+            // Draw bars: batch if all same color, otherwise draw individually
+            if series.has_point_colors() {
+                for (rect, &color) in rects.iter().zip(bar_colors.iter()) {
+                    let path = Path::new(|builder| {
+                        builder.rectangle(
+                            crate::core::Point::new(rect.x, rect.y),
+                            crate::core::Size::new(rect.width, rect.height),
+                        );
+                    });
+                    bar_frame.fill(&path, color);
                 }
-            });
-            bar_frame.fill(&path, color);
+            } else {
+                let path = Path::new(|builder| {
+                    for rect in rects {
+                        builder.rectangle(
+                            crate::core::Point::new(rect.x, rect.y),
+                            crate::core::Size::new(rect.width, rect.height),
+                        );
+                    }
+                });
+                bar_frame.fill(&path, base_color);
+            }
+
+            all_bar_colors.push(bar_colors);
 
             // Draw labels for this series if configured
             if let Some(label_config) = &series.label {
                 let label_size = label_config.size.map(|p| p.0).unwrap_or(12.0);
 
-                for (rect, point) in rects.iter().zip(series.points.iter()) {
+                for (bar_idx, (rect, point)) in
+                    rects.iter().zip(series.points.iter()).enumerate()
+                {
                     // Format the label text
                     let label_text = (label_config.format)(point.y);
 
@@ -339,6 +369,9 @@ where
                         .color
                         .unwrap_or(crate::color::Color::CONTRAST);
 
+                    // Use per-bar resolved color for contrast
+                    let this_bar_color = all_bar_colors[series_idx][bar_idx];
+
                     let label_color = match label_config.position {
                         Position::Above => {
                             // Check if label position is inside any other bar's rectangle (local coords)
@@ -346,32 +379,20 @@ where
                                 crate::core::Point::new(label_x, label_y);
 
                             // Find which bar (if any) contains this label position
-                            let containing_bar =
-                                state.series_rects.iter().enumerate().find_map(
-                                    |(other_series_idx, other_rects)| {
-                                        other_rects
-                                            .iter()
-                                            .find(|other_rect| {
-                                                other_rect.contains(label_point)
-                                            })
-                                            .map(|_| other_series_idx)
-                                    },
-                                );
+                            let containing_bar = all_bar_colors
+                                .iter()
+                                .zip(state.series_rects.iter())
+                                .find_map(|(colors, other_rects)| {
+                                    other_rects
+                                        .iter()
+                                        .zip(colors.iter())
+                                        .find(|(other_rect, _)| {
+                                            other_rect.contains(label_point)
+                                        })
+                                        .map(|(_, color)| *color)
+                                });
 
-                            if let Some(other_series_idx) = containing_bar {
-                                // Label is inside another bar - resolve against that bar's color
-                                let other_series =
-                                    &self.data.series[other_series_idx];
-                                let other_color = if let Some(series_color) =
-                                    other_series.color
-                                {
-                                    series_color
-                                        .resolve(background, text_pair, None)
-                                } else {
-                                    palette
-                                        .get(color_offset + other_series_idx)
-                                        .resolve(background, text_pair, None)
-                                };
+                            if let Some(other_color) = containing_bar {
                                 label_color_spec.resolve(
                                     other_color,
                                     text_pair,
@@ -385,9 +406,8 @@ where
                         }
                         _ => {
                             // Inside label (End, Center, Base): resolve against bar's visual color
-                            // Use chart background as fallback if pair options have poor contrast
                             label_color_spec.resolve(
-                                color,
+                                this_bar_color,
                                 text_pair,
                                 Some(background),
                             )

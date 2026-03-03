@@ -37,6 +37,16 @@ impl Slice {
     pub fn value(&self) -> f64 {
         self.value
     }
+
+    /// Returns the color of this slice, if set.
+    pub fn get_color(&self) -> Option<&Color> {
+        self.color.as_ref()
+    }
+
+    /// Returns the name of this slice.
+    pub fn get_name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
 }
 
 /// Creates a single slice with a value.

@@ -326,6 +326,11 @@ impl Data {
         self.primary.line(index)
     }
 
+    /// Returns a reference to a pie mark by index.
+    pub fn pie(&self, index: usize) -> Option<&Pie> {
+        self.primary.pie(index)
+    }
+
     /// Returns a reference to the X axis.
     pub fn x_axis_ref(&self) -> Option<&Axis> {
         self.primary.x_axis.as_ref()

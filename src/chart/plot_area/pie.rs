@@ -10,10 +10,16 @@ use crate::widget::renderer::geometry;
 /// Number of line segments per full circle for arc approximation.
 const ARC_SEGMENTS_PER_TAU: usize = 64;
 
-/// State for Pie — stores pre-calculated slice angles
+/// State for Pie — stores pre-calculated slice angles and geometry for hit-testing
 pub struct State {
     /// Start and end angles for each slice (in radians)
     pub slice_angles: Vec<(f32, f32)>,
+    /// Center of the pie in local coordinates
+    pub center: (f32, f32),
+    /// Outer radius
+    pub outer_radius: f32,
+    /// Inner radius (0 for full pie, >0 for donut)
+    pub inner_radius: f32,
 }
 
 /// A Pie series that renders pie/donut charts.
@@ -45,6 +51,9 @@ where
             tag: tree::Tag::of::<State>(),
             state: tree::State::new(State {
                 slice_angles: Vec::new(),
+                center: (0.0, 0.0),
+                outer_radius: 0.0,
+                inner_radius: 0.0,
             }),
             children: Vec::new(),
         }
@@ -60,7 +69,7 @@ where
         &self,
         tree: &mut Tree,
         _renderer: &Renderer,
-        _limits: &Limits,
+        limits: &Limits,
         _plane: &Plane,
     ) -> Node {
         let state = tree.state.downcast_mut::<State>();
@@ -72,6 +81,17 @@ where
             state.slice_angles.clear();
             return Node::new(Size::ZERO);
         }
+
+        // Compute geometry for hit-testing (same formula as draw)
+        let size = limits.max();
+        let cx = size.width / 2.0;
+        let cy = size.height / 2.0;
+        let radius = size.width.min(size.height) / 2.0 * 0.9;
+        let inner_radius = radius * self.data.hole;
+
+        state.center = (cx, cy);
+        state.outer_radius = radius;
+        state.inner_radius = inner_radius;
 
         let mut current_angle: f32 = -std::f32::consts::FRAC_PI_2; // Start at top (12 o'clock)
         state.slice_angles = self
@@ -104,6 +124,8 @@ where
         _viewport: &crate::core::Rectangle,
         color_offset: usize,
         palette: &crate::palette::Resolved,
+        mark_index: usize,
+        selection: &Option<crate::target::Target>,
     ) where
         Theme: crate::design::Design + ?Sized,
     {
@@ -259,13 +281,110 @@ where
             }
         }
 
+        // Draw selection highlight
+        let mut selection_frame = Frame::new(renderer, layout_bounds.size());
+
+        if let Some(target) = selection {
+            use crate::target::Target;
+            use crate::widget::canvas::Stroke;
+
+            let inner_color = crate::core::Color::from_rgba(0.0, 0.0, 0.0, 0.5);
+            let outer_color = crate::core::Color::from_rgba(1.0, 1.0, 1.0, 0.6);
+
+            let should_highlight = |slice_idx: usize| -> bool {
+                match target {
+                    Target::Mark(m) => *m == mark_index,
+                    Target::Series { mark, .. } => *mark == mark_index,
+                    Target::Entry {
+                        mark,
+                        series: _,
+                        index,
+                    } => *mark == mark_index && *index == slice_idx,
+                    _ => false,
+                }
+            };
+
+            for (i, (start_angle, end_angle)) in
+                state.slice_angles.iter().enumerate()
+            {
+                if !should_highlight(i) {
+                    continue;
+                }
+
+                let start = *start_angle;
+                let end = *end_angle;
+
+                // Apply gap offset (same as draw)
+                let has_gap = self.data.gap > 0.0 && self.data.slices.len() > 1;
+                let gap_offset = self.data.gap / 2.0;
+                let (scx, scy) = if has_gap {
+                    let mid = (start + end) / 2.0;
+                    (cx + gap_offset * mid.cos(), cy + gap_offset * mid.sin())
+                } else {
+                    (cx, cy)
+                };
+
+                // Build the wedge path for stroking
+                let highlight_path = Path::new(|builder| {
+                    if inner_radius > 0.0 {
+                        let inner_start = crate::core::Point::new(
+                            scx + inner_radius * start.cos(),
+                            scy + inner_radius * start.sin(),
+                        );
+                        let outer_start = crate::core::Point::new(
+                            scx + radius * start.cos(),
+                            scy + radius * start.sin(),
+                        );
+
+                        builder.move_to(inner_start);
+                        builder.line_to(outer_start);
+                        trace_arc(builder, scx, scy, radius, start, end);
+
+                        let inner_end = crate::core::Point::new(
+                            scx + inner_radius * end.cos(),
+                            scy + inner_radius * end.sin(),
+                        );
+                        builder.line_to(inner_end);
+                        trace_arc(builder, scx, scy, inner_radius, end, start);
+                        builder.close();
+                    } else {
+                        builder.move_to(crate::core::Point::new(scx, scy));
+                        let outer_start = crate::core::Point::new(
+                            scx + radius * start.cos(),
+                            scy + radius * start.sin(),
+                        );
+                        builder.line_to(outer_start);
+                        trace_arc(builder, scx, scy, radius, start, end);
+                        builder.close();
+                    }
+                });
+
+                // Outer white stroke (slightly expanded)
+                selection_frame.stroke(
+                    &highlight_path,
+                    Stroke::default().with_color(outer_color).with_width(3.0),
+                );
+
+                // Inner black stroke
+                selection_frame.stroke(
+                    &highlight_path,
+                    Stroke::default().with_color(inner_color).with_width(1.5),
+                );
+            }
+        }
+
+        let translation =
+            crate::core::Vector::new(layout_bounds.x, layout_bounds.y);
+
         let geometry = frame.into_geometry();
-        renderer.with_translation(
-            crate::core::Vector::new(layout_bounds.x, layout_bounds.y),
-            |renderer| {
-                renderer.draw_geometry(geometry);
-            },
-        );
+        renderer.with_translation(translation, |renderer| {
+            renderer.draw_geometry(geometry);
+        });
+
+        let selection_geometry = selection_frame.into_geometry();
+        renderer.with_translation(translation, |renderer| {
+            renderer.draw_geometry(selection_geometry);
+        });
     }
 }
 

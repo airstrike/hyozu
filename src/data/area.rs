@@ -74,6 +74,19 @@ impl Area {
             .nth(index)
     }
 
+    /// Returns a reference to a pie mark by index.
+    ///
+    /// Index refers to the nth Pie mark in this area.
+    pub fn pie(&self, index: usize) -> Option<&crate::Pie> {
+        self.marks
+            .iter()
+            .filter_map(|m| match m {
+                Mark::Pie(p) => Some(p),
+                _ => None,
+            })
+            .nth(index)
+    }
+
     /// Returns a mutable reference to a line mark by index.
     pub fn line_mut(&mut self, index: usize) -> Option<&mut crate::Line> {
         self.marks

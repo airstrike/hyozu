@@ -263,9 +263,10 @@ where
 
                     let local = crate::core::Point::new(local.x, local.y);
 
-                    // Hit-test against bar rects in the tree
+                    // Hit-test against bar/pie elements in the tree
                     let plot_area_tree = &scene_tree.children[6];
                     let bars_tag = tree::Tag::of::<plot_area::bars::State>();
+                    let pie_tag = tree::Tag::of::<plot_area::pie::State>();
 
                     for (mark_idx, mark_tree) in
                         plot_area_tree.children.iter().enumerate()
@@ -288,6 +289,53 @@ where
                                                     mark: mark_idx,
                                                     series: series_idx,
                                                     index: bar_idx,
+                                                },
+                                            ),
+                                        ));
+                                        return;
+                                    }
+                                }
+                            }
+                        } else if mark_tree.tag == pie_tag {
+                            let pie_state = mark_tree
+                                .state
+                                .downcast_ref::<plot_area::pie::State>(
+                            );
+
+                            let (cx, cy) = pie_state.center;
+                            let dx = local.x - cx;
+                            let dy = local.y - cy;
+                            let dist = (dx * dx + dy * dy).sqrt();
+
+                            if dist >= pie_state.inner_radius
+                                && dist <= pie_state.outer_radius
+                            {
+                                // Compute angle (atan2 gives -PI..PI, matching our -PI/2 start)
+                                let mut angle = dy.atan2(dx);
+                                // Normalize: our slices start at -PI/2 and go to ~3PI/2
+                                // atan2 returns -PI..PI, so angles in top-left quadrant
+                                // may need adjustment
+                                let first_start = pie_state
+                                    .slice_angles
+                                    .first()
+                                    .map(|(s, _)| *s)
+                                    .unwrap_or(0.0);
+                                if angle < first_start {
+                                    angle += std::f32::consts::TAU;
+                                }
+
+                                for (slice_idx, (start_angle, end_angle)) in
+                                    pie_state.slice_angles.iter().enumerate()
+                                {
+                                    if angle >= *start_angle
+                                        && angle <= *end_angle
+                                    {
+                                        shell.publish(on_action(
+                                            Action::Clicked(
+                                                crate::target::Target::Entry {
+                                                    mark: mark_idx,
+                                                    series: 0,
+                                                    index: slice_idx,
                                                 },
                                             ),
                                         ));

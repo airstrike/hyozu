@@ -156,14 +156,41 @@ where
         // Diff each series
         tree.diff_children_custom(
             &self.series,
-            |tree, series| match series {
-                Series::Line(line) => line.diff(tree),
-                Series::Bars(bars) => bars.diff(tree),
-                Series::Pie(pie) => pie.diff(tree),
-                Series::Gauge(gauge) => gauge.diff(tree),
-                Series::Waterfall(wf) => wf.diff(tree),
-                Series::Xy(xy) => xy.diff(tree),
-                Series::Rule(rule) => rule.diff(tree),
+            |tree, series| {
+                // When the mark type changes (e.g. Bars → Pie), the tree
+                // node still holds the old state type.  Detect this via
+                // the tag and rebuild the node from scratch.
+                let expected_tag = match series {
+                    Series::Line(_) => tree::Tag::of::<line::State>(),
+                    Series::Bars(_) => tree::Tag::of::<bars::State>(),
+                    Series::Pie(_) => tree::Tag::of::<pie::State>(),
+                    Series::Gauge(_) => tree::Tag::of::<gauge::State>(),
+                    Series::Waterfall(_) => tree::Tag::of::<waterfall::State>(),
+                    Series::Xy(_) => tree::Tag::of::<xy::State>(),
+                    Series::Rule(_) => tree::Tag::of::<rule::State>(),
+                };
+
+                if tree.tag != expected_tag {
+                    *tree = match series {
+                        Series::Line(line) => line.state(),
+                        Series::Bars(bars) => bars.state(),
+                        Series::Pie(pie) => pie.state(),
+                        Series::Gauge(gauge) => gauge.state(),
+                        Series::Waterfall(wf) => wf.state(),
+                        Series::Xy(xy) => xy.state(),
+                        Series::Rule(rule) => rule.state(),
+                    };
+                } else {
+                    match series {
+                        Series::Line(line) => line.diff(tree),
+                        Series::Bars(bars) => bars.diff(tree),
+                        Series::Pie(pie) => pie.diff(tree),
+                        Series::Gauge(gauge) => gauge.diff(tree),
+                        Series::Waterfall(wf) => wf.diff(tree),
+                        Series::Xy(xy) => xy.diff(tree),
+                        Series::Rule(rule) => rule.diff(tree),
+                    }
+                }
             },
             |series| match series {
                 Series::Line(line) => line.state(),
@@ -461,6 +488,8 @@ where
                         viewport,
                         color_offset,
                         palette,
+                        i,
+                        selection,
                     );
                     color_offset += pie.data.slices.len();
                 }
