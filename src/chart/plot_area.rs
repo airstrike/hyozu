@@ -408,9 +408,13 @@ where
         layout: crate::core::Layout<'_>,
         cursor: crate::core::mouse::Cursor,
         viewport: &crate::core::Rectangle,
+        palette: &crate::palette::Resolved,
     ) where
         D: crate::design::Design + ?Sized,
     {
+        // Track cumulative color offset across series
+        let mut color_offset: usize = 0;
+
         // Draw each series
         for (i, series) in self.series.iter().enumerate() {
             let series_tree = &tree.children[i];
@@ -424,8 +428,10 @@ where
                         layout,
                         cursor,
                         viewport,
-                        i,
+                        color_offset,
+                        palette,
                     );
+                    color_offset += 1;
                 }
                 Series::Bars(bars) => {
                     bars.draw(
@@ -436,7 +442,10 @@ where
                         layout,
                         cursor,
                         viewport,
+                        color_offset,
+                        palette,
                     );
+                    color_offset += bars.data.series.len();
                 }
                 Series::Pie(pie) => {
                     pie.draw(
@@ -447,7 +456,10 @@ where
                         layout,
                         cursor,
                         viewport,
+                        color_offset,
+                        palette,
                     );
+                    color_offset += pie.data.slices.len();
                 }
                 Series::Gauge(gauge) => {
                     gauge.draw(
@@ -458,7 +470,10 @@ where
                         layout,
                         cursor,
                         viewport,
+                        color_offset,
+                        palette,
                     );
+                    color_offset += 1;
                 }
                 Series::Waterfall(wf) => {
                     wf.draw(
@@ -470,6 +485,7 @@ where
                         cursor,
                         viewport,
                     );
+                    color_offset += 3;
                 }
                 Series::Xy(xy) => {
                     xy.draw(
@@ -480,8 +496,10 @@ where
                         layout,
                         cursor,
                         viewport,
-                        i,
+                        color_offset,
+                        palette,
                     );
+                    color_offset += 1;
                 }
                 Series::Rule(rule) => {
                     rule.draw(
@@ -493,6 +511,7 @@ where
                         cursor,
                         viewport,
                     );
+                    // Rules don't consume color slots
                 }
             }
         }

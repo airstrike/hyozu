@@ -102,6 +102,8 @@ where
         layout: crate::core::Layout<'_>,
         _cursor: crate::core::mouse::Cursor,
         _viewport: &crate::core::Rectangle,
+        color_offset: usize,
+        palette: &crate::palette::Resolved,
     ) where
         Theme: crate::design::Design + ?Sized,
     {
@@ -113,7 +115,6 @@ where
 
         let background = theme.background_color();
         let text_pair = theme.text_pair();
-        let palette = theme.data_colors();
 
         let layout_bounds = layout.bounds();
         let mut frame = Frame::new(renderer, layout_bounds.size());
@@ -146,9 +147,8 @@ where
                 slice_color.resolve(background, text_pair, None)
             } else {
                 palette
-                    .get(i % palette.len())
-                    .map(|c| c.resolve(background, text_pair, None))
-                    .unwrap_or(background)
+                    .get(color_offset + i)
+                    .resolve(background, text_pair, None)
             };
             slice_colors.push(color);
 

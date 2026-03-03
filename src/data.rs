@@ -38,7 +38,9 @@ pub struct Data {
 
     /// Optional title
     pub(crate) title: Option<String>,
-    // TODO: Add legend in future
+
+    /// Optional palette strategy override
+    pub(crate) palette: Option<crate::palette::Palette>,
 }
 
 /// Returns the default axis pair for a given mark type.
@@ -96,6 +98,7 @@ impl IntoData for Mark {
             primary: Area::from(self),
             secondary: Area::empty(),
             title: None,
+            palette: None,
         }
     }
 }
@@ -142,6 +145,7 @@ impl IntoData for Vec<Mark> {
             primary: Area::from(self),
             secondary: Area::empty(),
             title: None,
+            palette: None,
         }
     }
 }
@@ -271,6 +275,12 @@ impl Data {
     ) -> Self {
         self.primary =
             self.primary.y_axis(|axis| axis.with_bounds(lower, upper));
+        self
+    }
+
+    /// Sets the palette strategy for this chart.
+    pub fn palette(mut self, palette: crate::palette::Palette) -> Self {
+        self.palette = Some(palette);
         self
     }
 

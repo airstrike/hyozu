@@ -2,6 +2,7 @@ use std::borrow::Cow;
 
 use crate::color::{Color, Pair};
 use crate::core::{Font, theme};
+use crate::palette::PaletteSeed;
 
 /// Design system trait for chart styling.
 ///
@@ -19,7 +20,43 @@ pub trait Design {
 
     /// Returns an ordered palette of colors for data visualization.
     /// The first color is used for the first series, second for the second series, etc.
+    ///
+    /// Deprecated: prefer `palette_seed()` with the palette system.
     fn data_colors(&self) -> Vec<Color>;
+
+    /// Returns the seed colors for palette generation.
+    ///
+    /// The default implementation derives a seed from `data_colors()`.
+    fn palette_seed(&self) -> PaletteSeed {
+        let colors = self.data_colors();
+        let bg = self.background_color();
+        let get = |i: usize| {
+            if colors.is_empty() {
+                return crate::core::Color::BLACK;
+            }
+            let base = colors
+                .get(i % colors.len())
+                .and_then(|c| match c {
+                    Color::Fixed(c) => Some(*c),
+                    _ => None,
+                })
+                .unwrap_or(crate::core::Color::BLACK);
+            let wrap = i / colors.len();
+            if wrap == 0 {
+                base
+            } else {
+                crate::palette::shift_lightness(base, bg, wrap)
+            }
+        };
+        PaletteSeed {
+            primary: get(0),
+            secondary: get(1),
+            success: get(2),
+            warning: get(3),
+            danger: get(4),
+            background: bg,
+        }
+    }
 
     /// Returns the color for dividers (grid lines, separators).
     fn divider_color(&self) -> Color;
@@ -78,6 +115,10 @@ impl<T: Design> Design for &T {
         (*self).data_colors()
     }
 
+    fn palette_seed(&self) -> PaletteSeed {
+        (*self).palette_seed()
+    }
+
     fn divider_color(&self) -> Color {
         (*self).divider_color()
     }
@@ -123,6 +164,18 @@ impl Design for theme::Theme {
             extended.warning.base.color.into(),
             extended.danger.base.color.into(),
         ]
+    }
+
+    fn palette_seed(&self) -> PaletteSeed {
+        let extended = self.extended_palette();
+        PaletteSeed {
+            primary: extended.primary.base.color,
+            secondary: extended.secondary.base.color,
+            success: extended.success.base.color,
+            warning: extended.warning.base.color,
+            danger: extended.danger.base.color,
+            background: self.background_color(),
+        }
     }
 
     fn divider_color(&self) -> Color {

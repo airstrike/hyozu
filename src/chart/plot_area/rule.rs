@@ -94,7 +94,6 @@ where
 
         let background = theme.background_color();
         let text_pair = theme.text_pair();
-        let _palette = theme.data_colors();
 
         let layout_bounds = layout.bounds();
         let mut frame = Frame::new(renderer, layout_bounds.size());

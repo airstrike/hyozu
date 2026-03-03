@@ -242,6 +242,8 @@ where
         _layout: crate::core::Layout<'_>,
         _cursor: crate::core::mouse::Cursor,
         _viewport: &crate::core::Rectangle,
+        color_offset: usize,
+        palette: &crate::palette::Resolved,
     ) where
         Theme: crate::design::Design + ?Sized,
     {
@@ -249,7 +251,6 @@ where
 
         let background = theme.background_color();
         let text_pair = theme.text_pair();
-        let palette = theme.data_colors();
 
         // Get the layout bounds to offset the bars to their actual screen position
         let layout_bounds = _layout.bounds();
@@ -272,11 +273,10 @@ where
                 // Use series-specific color
                 series_color.resolve(background, text_pair, None)
             } else {
-                // Use color from palette based on series index
+                // Use color from palette based on color_offset + series index
                 palette
-                    .get(series_idx % palette.len())
-                    .map(|c| c.resolve(background, text_pair, None))
-                    .unwrap_or(background)
+                    .get(color_offset + series_idx)
+                    .resolve(background, text_pair, None)
             };
 
             // Draw each bar in this series
@@ -367,13 +367,8 @@ where
                                         .resolve(background, text_pair, None)
                                 } else {
                                     palette
-                                        .get(other_series_idx % palette.len())
-                                        .map(|c| {
-                                            c.resolve(
-                                                background, text_pair, None,
-                                            )
-                                        })
-                                        .unwrap_or(background)
+                                        .get(color_offset + other_series_idx)
+                                        .resolve(background, text_pair, None)
                                 };
                                 label_color_spec.resolve(
                                     other_color,

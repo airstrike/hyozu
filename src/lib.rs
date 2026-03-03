@@ -6,6 +6,7 @@ pub mod design;
 pub mod geometry;
 pub mod item;
 pub mod map;
+pub mod palette;
 pub mod props;
 pub mod theme;
 
@@ -20,6 +21,7 @@ pub use self::chart::chart;
 pub use color::{Color, Pair};
 pub use data::{Action, Data, Datum};
 pub use design::Design;
+pub use palette::{Palette, Resolved};
 
 pub use data::data;
 

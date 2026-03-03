@@ -4,7 +4,7 @@ use crate::core::widget::{Tree, tree};
 use crate::core::{Rectangle, Size};
 use crate::data::Datum;
 use crate::mark::waterfall::EntryKind;
-use crate::widget::canvas::{Frame, Path, Stroke};
+use crate::widget::canvas::{Frame, Path, Stroke, Text as CanvasText};
 
 use crate::core::text;
 use crate::widget::renderer::geometry;
@@ -173,25 +173,18 @@ where
 
         let background = theme.background_color();
         let text_pair = theme.text_pair();
-        let palette = theme.data_colors();
+        let seed = theme.palette_seed();
 
         let layout_bounds = layout.bounds();
         let mut frame = Frame::new(renderer, layout_bounds.size());
 
-        // Default colors for each kind: use palette positions
-        // 0 = increase (green-ish), 1 = decrease (red-ish), 2 = total (blue-ish)
-        let increase_color = palette
-            .first()
-            .map(|c| c.resolve(background, text_pair, None))
-            .unwrap_or(background);
-        let decrease_color = palette
-            .get(1)
-            .map(|c| c.resolve(background, text_pair, None))
-            .unwrap_or(background);
-        let total_color = palette
-            .get(2)
-            .map(|c| c.resolve(background, text_pair, None))
-            .unwrap_or(background);
+        // Waterfall uses semantic colors directly from the seed
+        let increase_color = crate::color::Color::Fixed(seed.success)
+            .resolve(background, text_pair, None);
+        let decrease_color = crate::color::Color::Fixed(seed.danger)
+            .resolve(background, text_pair, None);
+        let total_color = crate::color::Color::Fixed(seed.primary)
+            .resolve(background, text_pair, None);
 
         // Draw bars
         for (i, (rect, entry)) in
@@ -244,6 +237,41 @@ where
                         .with_width(1.0)
                         .with_color(connector_color),
                 );
+            }
+        }
+
+        // Draw labels above bars
+        let label_size = theme.font_size();
+        let label_color =
+            theme.text_color().resolve(background, text_pair, None);
+
+        for (rect, entry) in state.rects.iter().zip(self.data.entries.iter()) {
+            if let Some(label_text) = &entry.label {
+                let negative = entry.value < 0.0;
+                let (y, align_y) = if negative {
+                    (
+                        rect.y + rect.height + 4.0,
+                        crate::core::alignment::Vertical::Top,
+                    )
+                } else {
+                    (rect.y - 4.0, crate::core::alignment::Vertical::Bottom)
+                };
+
+                frame.fill_text(CanvasText {
+                    content: label_text.clone(),
+                    position: crate::core::Point::new(
+                        rect.x + rect.width / 2.0,
+                        y,
+                    ),
+                    color: label_color,
+                    size: label_size.into(),
+                    font: theme.font(),
+                    align_x: crate::core::alignment::Horizontal::Center.into(),
+                    align_y,
+                    line_height: crate::core::text::LineHeight::default(),
+                    shaping: crate::core::text::Shaping::Basic,
+                    ..CanvasText::default()
+                });
             }
         }
 

@@ -92,6 +92,8 @@ where
         layout: crate::core::Layout<'_>,
         _cursor: crate::core::mouse::Cursor,
         _viewport: &crate::core::Rectangle,
+        color_offset: usize,
+        palette: &crate::palette::Resolved,
     ) where
         Theme: crate::design::Design + ?Sized,
     {
@@ -99,7 +101,6 @@ where
 
         let background = theme.background_color();
         let text_pair = theme.text_pair();
-        let palette = theme.data_colors();
 
         let layout_bounds = layout.bounds();
         let mut frame = Frame::new(renderer, layout_bounds.size());
@@ -164,9 +165,8 @@ where
 
         // Draw value arc
         let value_color = palette
-            .first()
-            .map(|c| c.resolve(background, text_pair, None))
-            .unwrap_or(background);
+            .get(color_offset)
+            .resolve(background, text_pair, None);
 
         if state.value_angle > 0.001 {
             draw_arc_segment(

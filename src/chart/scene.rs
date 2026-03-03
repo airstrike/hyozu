@@ -4,6 +4,7 @@ use crate::chart::plot_area::PlotArea;
 use crate::chart::title::{self, Title};
 use crate::core::widget::{Tree, tree};
 use crate::design;
+use crate::palette::{self, Palette};
 
 use crate::core::text;
 use crate::widget::renderer::geometry;
@@ -23,6 +24,8 @@ where
     bottom_axis: Option<Guide<'a, Message, Renderer>>, // x_axis_primary
     left_axis: Option<Guide<'a, Message, Renderer>>, // y_axis_primary
     plot_area: PlotArea<'a, Message, Renderer>,     // plot area with series
+    palette: Palette,
+    color_slots: usize,
 }
 
 impl<'a, Message, Renderer> Scene<'a, Message, Renderer>
@@ -185,6 +188,13 @@ where
             Some(Legend::new(entries))
         };
 
+        let marks = data.primary.marks();
+        let palette_strategy = data
+            .palette
+            .clone()
+            .unwrap_or_else(|| Palette::default_for(marks));
+        let color_slots = palette::count_color_slots(marks);
+
         Self {
             title: data.title.as_deref().map(Title::new),
             legend,
@@ -208,7 +218,9 @@ where
                 .y_axis
                 .as_ref()
                 .map(|axis| Guide::new(axis, data.primary.marks())),
-            plot_area: PlotArea::new(data.primary.marks()),
+            plot_area: PlotArea::new(marks),
+            palette: palette_strategy,
+            color_slots,
         }
     }
 
@@ -467,6 +479,11 @@ where
     ) where
         D: design::Design + ?Sized,
     {
+        // Resolve palette for this draw call
+        let seed = design.palette_seed();
+        let resolved =
+            palette::Resolved::resolve(&self.palette, &seed, self.color_slots);
+
         // Navigate layout children in the same order as layout()
         // Layout tree structure: [title?, left_axis?, plot_area, bottom_axis?]
         let mut children_layouts = layout.children();
@@ -502,6 +519,7 @@ where
                 legend_layout,
                 cursor,
                 viewport,
+                &resolved,
             );
         }
 
@@ -532,6 +550,7 @@ where
             plot_layout,
             cursor,
             viewport,
+            &resolved,
         );
 
         // Bottom axis

@@ -84,7 +84,8 @@ where
         layout: crate::core::Layout<'_>,
         _cursor: crate::core::mouse::Cursor,
         _viewport: &crate::core::Rectangle,
-        series_index: usize,
+        color_offset: usize,
+        palette: &crate::palette::Resolved,
     ) where
         Theme: crate::design::Design + ?Sized,
     {
@@ -96,7 +97,6 @@ where
 
         let background = theme.background_color();
         let text_pair = theme.text_pair();
-        let palette = theme.data_colors();
 
         let layout_bounds = layout.bounds();
 
@@ -104,9 +104,8 @@ where
             data_color.resolve(background, text_pair, None)
         } else {
             palette
-                .get(series_index % palette.len().max(1))
-                .map(|c| c.resolve(background, text_pair, None))
-                .unwrap_or(background)
+                .get(color_offset)
+                .resolve(background, text_pair, None)
         };
 
         let marker_config = &self.data.marker;
