@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 /// Label configuration for pie slices.
 #[derive(Clone)]
-#[allow(dead_code)]
 pub struct Label {
     /// Format function for the label text
     pub(crate) format: Arc<dyn Fn(f64, f64) -> String + Send + Sync>,

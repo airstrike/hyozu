@@ -58,6 +58,8 @@ pub struct Pie {
     pub(crate) slices: Vec<Slice>,
     /// Inner hole radius as proportion of outer radius (0.0 = pie, 0.0..1.0 = donut)
     pub(crate) hole: f32,
+    /// Gap between slices in pixels.
+    pub(crate) gap: f32,
 }
 
 /// Creates a pie chart from slice values.
@@ -99,6 +101,7 @@ where
                 })
                 .collect(),
             hole: 0.0,
+            gap: 0.0,
         }
     }
 }
@@ -120,6 +123,7 @@ where
                 })
                 .collect(),
             hole: 0.0,
+            gap: 0.0,
         }
     }
 }
@@ -130,6 +134,7 @@ impl<const N: usize> IntoPie for [Slice; N] {
         Pie {
             slices: self.into(),
             hole: 0.0,
+            gap: 0.0,
         }
     }
 }
@@ -140,6 +145,7 @@ impl IntoPie for Vec<Slice> {
         Pie {
             slices: self,
             hole: 0.0,
+            gap: 0.0,
         }
     }
 }
@@ -163,6 +169,23 @@ impl Pie {
     /// Returns the hole proportion.
     pub fn hole_value(&self) -> f32 {
         self.hole
+    }
+
+    /// Sets the gap between slices in pixels.
+    pub fn gap(mut self, pixels: f32) -> Self {
+        self.gap = pixels.max(0.0);
+        self
+    }
+
+    /// Applies a label configuration to all slices that don't already have one.
+    pub fn labels(mut self, label: impl Into<label::Label>) -> Self {
+        let label = label.into();
+        for slice in &mut self.slices {
+            if slice.label.is_none() {
+                slice.label = Some(label.clone());
+            }
+        }
+        self
     }
 
     /// Pie charts have no axes.

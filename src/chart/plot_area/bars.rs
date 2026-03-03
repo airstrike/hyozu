@@ -402,7 +402,7 @@ where
                         position: crate::core::Point::new(label_x, label_y),
                         color: label_color,
                         size: label_size.into(),
-                        font: crate::core::Font::default(),
+                        font: theme.font(),
                         align_x,
                         align_y,
                         line_height: crate::core::text::LineHeight::default(),
