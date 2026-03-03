@@ -68,9 +68,11 @@ impl App {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::LoadData => {
-                let bars = bars!([1500, 1600, 1800, 1900, 2100, 2000])
-                    .data_labels(bar::label::Position::End + currency)
-                    .stacked();
+                let bars = bars!([1500, 1600, 1800, 1900, 2100, 2000], [
+                    800, 1200, 1000, 1400, 900, 1100
+                ],)
+                .data_labels(bar::label::Position::End + currency)
+                .stacked();
 
                 let data = Data::from(bars)
                     .title("Monthly Sales with Labels")

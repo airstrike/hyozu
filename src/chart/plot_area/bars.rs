@@ -4,6 +4,8 @@ use crate::core::widget::{Tree, tree};
 use crate::core::{Rectangle, Size};
 use crate::data::Datum;
 use crate::mark::bar::label::Position;
+use crate::widget::canvas::{Frame, Path, Text as CanvasText};
+use crate::widget::renderer::geometry;
 /// State for Bars - stores positioned bar rectangles
 pub struct State {
     /// Pixel rectangles for each series, outer vec is series, inner vec is bars
@@ -16,7 +18,7 @@ pub struct State {
 pub struct Bars<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: crate::core::text::Renderer,
+    Renderer: crate::core::text::Renderer + geometry::Renderer,
 {
     pub(super) data: &'a crate::bar::Bars,
     _marker: std::marker::PhantomData<(Message, Renderer)>,
@@ -25,7 +27,7 @@ where
 impl<'a, Message, Renderer> Bars<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: crate::core::text::Renderer,
+    Renderer: crate::core::text::Renderer + geometry::Renderer,
 {
     /// Create a new Bars borrowing data
     pub fn new(data: &'a crate::bar::Bars) -> Self {
@@ -252,6 +254,11 @@ where
         // Get the layout bounds to offset the bars to their actual screen position
         let layout_bounds = _layout.bounds();
 
+        // Single frame for all bar series
+        let mut bar_frame = Frame::new(renderer, layout_bounds.size());
+        // Single frame for all labels
+        let mut label_frame = Frame::new(renderer, layout_bounds.size());
+
         // Draw each series
         for (series_idx, (series, rects)) in self
             .data
@@ -273,20 +280,15 @@ where
             };
 
             // Draw each bar in this series
-            for rect in rects {
-                renderer.fill_quad(
-                    crate::core::renderer::Quad {
-                        bounds: Rectangle {
-                            x: layout_bounds.x + rect.x,
-                            y: layout_bounds.y + rect.y,
-                            width: rect.width,
-                            height: rect.height,
-                        },
-                        ..Default::default()
-                    },
-                    color,
-                );
-            }
+            let path = Path::new(|builder| {
+                for rect in rects {
+                    builder.rectangle(
+                        crate::core::Point::new(rect.x, rect.y),
+                        crate::core::Size::new(rect.width, rect.height),
+                    );
+                }
+            });
+            bar_frame.fill(&path, color);
 
             // Draw labels for this series if configured
             if let Some(label_config) = &series.label {
@@ -296,52 +298,37 @@ where
                     // Format the label text
                     let label_text = (label_config.format)(point.y);
 
-                    // Calculate label position based on configuration
+                    // Calculate label position in local coordinates
                     let (label_x, label_y, align_x, align_y) =
                         match label_config.position {
-                            Position::Above => {
-                                // Center horizontally, position above the bar
-                                (
-                                    layout_bounds.x + rect.x + rect.width / 2.0,
-                                    layout_bounds.y + rect.y - 4.0,
-                                    crate::core::alignment::Horizontal::Center
-                                        .into(),
-                                    crate::core::alignment::Vertical::Bottom,
-                                )
-                            }
-                            Position::End => {
-                                // Center horizontally, position at the end (top) of the bar
-                                (
-                                    layout_bounds.x + rect.x + rect.width / 2.0,
-                                    layout_bounds.y + rect.y + 4.0,
-                                    crate::core::alignment::Horizontal::Center
-                                        .into(),
-                                    crate::core::alignment::Vertical::Top,
-                                )
-                            }
-                            Position::Center => {
-                                // Center both horizontally and vertically
-                                (
-                                    layout_bounds.x + rect.x + rect.width / 2.0,
-                                    layout_bounds.y
-                                        + rect.y
-                                        + rect.height / 2.0,
-                                    crate::core::alignment::Horizontal::Center
-                                        .into(),
-                                    crate::core::alignment::Vertical::Center,
-                                )
-                            }
-                            Position::Base => {
-                                // Center horizontally, position at the base (bottom) of the bar
-                                (
-                                    layout_bounds.x + rect.x + rect.width / 2.0,
-                                    layout_bounds.y + rect.y + rect.height
-                                        - 4.0,
-                                    crate::core::alignment::Horizontal::Center
-                                        .into(),
-                                    crate::core::alignment::Vertical::Bottom,
-                                )
-                            }
+                            Position::Above => (
+                                rect.x + rect.width / 2.0,
+                                rect.y - 4.0,
+                                crate::core::alignment::Horizontal::Center
+                                    .into(),
+                                crate::core::alignment::Vertical::Bottom,
+                            ),
+                            Position::End => (
+                                rect.x + rect.width / 2.0,
+                                rect.y + 4.0,
+                                crate::core::alignment::Horizontal::Center
+                                    .into(),
+                                crate::core::alignment::Vertical::Top,
+                            ),
+                            Position::Center => (
+                                rect.x + rect.width / 2.0,
+                                rect.y + rect.height / 2.0,
+                                crate::core::alignment::Horizontal::Center
+                                    .into(),
+                                crate::core::alignment::Vertical::Center,
+                            ),
+                            Position::Base => (
+                                rect.x + rect.width / 2.0,
+                                rect.y + rect.height - 4.0,
+                                crate::core::alignment::Horizontal::Center
+                                    .into(),
+                                crate::core::alignment::Vertical::Bottom,
+                            ),
                         };
 
                     // Resolve label color based on position
@@ -352,31 +339,22 @@ where
 
                     let label_color = match label_config.position {
                         Position::Above => {
-                            // Check if label position is inside any other bar's rectangle
+                            // Check if label position is inside any other bar's rectangle (local coords)
                             let label_point =
                                 crate::core::Point::new(label_x, label_y);
 
                             // Find which bar (if any) contains this label position
-                            let containing_bar = state
-                                .series_rects
-                                .iter()
-                                .enumerate()
-                                .find_map(|(other_series_idx, other_rects)| {
-                                    other_rects
-                                        .iter()
-                                        .find(|other_rect| {
-                                            let screen_rect = Rectangle {
-                                                x: layout_bounds.x
-                                                    + other_rect.x,
-                                                y: layout_bounds.y
-                                                    + other_rect.y,
-                                                width: other_rect.width,
-                                                height: other_rect.height,
-                                            };
-                                            screen_rect.contains(label_point)
-                                        })
-                                        .map(|_| other_series_idx)
-                                });
+                            let containing_bar =
+                                state.series_rects.iter().enumerate().find_map(
+                                    |(other_series_idx, other_rects)| {
+                                        other_rects
+                                            .iter()
+                                            .find(|other_rect| {
+                                                other_rect.contains(label_point)
+                                            })
+                                            .map(|_| other_series_idx)
+                                    },
+                                );
 
                             if let Some(other_series_idx) = containing_bar {
                                 // Label is inside another bar - resolve against that bar's color
@@ -419,27 +397,34 @@ where
                         }
                     };
 
-                    renderer.fill_text(
-                        crate::core::text::Text {
-                            content: label_text,
-                            bounds: crate::core::Size::new(1000.0, 1000.0),
-                            size: label_size.into(),
-                            font: renderer.default_font(),
-                            align_x,
-                            align_y,
-                            line_height: crate::core::text::LineHeight::default(
-                            ),
-                            shaping: crate::core::text::Shaping::Basic,
-                            wrapping: crate::core::text::Wrapping::None,
-                            ellipsis: crate::core::text::Ellipsis::default(),
-                            hint_factor: renderer.scale_factor(),
-                        },
-                        crate::core::Point::new(label_x, label_y),
-                        label_color,
-                        *_viewport,
-                    );
+                    label_frame.fill_text(CanvasText {
+                        content: label_text,
+                        position: crate::core::Point::new(label_x, label_y),
+                        color: label_color,
+                        size: label_size.into(),
+                        font: crate::core::Font::default(),
+                        align_x,
+                        align_y,
+                        line_height: crate::core::text::LineHeight::default(),
+                        shaping: crate::core::text::Shaping::Basic,
+                        ..CanvasText::default()
+                    });
                 }
             }
         }
+
+        // Draw all bars, then all labels on top
+        let translation =
+            crate::core::Vector::new(layout_bounds.x, layout_bounds.y);
+
+        let bar_geometry = bar_frame.into_geometry();
+        renderer.with_translation(translation, |renderer| {
+            renderer.draw_geometry(bar_geometry);
+        });
+
+        let label_geometry = label_frame.into_geometry();
+        renderer.with_translation(translation, |renderer| {
+            renderer.draw_geometry(label_geometry);
+        });
     }
 }
