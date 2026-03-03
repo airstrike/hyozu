@@ -172,6 +172,43 @@ impl Area {
                         y_max = y_max.max(point.y);
                     }
                 }
+                Mark::Waterfall(wf) => {
+                    let mut running: f64 = 0.0;
+                    for (i, entry) in wf.entries.iter().enumerate() {
+                        x_min = x_min.min(i as f64);
+                        x_max = x_max.max(i as f64);
+                        match entry.kind {
+                            crate::mark::waterfall::EntryKind::Total => {
+                                running = entry.value;
+                            }
+                            _ => {
+                                running += entry.value;
+                            }
+                        }
+                        y_min = y_min.min(running).min(0.0);
+                        y_max = y_max.max(running);
+                    }
+                }
+                Mark::Xy(xy) => {
+                    for point in &xy.points {
+                        x_min = x_min.min(point.x);
+                        x_max = x_max.max(point.x);
+                        y_min = y_min.min(point.y);
+                        y_max = y_max.max(point.y);
+                    }
+                }
+                Mark::Rule(rule) => match rule.orientation {
+                    crate::mark::rule::RuleOrientation::Horizontal => {
+                        y_min = y_min.min(rule.value);
+                        y_max = y_max.max(rule.value);
+                    }
+                    crate::mark::rule::RuleOrientation::Vertical => {
+                        x_min = x_min.min(rule.value);
+                        x_max = x_max.max(rule.value);
+                    }
+                },
+                // Pie and Gauge don't use Cartesian bounds
+                Mark::Pie(_) | Mark::Gauge(_) => {}
             }
         }
 
@@ -185,9 +222,9 @@ impl Area {
             y_max = 1.0;
         }
 
-        // For bar charts, extend y to include zero
+        // For bar/waterfall charts, extend y to include zero
         for mark in &self.marks {
-            if matches!(mark, Mark::Bars(_)) {
+            if matches!(mark, Mark::Bars(_) | Mark::Waterfall(_)) {
                 y_min = y_min.min(0.0);
                 break;
             }

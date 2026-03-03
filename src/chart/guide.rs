@@ -464,6 +464,19 @@ where
                             values.insert(OrderedFloat(point.x));
                         }
                     }
+                    crate::Mark::Waterfall(wf) => {
+                        for (i, _) in wf.entries.iter().enumerate() {
+                            values.insert(OrderedFloat(i as f64));
+                        }
+                    }
+                    crate::Mark::Xy(xy) => {
+                        for point in &xy.points {
+                            values.insert(OrderedFloat(point.x));
+                        }
+                    }
+                    crate::Mark::Rule(_)
+                    | crate::Mark::Pie(_)
+                    | crate::Mark::Gauge(_) => {}
                 }
             }
 
@@ -631,14 +644,58 @@ where
                         max = max.max(val);
                     }
                 }
+                crate::Mark::Waterfall(wf) => {
+                    let mut running: f64 = 0.0;
+                    for (i, entry) in wf.entries.iter().enumerate() {
+                        if is_x_axis {
+                            min = min.min(i as f64);
+                            max = max.max(i as f64);
+                        } else {
+                            match entry.kind {
+                                crate::mark::waterfall::EntryKind::Total => {
+                                    running = entry.value;
+                                }
+                                _ => {
+                                    running += entry.value;
+                                }
+                            }
+                            min = min.min(running).min(0.0);
+                            max = max.max(running);
+                        }
+                    }
+                }
+                crate::Mark::Xy(xy) => {
+                    for point in &xy.points {
+                        let val = if is_x_axis { point.x } else { point.y };
+                        min = min.min(val);
+                        max = max.max(val);
+                    }
+                }
+                crate::Mark::Rule(rule) => match rule.orientation {
+                    crate::mark::rule::RuleOrientation::Horizontal
+                        if !is_x_axis =>
+                    {
+                        min = min.min(rule.value);
+                        max = max.max(rule.value);
+                    }
+                    crate::mark::rule::RuleOrientation::Vertical
+                        if is_x_axis =>
+                    {
+                        min = min.min(rule.value);
+                        max = max.max(rule.value);
+                    }
+                    _ => {}
+                },
+                crate::Mark::Pie(_) | crate::Mark::Gauge(_) => {}
             }
         }
 
-        // For Y-axis with bar charts, ensure we include zero
+        // For Y-axis with bar/waterfall charts, ensure we include zero
         // (Line charts should fit to the data range)
         if !is_x_axis {
-            let has_bars =
-                self.marks.iter().any(|m| matches!(m, crate::Mark::Bars(_)));
+            let has_bars = self.marks.iter().any(|m| {
+                matches!(m, crate::Mark::Bars(_) | crate::Mark::Waterfall(_))
+            });
             if has_bars {
                 min = min.min(0.0);
             }

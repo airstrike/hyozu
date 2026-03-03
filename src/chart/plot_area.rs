@@ -7,10 +7,20 @@ use crate::core::text;
 use crate::widget::renderer::geometry;
 
 pub mod bars;
+pub mod gauge;
 pub mod line;
+pub mod pie;
+pub mod rule;
+pub mod waterfall;
+pub mod xy;
 
 pub use bars::Bars;
+pub use gauge::Gauge;
 pub use line::Line;
+pub use pie::Pie;
+pub use rule::Rule;
+pub use waterfall::Waterfall;
+pub use xy::Xy;
 
 /// The coordinate plane for transforming data coords to pixels.
 #[derive(Debug, Clone)]
@@ -65,6 +75,11 @@ where
 {
     Line(Line<'a, Message, Renderer>),
     Bars(Bars<'a, Message, Renderer>),
+    Pie(Pie<'a, Message, Renderer>),
+    Gauge(Gauge<'a, Message, Renderer>),
+    Waterfall(Waterfall<'a, Message, Renderer>),
+    Xy(Xy<'a, Message, Renderer>),
+    Rule(Rule<'a, Message, Renderer>),
 }
 
 /// State for a PlotArea - stores the coordinate plane for rendering
@@ -99,6 +114,13 @@ where
             .map(|mark| match mark {
                 crate::Mark::Line(line) => Series::Line(Line::new(line)),
                 crate::Mark::Bars(bars) => Series::Bars(Bars::new(bars)),
+                crate::Mark::Pie(pie) => Series::Pie(Pie::new(pie)),
+                crate::Mark::Gauge(gauge) => Series::Gauge(Gauge::new(gauge)),
+                crate::Mark::Waterfall(wf) => {
+                    Series::Waterfall(Waterfall::new(wf))
+                }
+                crate::Mark::Xy(xy) => Series::Xy(Xy::new(xy)),
+                crate::Mark::Rule(rule) => Series::Rule(Rule::new(rule)),
             })
             .collect();
 
@@ -114,6 +136,11 @@ where
             .map(|s| match s {
                 Series::Line(line) => line.state(),
                 Series::Bars(bars) => bars.state(),
+                Series::Pie(pie) => pie.state(),
+                Series::Gauge(gauge) => gauge.state(),
+                Series::Waterfall(wf) => wf.state(),
+                Series::Xy(xy) => xy.state(),
+                Series::Rule(rule) => rule.state(),
             })
             .collect();
 
@@ -132,10 +159,20 @@ where
             |tree, series| match series {
                 Series::Line(line) => line.diff(tree),
                 Series::Bars(bars) => bars.diff(tree),
+                Series::Pie(pie) => pie.diff(tree),
+                Series::Gauge(gauge) => gauge.diff(tree),
+                Series::Waterfall(wf) => wf.diff(tree),
+                Series::Xy(xy) => xy.diff(tree),
+                Series::Rule(rule) => rule.diff(tree),
             },
             |series| match series {
                 Series::Line(line) => line.state(),
                 Series::Bars(bars) => bars.state(),
+                Series::Pie(pie) => pie.state(),
+                Series::Gauge(gauge) => gauge.state(),
+                Series::Waterfall(wf) => wf.state(),
+                Series::Xy(xy) => xy.state(),
+                Series::Rule(rule) => rule.state(),
             },
         );
     }
@@ -191,6 +228,43 @@ where
                         y_max = y_max.max(point.y);
                     }
                 }
+                Series::Waterfall(wf) => {
+                    let mut running: f64 = 0.0;
+                    for (i, entry) in wf.data.entries.iter().enumerate() {
+                        x_min = x_min.min(i as f64);
+                        x_max = x_max.max(i as f64);
+                        match entry.kind {
+                            crate::mark::waterfall::EntryKind::Total => {
+                                running = entry.value;
+                            }
+                            _ => {
+                                running += entry.value;
+                            }
+                        }
+                        y_min = y_min.min(running).min(0.0);
+                        y_max = y_max.max(running);
+                    }
+                }
+                Series::Xy(xy) => {
+                    for point in &xy.data.points {
+                        x_min = x_min.min(point.x);
+                        x_max = x_max.max(point.x);
+                        y_min = y_min.min(point.y);
+                        y_max = y_max.max(point.y);
+                    }
+                }
+                Series::Rule(rule) => match rule.data.orientation() {
+                    crate::mark::rule::RuleOrientation::Horizontal => {
+                        y_min = y_min.min(rule.data.value());
+                        y_max = y_max.max(rule.data.value());
+                    }
+                    crate::mark::rule::RuleOrientation::Vertical => {
+                        x_min = x_min.min(rule.data.value());
+                        x_max = x_max.max(rule.data.value());
+                    }
+                },
+                // Pie and Gauge don't use Cartesian bounds
+                Series::Pie(_) | Series::Gauge(_) => {}
             }
         }
 
@@ -204,9 +278,9 @@ where
             y_max = 1.0;
         }
 
-        // For bar charts, extend y to include zero
+        // For bar/waterfall charts, extend y to include zero
         for series in &self.series {
-            if matches!(series, Series::Bars(_)) {
+            if matches!(series, Series::Bars(_) | Series::Waterfall(_)) {
                 y_min = y_min.min(0.0);
                 break;
             }
@@ -299,6 +373,21 @@ where
                 Series::Bars(bars) => {
                     bars.layout(series_tree, renderer, limits, &plane);
                 }
+                Series::Pie(pie) => {
+                    pie.layout(series_tree, renderer, limits, &plane);
+                }
+                Series::Gauge(gauge) => {
+                    gauge.layout(series_tree, renderer, limits, &plane);
+                }
+                Series::Waterfall(wf) => {
+                    wf.layout(series_tree, renderer, limits, &plane);
+                }
+                Series::Xy(xy) => {
+                    xy.layout(series_tree, renderer, limits, &plane);
+                }
+                Series::Rule(rule) => {
+                    rule.layout(series_tree, renderer, limits, &plane);
+                }
             }
         }
 
@@ -340,6 +429,62 @@ where
                 }
                 Series::Bars(bars) => {
                     bars.draw(
+                        series_tree,
+                        renderer,
+                        design,
+                        style,
+                        layout,
+                        cursor,
+                        viewport,
+                    );
+                }
+                Series::Pie(pie) => {
+                    pie.draw(
+                        series_tree,
+                        renderer,
+                        design,
+                        style,
+                        layout,
+                        cursor,
+                        viewport,
+                    );
+                }
+                Series::Gauge(gauge) => {
+                    gauge.draw(
+                        series_tree,
+                        renderer,
+                        design,
+                        style,
+                        layout,
+                        cursor,
+                        viewport,
+                    );
+                }
+                Series::Waterfall(wf) => {
+                    wf.draw(
+                        series_tree,
+                        renderer,
+                        design,
+                        style,
+                        layout,
+                        cursor,
+                        viewport,
+                    );
+                }
+                Series::Xy(xy) => {
+                    xy.draw(
+                        series_tree,
+                        renderer,
+                        design,
+                        style,
+                        layout,
+                        cursor,
+                        viewport,
+                        i,
+                    );
+                }
+                Series::Rule(rule) => {
+                    rule.draw(
                         series_tree,
                         renderer,
                         design,
