@@ -34,7 +34,7 @@ pub trait Design {
     fn font_size(&self) -> f32;
 
     /// Returns an owned [`Cow`] of this design.
-    fn into_cow(&self) -> Cow<'static, Self>
+    fn to_cow(&self) -> Cow<'static, Self>
     where
         Self: Sized + Clone,
     {

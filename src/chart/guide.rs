@@ -57,7 +57,8 @@ fn compute_nice_step(range: f64, target_count: usize) -> f64 {
     }
 }
 
-use jiff::{Timestamp, tz::TimeZone};
+use jiff::Timestamp;
+use jiff::tz::TimeZone;
 
 /// Time unit for hierarchical time intervals (like D3.js/Chart.js)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,9 +77,9 @@ impl TimeUnit {
         match self {
             TimeUnit::Second => "%H:%M:%S",
             TimeUnit::Minute | TimeUnit::Hour => "%H:%M",
-            TimeUnit::Day => "%b %d",        // "Jun 15"
-            TimeUnit::Month => "%b %Y",      // "Jun 2024"
-            TimeUnit::Year => "%Y",          // "2024"
+            TimeUnit::Day => "%b %d",   // "Jun 15"
+            TimeUnit::Month => "%b %Y", // "Jun 2024"
+            TimeUnit::Year => "%Y",     // "2024"
         }
     }
 }
@@ -102,15 +103,16 @@ impl TimeInterval {
             TimeUnit::Minute => 60.0,
             TimeUnit::Hour => 3600.0,
             TimeUnit::Day => 86400.0,
-            TimeUnit::Month => 30.0 * 86400.0,  // approximate
-            TimeUnit::Year => 365.0 * 86400.0,  // approximate
+            TimeUnit::Month => 30.0 * 86400.0, // approximate
+            TimeUnit::Year => 365.0 * 86400.0, // approximate
         };
         base * self.count as f64
     }
 
     /// Floor a unix timestamp (seconds) to this interval's boundary using jiff
     fn floor(&self, timestamp_secs: i64) -> i64 {
-        let ts = Timestamp::from_second(timestamp_secs).unwrap_or(Timestamp::UNIX_EPOCH);
+        let ts = Timestamp::from_second(timestamp_secs)
+            .unwrap_or(Timestamp::UNIX_EPOCH);
         let zoned = ts.to_zoned(TimeZone::UTC);
 
         match self.unit {
@@ -121,7 +123,11 @@ impl TimeInterval {
             }
             TimeUnit::Minute => {
                 // Floor to interval multiple of minutes from midnight
-                let midnight = zoned.start_of_day().unwrap_or(zoned).timestamp().as_second();
+                let midnight = zoned
+                    .start_of_day()
+                    .unwrap_or(zoned)
+                    .timestamp()
+                    .as_second();
                 let secs_since_midnight = timestamp_secs - midnight;
                 let step = self.count * 60;
                 let aligned = (secs_since_midnight / step) * step;
@@ -129,7 +135,11 @@ impl TimeInterval {
             }
             TimeUnit::Hour => {
                 // Floor to interval multiple of hours from midnight
-                let midnight = zoned.start_of_day().unwrap_or(zoned).timestamp().as_second();
+                let midnight = zoned
+                    .start_of_day()
+                    .unwrap_or(zoned)
+                    .timestamp()
+                    .as_second();
                 let secs_since_midnight = timestamp_secs - midnight;
                 let step = self.count * 3600;
                 let aligned = (secs_since_midnight / step) * step;
@@ -146,7 +156,8 @@ impl TimeInterval {
                 // Floor to start of month, aligned to interval
                 let dt = zoned.datetime();
                 let month = dt.month();
-                let aligned_month = ((month - 1) / self.count as i8) * self.count as i8 + 1;
+                let aligned_month =
+                    ((month - 1) / self.count as i8) * self.count as i8 + 1;
                 jiff::civil::date(dt.year(), aligned_month, 1)
                     .to_zoned(TimeZone::UTC)
                     .unwrap()
@@ -156,7 +167,8 @@ impl TimeInterval {
             TimeUnit::Year => {
                 // Floor to start of year, aligned to interval
                 let year = zoned.datetime().year();
-                let aligned_year = (year / self.count as i16) * self.count as i16;
+                let aligned_year =
+                    (year / self.count as i16) * self.count as i16;
                 jiff::civil::date(aligned_year, 1, 1)
                     .to_zoned(TimeZone::UTC)
                     .unwrap()
@@ -168,7 +180,8 @@ impl TimeInterval {
 
     /// Advance a timestamp by this interval using jiff
     fn advance(&self, timestamp_secs: i64) -> i64 {
-        let ts = Timestamp::from_second(timestamp_secs).unwrap_or(Timestamp::UNIX_EPOCH);
+        let ts = Timestamp::from_second(timestamp_secs)
+            .unwrap_or(Timestamp::UNIX_EPOCH);
         let zoned = ts.to_zoned(TimeZone::UTC);
 
         let span = match self.unit {
@@ -186,7 +199,8 @@ impl TimeInterval {
 
     /// Move backward by one interval step
     fn retreat(&self, timestamp_secs: i64) -> i64 {
-        let ts = Timestamp::from_second(timestamp_secs).unwrap_or(Timestamp::UNIX_EPOCH);
+        let ts = Timestamp::from_second(timestamp_secs)
+            .unwrap_or(Timestamp::UNIX_EPOCH);
         let zoned = ts.to_zoned(TimeZone::UTC);
 
         let span = match self.unit {
@@ -204,7 +218,8 @@ impl TimeInterval {
 
     /// Format a timestamp using the appropriate format for this interval's unit
     fn format(&self, timestamp_secs: i64) -> String {
-        let ts = Timestamp::from_second(timestamp_secs).unwrap_or(Timestamp::UNIX_EPOCH);
+        let ts = Timestamp::from_second(timestamp_secs)
+            .unwrap_or(Timestamp::UNIX_EPOCH);
         let zoned = ts.to_zoned(TimeZone::UTC);
         zoned.strftime(self.unit.format_str()).to_string()
     }
@@ -231,12 +246,12 @@ const TIME_INTERVALS: &[TimeInterval] = &[
     TimeInterval::new(TimeUnit::Hour, 12),
     TimeInterval::new(TimeUnit::Day, 1),
     TimeInterval::new(TimeUnit::Day, 2),
-    TimeInterval::new(TimeUnit::Day, 7),    // week
-    TimeInterval::new(TimeUnit::Day, 14),   // 2 weeks
+    TimeInterval::new(TimeUnit::Day, 7), // week
+    TimeInterval::new(TimeUnit::Day, 14), // 2 weeks
     TimeInterval::new(TimeUnit::Month, 1),
     TimeInterval::new(TimeUnit::Month, 2),
-    TimeInterval::new(TimeUnit::Month, 3),  // quarter
-    TimeInterval::new(TimeUnit::Month, 6),  // half year
+    TimeInterval::new(TimeUnit::Month, 3), // quarter
+    TimeInterval::new(TimeUnit::Month, 6), // half year
     TimeInterval::new(TimeUnit::Year, 1),
     TimeInterval::new(TimeUnit::Year, 2),
     TimeInterval::new(TimeUnit::Year, 5),
@@ -247,7 +262,10 @@ const TIME_INTERVALS: &[TimeInterval] = &[
 ];
 
 /// Select the best time interval for a given range and target tick count
-fn select_time_interval(range_seconds: f64, target_count: usize) -> TimeInterval {
+fn select_time_interval(
+    range_seconds: f64,
+    target_count: usize,
+) -> TimeInterval {
     let target_step = range_seconds / target_count as f64;
 
     for interval in TIME_INTERVALS {
@@ -325,8 +343,14 @@ fn nice_time_ticks_with_interval(
 }
 
 /// Generate nice time-aligned tick positions
-fn nice_time_ticks(min: f64, max: f64, target_count: usize, alignment: Alignment) -> Vec<f64> {
-    let (ticks, _) = nice_time_ticks_with_interval(min, max, target_count, alignment);
+fn nice_time_ticks(
+    min: f64,
+    max: f64,
+    target_count: usize,
+    alignment: Alignment,
+) -> Vec<f64> {
+    let (ticks, _) =
+        nice_time_ticks_with_interval(min, max, target_count, alignment);
     ticks.into_iter().map(|t| t as f64).collect()
 }
 
@@ -406,7 +430,10 @@ where
 
     /// Derive tick positions, label positions, and label text from data
     /// Returns (label_info, tick_positions) based on label placement
-    fn compute_ticks_and_labels(&self, bounds: Bounds) -> (Vec<(f64, String)>, Vec<f64>) {
+    fn compute_ticks_and_labels(
+        &self,
+        bounds: Bounds,
+    ) -> (Vec<(f64, String)>, Vec<f64>) {
         use crate::axis::label;
         use crate::axis::tick::Frequency;
 
@@ -455,7 +482,8 @@ where
         // For time axes, get the interval for smart formatting
         let time_interval = if self.axis.kind() == Kind::Time {
             let alignment = self.axis.ticks.alignment;
-            let (_, interval) = nice_time_ticks_with_interval(axis_min, axis_max, 6, alignment);
+            let (_, interval) =
+                nice_time_ticks_with_interval(axis_min, axis_max, 6, alignment);
             Some(interval)
         } else {
             None
@@ -609,10 +637,8 @@ where
         // For Y-axis with bar charts, ensure we include zero
         // (Line charts should fit to the data range)
         if !is_x_axis {
-            let has_bars = self
-                .marks
-                .iter()
-                .any(|m| matches!(m, crate::Mark::Bars(_)));
+            let has_bars =
+                self.marks.iter().any(|m| matches!(m, crate::Mark::Bars(_)));
             if has_bars {
                 min = min.min(0.0);
             }
@@ -680,13 +706,11 @@ where
     pub(super) fn state(&self) -> Tree {
         // Compute bounds first, then ticks within bounds
         let bounds = self.compute_axis_bounds();
-        let (label_info, _tick_positions) = self.compute_ticks_and_labels(bounds);
+        let (label_info, _tick_positions) =
+            self.compute_ticks_and_labels(bounds);
 
         // Create a tree for each label's paragraph
-        let children = label_info
-            .iter()
-            .map(|_| Tree::empty())
-            .collect();
+        let children = label_info.iter().map(|_| Tree::empty()).collect();
 
         Tree {
             tag: tree::Tag::of::<State<Renderer::Paragraph>>(),
@@ -721,7 +745,8 @@ where
     ) -> Node {
         // Compute bounds first, then generate ticks within those bounds
         let bounds = self.compute_axis_bounds();
-        let (label_info, tick_positions) = self.compute_ticks_and_labels(bounds);
+        let (label_info, tick_positions) =
+            self.compute_ticks_and_labels(bounds);
 
         // Update state with computed values
         let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
@@ -806,6 +831,7 @@ where
                 align_y: alignment::Vertical::Top,
                 shaping: text::Shaping::Basic,
                 wrapping: text::Wrapping::None,
+                ellipsis: text::Ellipsis::default(),
                 hint_factor: renderer.scale_factor(),
             });
 
@@ -824,7 +850,8 @@ where
 
             let y = if value_range > 0.0 {
                 (max_size.height as f64
-                    - ((tick_value - min_value) / value_range) * max_size.height as f64) as f32
+                    - ((tick_value - min_value) / value_range)
+                        * max_size.height as f64) as f32
             } else {
                 max_size.height / 2.0
             };
@@ -891,6 +918,7 @@ where
                 align_y: alignment::Vertical::Top,
                 shaping: text::Shaping::Basic,
                 wrapping: text::Wrapping::None,
+                ellipsis: text::Ellipsis::default(),
                 hint_factor: renderer.scale_factor(),
             });
 
@@ -899,7 +927,8 @@ where
             // Calculate X position for this tick within our width
             let tick_value = *pos;
             let x = if value_range > 0.0 {
-                (((tick_value - min_value) / value_range) * max_size.width as f64) as f32
+                (((tick_value - min_value) / value_range)
+                    * max_size.width as f64) as f32
             } else {
                 max_size.width / 2.0
             };
@@ -1233,7 +1262,8 @@ mod tests {
         let min = base as f64;
         let max = min + 3600.0;
 
-        let (ticks, interval) = nice_time_ticks_with_interval(min, max, 6, Alignment::Auto);
+        let (ticks, interval) =
+            nice_time_ticks_with_interval(min, max, 6, Alignment::Auto);
 
         // Should select 10-minute intervals
         assert_eq!(interval.unit, TimeUnit::Minute);
@@ -1241,11 +1271,20 @@ mod tests {
 
         // Verify ticks are at 10-minute boundaries
         for tick in &ticks {
-            assert_eq!(tick % 600, 0, "Tick {} not aligned to 10 minutes", tick);
+            assert_eq!(
+                tick % 600,
+                0,
+                "Tick {} not aligned to 10 minutes",
+                tick
+            );
         }
 
         // Should have 6-7 ticks (depends on whether 13:00 is included)
-        assert!(ticks.len() >= 6 && ticks.len() <= 7, "Expected 6-7 ticks, got {}", ticks.len());
+        assert!(
+            ticks.len() >= 6 && ticks.len() <= 7,
+            "Expected 6-7 ticks, got {}",
+            ticks.len()
+        );
     }
 
     #[test]

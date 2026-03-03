@@ -1,7 +1,7 @@
 use super::Plane;
+use crate::core::Size;
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
-use crate::core::Size;
 use crate::widget::canvas::{Frame, Path, Stroke};
 
 use crate::core::text;
@@ -105,13 +105,29 @@ where
 
                     match label_config.show {
                         Show::MinMaxFirst => {
-                            let min_idx = self.data.points.iter().position(|p| p.y == min_val);
-                            let max_idx = self.data.points.iter().position(|p| p.y == max_val);
+                            let min_idx = self
+                                .data
+                                .points
+                                .iter()
+                                .position(|p| p.y == min_val);
+                            let max_idx = self
+                                .data
+                                .points
+                                .iter()
+                                .position(|p| p.y == max_val);
                             [min_idx, max_idx].into_iter().flatten().collect()
                         }
                         Show::MinMaxLast => {
-                            let min_idx = self.data.points.iter().rposition(|p| p.y == min_val);
-                            let max_idx = self.data.points.iter().rposition(|p| p.y == max_val);
+                            let min_idx = self
+                                .data
+                                .points
+                                .iter()
+                                .rposition(|p| p.y == min_val);
+                            let max_idx = self
+                                .data
+                                .points
+                                .iter()
+                                .rposition(|p| p.y == max_val);
                             [min_idx, max_idx].into_iter().flatten().collect()
                         }
                         Show::MinMaxAll => self
@@ -164,37 +180,38 @@ where
                 let label_height = label_size * 1.2;
 
                 // Resolve position and rect - either auto with hit-testing or fixed
-                let (resolved_position, label_rect) = match label_config.position {
-                    Position::Auto => find_best_label_placement(
-                        *pixel_point,
-                        label_width,
-                        label_height,
-                        &segments,
-                        &state.label_rects,
-                        &plane.obstacles,
-                        Some(plane.bounds),
-                    ),
-                    other => {
-                        // For fixed positions, use pathfinding too to avoid obstacles
-                        let start_rect = compute_label_rect(
+                let (resolved_position, label_rect) =
+                    match label_config.position {
+                        Position::Auto => find_best_label_placement(
                             *pixel_point,
                             label_width,
                             label_height,
-                            other,
-                        );
-                        // Search from the fixed position to find valid placement
-                        search_from_position(
-                            start_rect,
                             &segments,
                             &state.label_rects,
                             &plane.obstacles,
                             Some(plane.bounds),
-                            10,
-                        )
-                        .map(|(rect, _)| (other, rect))
-                        .unwrap_or((other, start_rect))
-                    }
-                };
+                        ),
+                        other => {
+                            // For fixed positions, use pathfinding too to avoid obstacles
+                            let start_rect = compute_label_rect(
+                                *pixel_point,
+                                label_width,
+                                label_height,
+                                other,
+                            );
+                            // Search from the fixed position to find valid placement
+                            search_from_position(
+                                start_rect,
+                                &segments,
+                                &state.label_rects,
+                                &plane.obstacles,
+                                Some(plane.bounds),
+                                10,
+                            )
+                            .map(|(rect, _)| (other, rect))
+                            .unwrap_or((other, start_rect))
+                        }
+                    };
 
                 state.label_texts.push(label_text);
                 state.label_positions.push(resolved_position);
@@ -277,17 +294,20 @@ where
 
         // Draw markers if configured
         if let Some(marker_config) = &self.data.marker {
-            let marker_color = if let Some(marker_color_spec) = marker_config.color {
-                marker_color_spec.resolve(background, text_pair, None)
-            } else {
-                color
-            };
+            let marker_color =
+                if let Some(marker_color_spec) = marker_config.color {
+                    marker_color_spec.resolve(background, text_pair, None)
+                } else {
+                    color
+                };
 
             let num_points = state.pixel_points.len();
 
             // Find min/max Y indices for MinMax modes
             let minmax_indices: Vec<usize> = match marker_config.show {
-                marker::Show::MinMaxFirst | marker::Show::MinMaxAll | marker::Show::MinMaxLast => {
+                marker::Show::MinMaxFirst
+                | marker::Show::MinMaxAll
+                | marker::Show::MinMaxLast => {
                     let (min_val, max_val) = self.data.points.iter().fold(
                         (f64::INFINITY, f64::NEG_INFINITY),
                         |(min, max), p| (min.min(p.y), max.max(p.y)),
@@ -295,13 +315,29 @@ where
 
                     match marker_config.show {
                         marker::Show::MinMaxFirst => {
-                            let min_idx = self.data.points.iter().position(|p| p.y == min_val);
-                            let max_idx = self.data.points.iter().position(|p| p.y == max_val);
+                            let min_idx = self
+                                .data
+                                .points
+                                .iter()
+                                .position(|p| p.y == min_val);
+                            let max_idx = self
+                                .data
+                                .points
+                                .iter()
+                                .position(|p| p.y == max_val);
                             [min_idx, max_idx].into_iter().flatten().collect()
                         }
                         marker::Show::MinMaxLast => {
-                            let min_idx = self.data.points.iter().rposition(|p| p.y == min_val);
-                            let max_idx = self.data.points.iter().rposition(|p| p.y == max_val);
+                            let min_idx = self
+                                .data
+                                .points
+                                .iter()
+                                .rposition(|p| p.y == min_val);
+                            let max_idx = self
+                                .data
+                                .points
+                                .iter()
+                                .rposition(|p| p.y == max_val);
                             [min_idx, max_idx].into_iter().flatten().collect()
                         }
                         marker::Show::MinMaxAll => self
@@ -327,7 +363,9 @@ where
                     marker::Show::Any => true,
                     marker::Show::FirstOnly => idx == 0,
                     marker::Show::LastOnly => idx == num_points - 1,
-                    marker::Show::FirstAndLast => idx == 0 || idx == num_points - 1,
+                    marker::Show::FirstAndLast => {
+                        idx == 0 || idx == num_points - 1
+                    }
                     marker::Show::MinMaxFirst
                     | marker::Show::MinMaxAll
                     | marker::Show::MinMaxLast => minmax_indices.contains(&idx),
@@ -348,55 +386,136 @@ where
                         }
                         Shape::Square => {
                             builder.rectangle(
-                                Point::new(pixel_point.x - half, pixel_point.y - half),
+                                Point::new(
+                                    pixel_point.x - half,
+                                    pixel_point.y - half,
+                                ),
                                 crate::core::Size::new(size, size),
                             );
                         }
                         Shape::Diamond => {
-                            builder.move_to(Point::new(pixel_point.x, pixel_point.y - half));
-                            builder.line_to(Point::new(pixel_point.x + half, pixel_point.y));
-                            builder.line_to(Point::new(pixel_point.x, pixel_point.y + half));
-                            builder.line_to(Point::new(pixel_point.x - half, pixel_point.y));
+                            builder.move_to(Point::new(
+                                pixel_point.x,
+                                pixel_point.y - half,
+                            ));
+                            builder.line_to(Point::new(
+                                pixel_point.x + half,
+                                pixel_point.y,
+                            ));
+                            builder.line_to(Point::new(
+                                pixel_point.x,
+                                pixel_point.y + half,
+                            ));
+                            builder.line_to(Point::new(
+                                pixel_point.x - half,
+                                pixel_point.y,
+                            ));
                             builder.close();
                         }
                         Shape::Triangle => {
                             // Pointing up
-                            builder.move_to(Point::new(pixel_point.x, pixel_point.y - half));
-                            builder.line_to(Point::new(pixel_point.x + half, pixel_point.y + half));
-                            builder.line_to(Point::new(pixel_point.x - half, pixel_point.y + half));
+                            builder.move_to(Point::new(
+                                pixel_point.x,
+                                pixel_point.y - half,
+                            ));
+                            builder.line_to(Point::new(
+                                pixel_point.x + half,
+                                pixel_point.y + half,
+                            ));
+                            builder.line_to(Point::new(
+                                pixel_point.x - half,
+                                pixel_point.y + half,
+                            ));
                             builder.close();
                         }
                         Shape::TriangleDown => {
                             // Pointing down
-                            builder.move_to(Point::new(pixel_point.x, pixel_point.y + half));
-                            builder.line_to(Point::new(pixel_point.x + half, pixel_point.y - half));
-                            builder.line_to(Point::new(pixel_point.x - half, pixel_point.y - half));
+                            builder.move_to(Point::new(
+                                pixel_point.x,
+                                pixel_point.y + half,
+                            ));
+                            builder.line_to(Point::new(
+                                pixel_point.x + half,
+                                pixel_point.y - half,
+                            ));
+                            builder.line_to(Point::new(
+                                pixel_point.x - half,
+                                pixel_point.y - half,
+                            ));
                             builder.close();
                         }
                         Shape::Cross => {
                             // Plus sign (+)
                             let arm = half * 0.3;
-                            builder.move_to(Point::new(pixel_point.x - arm, pixel_point.y - half));
-                            builder.line_to(Point::new(pixel_point.x + arm, pixel_point.y - half));
-                            builder.line_to(Point::new(pixel_point.x + arm, pixel_point.y - arm));
-                            builder.line_to(Point::new(pixel_point.x + half, pixel_point.y - arm));
-                            builder.line_to(Point::new(pixel_point.x + half, pixel_point.y + arm));
-                            builder.line_to(Point::new(pixel_point.x + arm, pixel_point.y + arm));
-                            builder.line_to(Point::new(pixel_point.x + arm, pixel_point.y + half));
-                            builder.line_to(Point::new(pixel_point.x - arm, pixel_point.y + half));
-                            builder.line_to(Point::new(pixel_point.x - arm, pixel_point.y + arm));
-                            builder.line_to(Point::new(pixel_point.x - half, pixel_point.y + arm));
-                            builder.line_to(Point::new(pixel_point.x - half, pixel_point.y - arm));
-                            builder.line_to(Point::new(pixel_point.x - arm, pixel_point.y - arm));
+                            builder.move_to(Point::new(
+                                pixel_point.x - arm,
+                                pixel_point.y - half,
+                            ));
+                            builder.line_to(Point::new(
+                                pixel_point.x + arm,
+                                pixel_point.y - half,
+                            ));
+                            builder.line_to(Point::new(
+                                pixel_point.x + arm,
+                                pixel_point.y - arm,
+                            ));
+                            builder.line_to(Point::new(
+                                pixel_point.x + half,
+                                pixel_point.y - arm,
+                            ));
+                            builder.line_to(Point::new(
+                                pixel_point.x + half,
+                                pixel_point.y + arm,
+                            ));
+                            builder.line_to(Point::new(
+                                pixel_point.x + arm,
+                                pixel_point.y + arm,
+                            ));
+                            builder.line_to(Point::new(
+                                pixel_point.x + arm,
+                                pixel_point.y + half,
+                            ));
+                            builder.line_to(Point::new(
+                                pixel_point.x - arm,
+                                pixel_point.y + half,
+                            ));
+                            builder.line_to(Point::new(
+                                pixel_point.x - arm,
+                                pixel_point.y + arm,
+                            ));
+                            builder.line_to(Point::new(
+                                pixel_point.x - half,
+                                pixel_point.y + arm,
+                            ));
+                            builder.line_to(Point::new(
+                                pixel_point.x - half,
+                                pixel_point.y - arm,
+                            ));
+                            builder.line_to(Point::new(
+                                pixel_point.x - arm,
+                                pixel_point.y - arm,
+                            ));
                             builder.close();
                         }
                         Shape::X => {
                             let diag = half * 0.707; // cos(45°)
                             // We'll draw a simplified X using lines
-                            builder.move_to(Point::new(pixel_point.x - diag, pixel_point.y - diag));
-                            builder.line_to(Point::new(pixel_point.x + diag, pixel_point.y + diag));
-                            builder.move_to(Point::new(pixel_point.x + diag, pixel_point.y - diag));
-                            builder.line_to(Point::new(pixel_point.x - diag, pixel_point.y + diag));
+                            builder.move_to(Point::new(
+                                pixel_point.x - diag,
+                                pixel_point.y - diag,
+                            ));
+                            builder.line_to(Point::new(
+                                pixel_point.x + diag,
+                                pixel_point.y + diag,
+                            ));
+                            builder.move_to(Point::new(
+                                pixel_point.x + diag,
+                                pixel_point.y - diag,
+                            ));
+                            builder.line_to(Point::new(
+                                pixel_point.x - diag,
+                                pixel_point.y + diag,
+                            ));
                         }
                     }
                 });
@@ -408,7 +527,8 @@ where
 
                 // Stroke the marker if configured
                 if let Some(stroke_color_spec) = marker_config.stroke {
-                    let stroke_color = stroke_color_spec.resolve(background, text_pair, None);
+                    let stroke_color =
+                        stroke_color_spec.resolve(background, text_pair, None);
                     marker_frame.stroke(
                         &path,
                         Stroke::default()
@@ -440,7 +560,8 @@ where
             let label_size = label_config.size.map(|p| p.0).unwrap_or(12.0);
 
             // Resolve label color (defaults to line color)
-            let label_color = if let Some(label_color_spec) = label_config.color {
+            let label_color = if let Some(label_color_spec) = label_config.color
+            {
                 label_color_spec.resolve(background, text_pair, None)
             } else {
                 color
@@ -467,11 +588,15 @@ where
                     ),
                     Position::Left => (
                         layout_bounds.x + label_rect.x + label_rect.width,
-                        layout_bounds.y + label_rect.y + label_rect.height / 2.0,
+                        layout_bounds.y
+                            + label_rect.y
+                            + label_rect.height / 2.0,
                     ),
                     Position::Right => (
                         layout_bounds.x + label_rect.x,
-                        layout_bounds.y + label_rect.y + label_rect.height / 2.0,
+                        layout_bounds.y
+                            + label_rect.y
+                            + label_rect.height / 2.0,
                     ),
                 };
 
@@ -486,6 +611,7 @@ where
                         line_height: crate::core::text::LineHeight::default(),
                         shaping: crate::core::text::Shaping::Basic,
                         wrapping: crate::core::text::Wrapping::None,
+                        ellipsis: crate::core::text::Ellipsis::default(),
                         hint_factor: renderer.scale_factor(),
                     },
                     crate::core::Point::new(anchor_x, anchor_y),
@@ -508,7 +634,10 @@ fn compute_label_rect(
 
     match position {
         Position::Auto | Position::Above => Rectangle::new(
-            Point::new(point.x - label_width / 2.0, point.y - label_height - padding),
+            Point::new(
+                point.x - label_width / 2.0,
+                point.y - label_height - padding,
+            ),
             crate::core::Size::new(label_width, label_height),
         ),
         Position::Below => Rectangle::new(
@@ -516,7 +645,10 @@ fn compute_label_rect(
             crate::core::Size::new(label_width, label_height),
         ),
         Position::Left => Rectangle::new(
-            Point::new(point.x - label_width - padding, point.y - label_height / 2.0),
+            Point::new(
+                point.x - label_width - padding,
+                point.y - label_height / 2.0,
+            ),
             crate::core::Size::new(label_width, label_height),
         ),
         Position::Right => Rectangle::new(
@@ -567,9 +699,9 @@ fn is_valid_placement(
             || rect.y < bounds.y
             || rect.x + rect.width > bounds.x + bounds.width
             || rect.y + rect.height > bounds.y + bounds.height)
-        {
-            return false;
-        }
+    {
+        return false;
+    }
 
     // Must not intersect obstacle rectangles (axes, etc.)
     let hits_obstacle = obstacles
@@ -623,7 +755,13 @@ fn search_from_position(
     ];
 
     // Check starting position first
-    if is_valid_placement(start_rect, line_segments, existing_labels, obstacles, plot_bounds) {
+    if is_valid_placement(
+        start_rect,
+        line_segments,
+        existing_labels,
+        obstacles,
+        plot_bounds,
+    ) {
         return Some((start_rect, 0.0));
     }
 
@@ -633,11 +771,20 @@ fn search_from_position(
 
         for (dx, dy) in &directions {
             let rect = Rectangle::new(
-                Point::new(start_rect.x + dx * offset, start_rect.y + dy * offset),
+                Point::new(
+                    start_rect.x + dx * offset,
+                    start_rect.y + dy * offset,
+                ),
                 crate::core::Size::new(start_rect.width, start_rect.height),
             );
 
-            if is_valid_placement(rect, line_segments, existing_labels, obstacles, plot_bounds) {
+            if is_valid_placement(
+                rect,
+                line_segments,
+                existing_labels,
+                obstacles,
+                plot_bounds,
+            ) {
                 let actual_distance = (dx * offset).abs() + (dy * offset).abs();
                 return Some((rect, actual_distance));
             }
@@ -669,11 +816,17 @@ fn find_best_label_placement(
     let mut best_result: Option<(Position, Rectangle, f32)> = None;
 
     for candidate in candidates {
-        let start_rect = compute_label_rect(point, label_width, label_height, candidate);
+        let start_rect =
+            compute_label_rect(point, label_width, label_height, candidate);
 
-        if let Some((found_rect, distance)) =
-            search_from_position(start_rect, line_segments, existing_labels, obstacles, plot_bounds, max_search_steps)
-        {
+        if let Some((found_rect, distance)) = search_from_position(
+            start_rect,
+            line_segments,
+            existing_labels,
+            obstacles,
+            plot_bounds,
+            max_search_steps,
+        ) {
             // Prefer results with smaller distance traveled
             let dominated = best_result
                 .as_ref()
@@ -694,7 +847,12 @@ fn find_best_label_placement(
     best_result
         .map(|(pos, rect, _)| (pos, rect))
         .unwrap_or_else(|| {
-            let rect = compute_label_rect(point, label_width, label_height, Position::Above);
+            let rect = compute_label_rect(
+                point,
+                label_width,
+                label_height,
+                Position::Above,
+            );
             (Position::Above, rect)
         })
 }
@@ -716,7 +874,12 @@ mod tests {
     #[test]
     fn compute_label_rect_above() {
         let point = Point::new(100.0, 100.0);
-        let rect = compute_label_rect(point, LABEL_WIDTH, LABEL_HEIGHT, Position::Above);
+        let rect = compute_label_rect(
+            point,
+            LABEL_WIDTH,
+            LABEL_HEIGHT,
+            Position::Above,
+        );
 
         // Above: centered horizontally, above the point
         assert_eq!(rect.x, 90.0); // 100 - 20/2
@@ -728,7 +891,12 @@ mod tests {
     #[test]
     fn compute_label_rect_below() {
         let point = Point::new(100.0, 100.0);
-        let rect = compute_label_rect(point, LABEL_WIDTH, LABEL_HEIGHT, Position::Below);
+        let rect = compute_label_rect(
+            point,
+            LABEL_WIDTH,
+            LABEL_HEIGHT,
+            Position::Below,
+        );
 
         // Below: centered horizontally, below the point
         assert_eq!(rect.x, 90.0); // 100 - 20/2
@@ -738,7 +906,12 @@ mod tests {
     #[test]
     fn compute_label_rect_right() {
         let point = Point::new(100.0, 100.0);
-        let rect = compute_label_rect(point, LABEL_WIDTH, LABEL_HEIGHT, Position::Right);
+        let rect = compute_label_rect(
+            point,
+            LABEL_WIDTH,
+            LABEL_HEIGHT,
+            Position::Right,
+        );
 
         // Right: to the right of point, centered vertically
         assert_eq!(rect.x, 106.0); // point.x + padding
@@ -748,7 +921,12 @@ mod tests {
     #[test]
     fn compute_label_rect_left() {
         let point = Point::new(100.0, 100.0);
-        let rect = compute_label_rect(point, LABEL_WIDTH, LABEL_HEIGHT, Position::Left);
+        let rect = compute_label_rect(
+            point,
+            LABEL_WIDTH,
+            LABEL_HEIGHT,
+            Position::Left,
+        );
 
         // Left: to the left of point, centered vertically
         assert_eq!(rect.x, 100.0 - LABEL_WIDTH - 6.0); // point.x - width - padding
@@ -764,7 +942,13 @@ mod tests {
         let obstacles: Vec<Rectangle> = vec![];
 
         let (pos, rect) = find_best_label_placement(
-            point, LABEL_WIDTH, LABEL_HEIGHT, &segments, &existing, &obstacles, None,
+            point,
+            LABEL_WIDTH,
+            LABEL_HEIGHT,
+            &segments,
+            &existing,
+            &obstacles,
+            None,
         );
 
         // Should pick Above (first priority)
@@ -782,7 +966,13 @@ mod tests {
         let obstacles: Vec<Rectangle> = vec![];
 
         let (pos, _rect) = find_best_label_placement(
-            point, LABEL_WIDTH, LABEL_HEIGHT, &segments, &existing, &obstacles, None,
+            point,
+            LABEL_WIDTH,
+            LABEL_HEIGHT,
+            &segments,
+            &existing,
+            &obstacles,
+            None,
         );
 
         // Above would intersect the vertical line, should pick Below
@@ -797,12 +987,24 @@ mod tests {
         let existing: Vec<Rectangle> = vec![];
         // Simulate left axis (x < 0) and bottom axis (y > 200)
         let obstacles = vec![
-            Rectangle::new(Point::new(-50.0, 0.0), crate::core::Size::new(50.0, 200.0)),   // left axis
-            Rectangle::new(Point::new(0.0, 200.0), crate::core::Size::new(200.0, 30.0)),   // bottom axis
+            Rectangle::new(
+                Point::new(-50.0, 0.0),
+                crate::core::Size::new(50.0, 200.0),
+            ), // left axis
+            Rectangle::new(
+                Point::new(0.0, 200.0),
+                crate::core::Size::new(200.0, 30.0),
+            ), // bottom axis
         ];
 
         let (pos, rect) = find_best_label_placement(
-            point, LABEL_WIDTH, LABEL_HEIGHT, &segments, &existing, &obstacles, Some(plot_bounds()),
+            point,
+            LABEL_WIDTH,
+            LABEL_HEIGHT,
+            &segments,
+            &existing,
+            &obstacles,
+            Some(plot_bounds()),
         );
 
         // Should find a valid position that doesn't hit obstacles
@@ -810,7 +1012,9 @@ mod tests {
         for obs in &obstacles {
             assert!(
                 !crate::geometry::intersect::rects(rect, *obs),
-                "rect {:?} should not intersect obstacle {:?}", rect, obs
+                "rect {:?} should not intersect obstacle {:?}",
+                rect,
+                obs
             );
         }
         // Position should be Above or Right (not Below which hits bottom axis)
@@ -827,7 +1031,13 @@ mod tests {
         let obstacles: Vec<Rectangle> = vec![];
 
         let (_pos, rect) = find_best_label_placement(
-            point, LABEL_WIDTH, LABEL_HEIGHT, &segments, &existing, &obstacles, Some(plot_bounds()),
+            point,
+            LABEL_WIDTH,
+            LABEL_HEIGHT,
+            &segments,
+            &existing,
+            &obstacles,
+            Some(plot_bounds()),
         );
 
         // Should find a valid position (within bounds, no line intersection)
@@ -835,7 +1045,11 @@ mod tests {
         assert!(rect.y >= 0.0, "rect.y should be >= 0");
         // Verify it doesn't hit the line
         assert!(
-            !crate::geometry::intersect::line_rect(point, Point::new(50.0, 150.0), rect),
+            !crate::geometry::intersect::line_rect(
+                point,
+                Point::new(50.0, 150.0),
+                rect
+            ),
             "rect should not intersect line"
         );
     }
@@ -849,7 +1063,13 @@ mod tests {
         let obstacles: Vec<Rectangle> = vec![];
 
         let (pos, _rect) = find_best_label_placement(
-            point, LABEL_WIDTH, LABEL_HEIGHT, &segments, &existing, &obstacles, Some(plot_bounds()),
+            point,
+            LABEL_WIDTH,
+            LABEL_HEIGHT,
+            &segments,
+            &existing,
+            &obstacles,
+            Some(plot_bounds()),
         );
 
         // Above should clear the nearly-horizontal line with no search needed
@@ -861,14 +1081,18 @@ mod tests {
         // Point at (0, 0) - truly cornered, needs search to escape
         let point = Point::new(5.0, 5.0); // small offset so we have room
         // Line going diagonally, blocking Above and Left
-        let segments = vec![
-            (Point::new(0.0, 0.0), Point::new(20.0, 20.0)),
-        ];
+        let segments = vec![(Point::new(0.0, 0.0), Point::new(20.0, 20.0))];
         let existing: Vec<Rectangle> = vec![];
         let obstacles: Vec<Rectangle> = vec![];
 
         let (_pos, rect) = find_best_label_placement(
-            point, LABEL_WIDTH, LABEL_HEIGHT, &segments, &existing, &obstacles, Some(plot_bounds()),
+            point,
+            LABEL_WIDTH,
+            LABEL_HEIGHT,
+            &segments,
+            &existing,
+            &obstacles,
+            Some(plot_bounds()),
         );
 
         // Should find some valid position
@@ -896,7 +1120,13 @@ mod tests {
         let obstacles: Vec<Rectangle> = vec![];
 
         let (pos, _rect) = find_best_label_placement(
-            point, LABEL_WIDTH, LABEL_HEIGHT, &segments, &existing, &obstacles, None,
+            point,
+            LABEL_WIDTH,
+            LABEL_HEIGHT,
+            &segments,
+            &existing,
+            &obstacles,
+            None,
         );
 
         // Above overlaps existing, should pick Below

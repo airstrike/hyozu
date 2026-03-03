@@ -123,16 +123,21 @@ impl App {
     fn subscription(&self) -> Subscription<Message> {
         use keyboard::key::{Key, Named};
 
-        keyboard::on_key_press(|key, _modifiers| match key {
-            Key::Named(Named::PageDown)
-            | Key::Named(Named::ArrowRight)
-            | Key::Named(Named::ArrowDown) => Some(Message::NextTheme),
-            Key::Named(Named::PageUp)
-            | Key::Named(Named::ArrowLeft)
-            | Key::Named(Named::ArrowUp) => Some(Message::PreviousTheme),
-            Key::Named(Named::Home) => Some(Message::FirstTheme),
-            Key::Named(Named::End) => Some(Message::LastTheme),
-            _ => None,
+        keyboard::listen().filter_map(|event| {
+            let keyboard::Event::KeyPressed { key, .. } = event else {
+                return None;
+            };
+            match key {
+                Key::Named(Named::PageDown)
+                | Key::Named(Named::ArrowRight)
+                | Key::Named(Named::ArrowDown) => Some(Message::NextTheme),
+                Key::Named(Named::PageUp)
+                | Key::Named(Named::ArrowLeft)
+                | Key::Named(Named::ArrowUp) => Some(Message::PreviousTheme),
+                Key::Named(Named::Home) => Some(Message::FirstTheme),
+                Key::Named(Named::End) => Some(Message::LastTheme),
+                _ => None,
+            }
         })
     }
 
@@ -223,17 +228,18 @@ impl App {
         .spacing(10);
 
         let layout_controls =
-            row![checkbox("Stacked", stacked).on_toggle(on_layout)]
+            row![checkbox(stacked).label("Stacked").on_toggle(on_layout)]
                 .align_y(Center)
                 .spacing(10);
 
         let theme_picker = row![
             "Theme:",
             pick_list(
-                &self.all_themes[..],
-                Some(&self.theme),
-                Message::ThemeChanged
+                Some(self.theme.clone()),
+                self.all_themes.clone(),
+                |t: &Theme| t.to_string(),
             )
+            .on_select(Message::ThemeChanged)
             .width(Fill)
             .placeholder("Paper (default)"),
         ]

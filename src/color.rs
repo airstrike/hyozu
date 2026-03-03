@@ -297,7 +297,7 @@ fn adjust_lightness_hcl(
     let y =
         0.2126729 * linear[0] + 0.7151522 * linear[1] + 0.0721750 * linear[2];
     let z =
-        0.0193339 * linear[0] + 0.1191920 * linear[1] + 0.9503041 * linear[2];
+        0.0193339 * linear[0] + 0.119_192 * linear[1] + 0.9503041 * linear[2];
 
     // XYZ to LAB (D65 white point: 0.95047, 1.0, 1.08883)
     let f = |t: f32| {
@@ -359,14 +359,14 @@ fn adjust_lightness_hcl(
 
     // XYZ to Linear RGB
     let lr = 3.2404542 * x2 - 1.5371385 * y2 - 0.4985314 * z2;
-    let lg = -0.9692660 * x2 + 1.8760108 * y2 + 0.0415560 * z2;
+    let lg = -0.969_266 * x2 + 1.8760108 * y2 + 0.0415560 * z2;
     let lb = 0.0556434 * x2 - 0.2040259 * y2 + 1.0572252 * z2;
 
     // Linear RGB to sRGB (gamma correction)
     crate::core::Color::from_linear_rgba(
-        lr.max(0.0).min(1.0),
-        lg.max(0.0).min(1.0),
-        lb.max(0.0).min(1.0),
+        lr.clamp(0.0, 1.0),
+        lg.clamp(0.0, 1.0),
+        lb.clamp(0.0, 1.0),
         color.a,
     )
 }

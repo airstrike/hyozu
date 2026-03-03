@@ -126,9 +126,8 @@ where
 
                                 // Use plane to transform data coordinate to pixel
                                 // For grouped layout, position bars within the group with spacing
-                                let bar_center_x = plane
-                                    .to_pixel(Datum::x(bin_idx as f64))
-                                    .x;
+                                let bar_center_x =
+                                    plane.to_pixel(Datum::x(bin_idx as f64)).x;
                                 let total_group_width = bin_width * bar_length;
                                 let group_start =
                                     bar_center_x - total_group_width / 2.0;
@@ -169,9 +168,8 @@ where
                                 cumulative_tops[bin_idx] = y;
 
                                 // Use plane to transform data coordinate to pixel
-                                let bar_center_x = plane
-                                    .to_pixel(Datum::x(bin_idx as f64))
-                                    .x;
+                                let bar_center_x =
+                                    plane.to_pixel(Datum::x(bin_idx as f64)).x;
                                 let x = bar_center_x - bar_width / 2.0;
 
                                 Rectangle {
@@ -210,9 +208,8 @@ where
                                 let bar_height = (zero_y - pixel_point.y).abs();
 
                                 // Use plane to transform data coordinate to pixel
-                                let bar_center_x = plane
-                                    .to_pixel(Datum::x(bin_idx as f64))
-                                    .x;
+                                let bar_center_x =
+                                    plane.to_pixel(Datum::x(bin_idx as f64)).x;
                                 let x = bar_center_x - bar_width / 2.0;
 
                                 Rectangle {
@@ -434,6 +431,7 @@ where
                             ),
                             shaping: crate::core::text::Shaping::Basic,
                             wrapping: crate::core::text::Wrapping::None,
+                            ellipsis: crate::core::text::Ellipsis::default(),
                             hint_factor: renderer.scale_factor(),
                         },
                         crate::core::Point::new(label_x, label_y),

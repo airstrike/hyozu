@@ -96,9 +96,9 @@ struct App {
 
 #[derive(Debug, Clone)]
 enum Message {
-    SetRange(TimeRange),
-    SetAlignment(Alignment),
-    SetShow(line::label::Show),
+    Range(TimeRange),
+    Alignment(Alignment),
+    Show(line::label::Show),
 }
 
 impl App {
@@ -128,9 +128,11 @@ impl App {
         // so all time ranges share the same underlying price path
         let points = generate_gbm(start_ts, end_ts, interval);
 
-        data(line(points).data_labels(
-            show + line::label::Position::Right + format_price,
-        ))
+        data(
+            line(points).data_labels(
+                show + line::label::Position::Right + format_price,
+            ),
+        )
         .x_axis(|_| line::Line::time_axis().with_ticks(alignment))
         .y_axis_labels(format_price)
     }
@@ -141,19 +143,21 @@ impl App {
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::SetRange(range) => {
+            Message::Range(range) => {
                 self.range = range;
                 self.rebuild_data();
             }
-            Message::SetAlignment(alignment) => {
+            Message::Alignment(alignment) => {
                 self.alignment = alignment;
                 if let Some(axis) = self.data.x_axis_mut() {
                     axis.ticks_mut().alignment = alignment;
                 }
             }
-            Message::SetShow(show) => {
+            Message::Show(show) => {
                 self.show = show;
-                if let Some(label) = self.data.line_mut(0).and_then(|l| l.label_mut()) {
+                if let Some(label) =
+                    self.data.line_mut(0).and_then(|l| l.label_mut())
+                {
                     label.show = show;
                 }
             }
@@ -164,9 +168,9 @@ impl App {
     fn view(&self) -> iced::Element<'_, Message> {
         use line::label::Show;
 
-        let range_buttons = row(TimeRange::all().iter().map(|&r| {
-            btn(r.label(), self.range == r, Message::SetRange(r))
-        }))
+        let range_buttons = row(TimeRange::all()
+            .iter()
+            .map(|&r| btn(r.label(), self.range == r, Message::Range(r))))
         .spacing(4);
 
         let alignments = [
@@ -175,7 +179,7 @@ impl App {
             (Alignment::SnapToEnd, "End"),
         ];
         let alignment_buttons = row(alignments.iter().map(|&(a, label)| {
-            btn(label, self.alignment == a, Message::SetAlignment(a))
+            btn(label, self.alignment == a, Message::Alignment(a))
         }))
         .spacing(4);
 
@@ -186,9 +190,9 @@ impl App {
             (Show::FirstAndLast, "First+Last"),
             (Show::MinMaxFirst, "Min/Max"),
         ];
-        let show_buttons = row(shows.iter().map(|&(s, label)| {
-            btn(label, self.show == s, Message::SetShow(s))
-        }))
+        let show_buttons = row(shows
+            .iter()
+            .map(|&(s, label)| btn(label, self.show == s, Message::Show(s))))
         .spacing(4);
 
         let controls = column![
@@ -238,7 +242,6 @@ fn btn<'a, Message: Clone + 'a>(
         .on_press(msg)
         .into()
 }
-
 
 /// Simple deterministic RNG for reproducible price simulation.
 /// Uses a linear congruential generator with Box-Muller for Gaussian.
