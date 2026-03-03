@@ -303,23 +303,27 @@ where
         // Split again to get fresh mutable borrows (previous phase borrows have ended)
         let (first_children, second_children) = tree.children.split_at_mut(5);
 
-        let left_axis_node = self.left_axis.as_ref().map(|guide| guide.layout(
+        let left_axis_node = self.left_axis.as_ref().map(|guide| {
+            guide.layout(
                 &mut second_children[0], // left axis
                 renderer,
                 &crate::core::layout::Limits::new(
                     Size::ZERO,
                     Size::new(available.width, vertical_space),
                 ),
-            ));
+            )
+        });
 
-        let bottom_axis_node = self.bottom_axis.as_ref().map(|guide| guide.layout(
+        let bottom_axis_node = self.bottom_axis.as_ref().map(|guide| {
+            guide.layout(
                 &mut first_children[4], // bottom axis
                 renderer,
                 &crate::core::layout::Limits::new(
                     Size::ZERO,
                     Size::new(horizontal_width, remaining_height),
                 ),
-            ));
+            )
+        });
 
         // 6: plot area - gets whatever space remains
         let plot_width = horizontal_width;

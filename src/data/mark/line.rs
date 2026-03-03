@@ -3,8 +3,7 @@ pub mod marker;
 
 use crate::color::Color;
 use crate::data::axis::{self, Axis, Kind, Orientation, Placement};
-use crate::data::{Datum, IntoDatums};
-use crate::data::Mark;
+use crate::data::{Datum, IntoDatums, Mark};
 
 /// Trait for types that can be converted into a Line mark.
 /// Used by the `lines!` macro to accept both raw data and Line builders.
@@ -109,7 +108,10 @@ impl Line {
     }
 
     /// Configure data labels for the line points.
-    pub fn data_labels(mut self, label: impl Into<Option<label::Label>>) -> Self {
+    pub fn data_labels(
+        mut self,
+        label: impl Into<Option<label::Label>>,
+    ) -> Self {
         self.label = label.into();
         self
     }
@@ -133,7 +135,10 @@ impl Line {
     /// // Only first and last with diamond markers
     /// let mark = line([1, 2, 3, 4]).markers(Shape::Diamond + Show::FirstAndLast);
     /// ```
-    pub fn markers(mut self, marker: impl Into<Option<marker::Marker>>) -> Self {
+    pub fn markers(
+        mut self,
+        marker: impl Into<Option<marker::Marker>>,
+    ) -> Self {
         self.marker = marker.into();
         self
     }

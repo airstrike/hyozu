@@ -1,5 +1,5 @@
-use crate::core::{Font, Pixels};
 use crate::color::Color;
+use crate::core::{Font, Pixels};
 
 pub mod label;
 pub mod tick;
@@ -259,7 +259,6 @@ impl Axis {
         self.ticks = ticks.into();
         self
     }
-
 
     /// Set custom labels for this axis.
     ///

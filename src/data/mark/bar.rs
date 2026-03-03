@@ -1,5 +1,5 @@
-use crate::data::axis::{self, Axis, Kind, Orientation, Placement};
 use crate::data::IntoDatums;
+use crate::data::axis::{self, Axis, Kind, Orientation, Placement};
 
 pub mod label;
 pub mod layout;

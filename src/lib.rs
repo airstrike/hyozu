@@ -18,9 +18,8 @@ pub use core::Function;
 // Re-export commonly used items for convenience
 pub use self::chart::chart;
 pub use color::{Color, Pair};
-pub use data::{Action, Data};
+pub use data::{Action, Data, Datum};
 pub use design::Design;
-pub use data::Datum;
 
 pub use data::data;
 

@@ -1,8 +1,8 @@
 //! Property descriptors for line charts.
 
 use crate::color::Color;
-use crate::data::mark::line::label;
 use crate::data::mark::Line;
+use crate::data::mark::line::label;
 use crate::map::Map;
 
 /// A property of a line chart.

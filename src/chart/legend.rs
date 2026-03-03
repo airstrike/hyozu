@@ -27,7 +27,7 @@ where
 impl<'a, Message, Renderer> Default for Legend<'a, Message, Renderer>
 where
     Renderer: text::Renderer,
- {
+{
     fn default() -> Self {
         Self::new()
     }

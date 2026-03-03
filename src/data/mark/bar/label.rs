@@ -119,7 +119,10 @@ impl Label {
 
 impl From<Position> for Label {
     fn from(position: Position) -> Self {
-        Label { position, ..Default::default() }
+        Label {
+            position,
+            ..Default::default()
+        }
     }
 }
 
@@ -131,7 +134,9 @@ impl From<Position> for Option<Label> {
 
 // === Position + component ===
 
-impl<F: Fn(f64) -> String + Send + Sync + 'static> std::ops::Add<F> for Position {
+impl<F: Fn(f64) -> String + Send + Sync + 'static> std::ops::Add<F>
+    for Position
+{
     type Output = Label;
     fn add(self, format: F) -> Label {
         Label::from(self).with_format(format)

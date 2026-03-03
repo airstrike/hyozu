@@ -9,8 +9,8 @@
 use iced::widget::{button, center, column, container, row, space, text};
 use iced::{Color, Task};
 
-use hyozu::{chart, data, line, lines};
 use hyozu::line::marker::Shape;
+use hyozu::{chart, data, line, lines};
 
 use theme::Theme; // custom theme type. see end of file.
 

@@ -1,6 +1,6 @@
+use crate::core::Rectangle;
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
-use crate::core::Rectangle;
 use crate::data::Datum;
 
 use crate::core::text;
@@ -222,7 +222,7 @@ where
         renderer: &Renderer,
         limits: &Limits,
         axis_bounds: Option<(f64, f64, f64, f64)>, // (x_min, x_max, y_min, y_max) from axes
-        axis_layout: AxisLayout,                    // Physical dimensions of axes
+        axis_layout: AxisLayout, // Physical dimensions of axes
     ) -> Node {
         let state = tree.state.downcast_mut::<State>();
         let size = limits.max();

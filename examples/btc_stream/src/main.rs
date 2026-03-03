@@ -233,7 +233,9 @@ impl App {
                     // Fetch historical for new pair
                     return Task::future(fetch_historical_prices(pair)).map(
                         move |result| match result {
-                            Ok(points) => Message::HistoricalPrices(pair, points),
+                            Ok(points) => {
+                                Message::HistoricalPrices(pair, points)
+                            }
                             Err(e) => {
                                 eprintln!("Failed to fetch historical: {}", e);
                                 Message::HistoricalPrices(pair, vec![])
@@ -415,9 +417,8 @@ where
         "https://api.kraken.com/0/public/Ticker?pair={}",
         pair.api_pair()
     );
-    let uri: hyper::Uri = url
-        .parse()
-        .map_err(|e| format!("Invalid URI: {}", e))?;
+    let uri: hyper::Uri =
+        url.parse().map_err(|e| format!("Invalid URI: {}", e))?;
 
     let req = Request::builder()
         .method("GET")
@@ -493,9 +494,8 @@ async fn fetch_historical_prices(
         "https://api.kraken.com/0/public/OHLC?pair={}&interval=1",
         pair.api_pair()
     );
-    let uri: hyper::Uri = url
-        .parse()
-        .map_err(|e| format!("Invalid URI: {}", e))?;
+    let uri: hyper::Uri =
+        url.parse().map_err(|e| format!("Invalid URI: {}", e))?;
 
     let req = Request::builder()
         .method("GET")

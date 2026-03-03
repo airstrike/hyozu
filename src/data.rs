@@ -205,7 +205,8 @@ impl Data {
         lower: impl Into<Option<f64>>,
         upper: impl Into<Option<f64>>,
     ) -> Self {
-        self.primary = self.primary.x_axis(|axis| axis.with_bounds(lower, upper));
+        self.primary =
+            self.primary.x_axis(|axis| axis.with_bounds(lower, upper));
         self
     }
 
@@ -229,7 +230,8 @@ impl Data {
         lower: impl Into<Option<f64>>,
         upper: impl Into<Option<f64>>,
     ) -> Self {
-        self.primary = self.primary.y_axis(|axis| axis.with_bounds(lower, upper));
+        self.primary =
+            self.primary.y_axis(|axis| axis.with_bounds(lower, upper));
         self
     }
 
