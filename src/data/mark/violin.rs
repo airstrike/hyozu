@@ -1,14 +1,7 @@
 use crate::color::Color;
 use crate::data::axis::{self, Axis, Kind, Orientation, Placement};
 
-/// Direction for violin charts.
-/// NOTE: This will be consolidated with bar::Direction during merge.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Direction {
-    #[default]
-    Vertical,
-    Horizontal,
-}
+pub use super::bar::Direction;
 
 /// Optional box plot statistics for overlay.
 #[derive(Debug, Clone)]
