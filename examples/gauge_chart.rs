@@ -1,3 +1,4 @@
+use hyozu::axis::Ticks;
 use hyozu::{data, gauge};
 use iced::widget::{center, column, pick_list, row};
 use iced::{Center, Fill, Subscription, Task, Theme, keyboard};
@@ -35,7 +36,8 @@ impl App {
             .zone(70.0, 100.0, 0xF44336)
             .format(|v| format!("{:.0}%", v))
             .unit("efficiency")
-            .show_min_max(true);
+            .ticks(Ticks::default())
+            .gradient(true);
 
         (
             Self {

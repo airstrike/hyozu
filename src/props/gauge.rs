@@ -13,8 +13,12 @@ pub enum Property {
     Thickness(f32),
     /// Whether to show the center value label
     ShowValue(bool),
-    /// Whether to show min/max labels at arc ends
-    ShowMinMax(bool),
+    /// Spacing between value text and unit label
+    Spacing(f32),
+    /// Whether to show tick labels
+    ShowTickLabels(bool),
+    /// Whether to use gradient arc mode
+    Gradient(bool),
 }
 
 impl Map for Property {}
@@ -27,9 +31,11 @@ impl Property {
             Property::Sweep(v) => gauge.sweep = v.clamp(90.0, 360.0),
             Property::Thickness(v) => gauge.thickness = v.clamp(0.05, 0.5),
             Property::ShowValue(v) => gauge.show_value = *v,
-            Property::ShowMinMax(v) => gauge.show_min_max = *v,
+            Property::Spacing(v) => gauge.label_spacing = *v,
+            Property::ShowTickLabels(v) => gauge.show_tick_labels = *v,
+            Property::Gradient(v) => gauge.gradient = *v,
         }
     }
 }
 
-pub use Property::{ShowMinMax, ShowValue, Sweep, Thickness, Value};
+pub use Property::{Gradient, ShowTickLabels, ShowValue, Spacing, Sweep, Thickness, Value};

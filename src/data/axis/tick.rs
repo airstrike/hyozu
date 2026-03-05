@@ -142,6 +142,8 @@ pub enum Frequency {
     EveryItem,
     /// Show tick every N items
     EveryNthItem(usize),
+    /// Show ticks only at the first and last positions
+    FirstAndLast,
     /// Custom tick positions (for manual override)
     Custom(Vec<f64>),
 }

@@ -443,8 +443,10 @@ where
                         }
                     }
                     crate::Mark::Heatmap(hm) => {
-                        for col in 0..hm.cols() {
-                            values.insert(OrderedFloat(col as f64));
+                        let is_x = matches!(self.axis.orientation(), Orientation::Bottom | Orientation::Top);
+                        let count = if is_x { hm.cols() } else { hm.rows() };
+                        for i in 0..count {
+                            values.insert(OrderedFloat(i as f64));
                         }
                     }
                     crate::Mark::BoxPlot(bp) => {
@@ -491,6 +493,10 @@ where
                 .filter(|(i, _)| i % n == 0)
                 .map(|(_, v)| v)
                 .collect(),
+            Frequency::FirstAndLast if data_positions.len() >= 2 => {
+                vec![data_positions[0], *data_positions.last().unwrap()]
+            }
+            Frequency::FirstAndLast => data_positions,
             Frequency::Custom(custom) => custom.clone(),
         };
 

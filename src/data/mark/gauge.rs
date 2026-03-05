@@ -1,4 +1,5 @@
 use crate::color::Color;
+use crate::data::axis::tick;
 use std::sync::Arc;
 
 /// A colored zone on a gauge chart.
@@ -41,8 +42,14 @@ pub struct Gauge {
     pub(crate) format: Option<Arc<dyn Fn(f64) -> String + Send + Sync>>,
     /// Optional unit label displayed below value
     pub(crate) unit: Option<String>,
-    /// Whether to show min/max labels at arc ends
-    pub(crate) show_min_max: bool,
+    /// Spacing between value text and unit label
+    pub(crate) label_spacing: f32,
+    /// Optional tick marks
+    pub(crate) ticks: Option<tick::Ticks>,
+    /// Whether to show tick labels (default true)
+    pub(crate) show_tick_labels: bool,
+    /// Whether to use gradient arc mode
+    pub(crate) gradient: bool,
 }
 
 impl std::fmt::Debug for Gauge {
@@ -57,7 +64,10 @@ impl std::fmt::Debug for Gauge {
             .field("show_value", &self.show_value)
             .field("format", &self.format.as_ref().map(|_| "<function>"))
             .field("unit", &self.unit)
-            .field("show_min_max", &self.show_min_max)
+            .field("label_spacing", &self.label_spacing)
+            .field("ticks", &self.ticks)
+            .field("show_tick_labels", &self.show_tick_labels)
+            .field("gradient", &self.gradient)
             .finish()
     }
 }
@@ -86,7 +96,10 @@ pub fn gauge(value: impl Into<f64>) -> Gauge {
         show_value: true,
         format: None,
         unit: None,
-        show_min_max: false,
+        label_spacing: 10.0,
+        ticks: None,
+        show_tick_labels: true,
+        gradient: false,
     }
 }
 
@@ -138,9 +151,27 @@ impl Gauge {
         self
     }
 
-    /// Whether to show min/max labels at arc ends (default false).
-    pub fn show_min_max(mut self, show: bool) -> Self {
-        self.show_min_max = show;
+    /// Sets the spacing between the value text and unit label (default 10.0).
+    pub fn spacing(mut self, spacing: f32) -> Self {
+        self.label_spacing = spacing;
+        self
+    }
+
+    /// Adds tick marks to the gauge.
+    pub fn ticks(mut self, ticks: impl Into<tick::Ticks>) -> Self {
+        self.ticks = Some(ticks.into());
+        self
+    }
+
+    /// Whether to show tick labels (default true).
+    pub fn show_tick_labels(mut self, show: bool) -> Self {
+        self.show_tick_labels = show;
+        self
+    }
+
+    /// Whether to use gradient arc mode (default false).
+    pub fn gradient(mut self, gradient: bool) -> Self {
+        self.gradient = gradient;
         self
     }
 
