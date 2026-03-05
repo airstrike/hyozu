@@ -175,33 +175,56 @@ impl Area {
                     }
                 }
                 Mark::Bars(bars) => {
-                    // Vertical bars (default)
-                    // For stacked layout, compute cumulative sums
+                    let is_horizontal = bars.direction == Direction::Horizontal;
+
                     if bars.layout == Layout::Stacked {
                         let mut sums: HashMap<i64, f64> = HashMap::new();
 
                         for series in &bars.series {
                             for point in &series.points {
-                                let x_key = (point.x * 1000.0).round() as i64;
-                                *sums.entry(x_key).or_insert(0.0) += point.y;
+                                let cat_key = (point.x * 1000.0).round() as i64;
+                                *sums.entry(cat_key).or_insert(0.0) += point.y;
 
-                                x_min = x_min.min(point.x);
-                                x_max = x_max.max(point.x);
+                                if is_horizontal {
+                                    // Categories on Y axis
+                                    y_min = y_min.min(point.x);
+                                    y_max = y_max.max(point.x);
+                                } else {
+                                    // Categories on X axis
+                                    x_min = x_min.min(point.x);
+                                    x_max = x_max.max(point.x);
+                                }
                             }
                         }
 
                         for sum in sums.values() {
-                            y_min = y_min.min(*sum);
-                            y_max = y_max.max(*sum);
+                            if is_horizontal {
+                                // Values on X axis
+                                x_min = x_min.min(*sum);
+                                x_max = x_max.max(*sum);
+                            } else {
+                                // Values on Y axis
+                                y_min = y_min.min(*sum);
+                                y_max = y_max.max(*sum);
+                            }
                         }
                     } else {
                         // For grouped/overlaid, use individual values
                         for series in &bars.series {
                             for point in &series.points {
-                                x_min = x_min.min(point.x);
-                                x_max = x_max.max(point.x);
-                                y_min = y_min.min(point.y);
-                                y_max = y_max.max(point.y);
+                                if is_horizontal {
+                                    // Categories on Y, values on X
+                                    y_min = y_min.min(point.x);
+                                    y_max = y_max.max(point.x);
+                                    x_min = x_min.min(point.y);
+                                    x_max = x_max.max(point.y);
+                                } else {
+                                    // Categories on X, values on Y
+                                    x_min = x_min.min(point.x);
+                                    x_max = x_max.max(point.x);
+                                    y_min = y_min.min(point.y);
+                                    y_max = y_max.max(point.y);
+                                }
                             }
                         }
                     }

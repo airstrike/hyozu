@@ -402,8 +402,7 @@ where
         use crate::axis::label;
         use crate::axis::tick::Frequency;
 
-        let is_x_axis = matches!(self.axis.orientation(), Orientation::Bottom | Orientation::Top);
-        let is_categorical = is_x_axis && self.axis.is_categorical();
+        let is_categorical = self.axis.is_categorical();
 
         let (axis_min, axis_max) = (bounds.min(), bounds.max());
 
@@ -598,33 +597,47 @@ where
                     }
                 }
                 crate::Mark::Bars(bars) => {
-                    if !is_x_axis && bars.layout == Layout::Stacked {
-                        // For stacked bars Y-axis, compute cumulative sums
+                    use crate::mark::bar::Direction;
+
+                    // For horizontal bars, the axes are swapped:
+                    // - x-axis (bottom) shows values (point.y)
+                    // - y-axis (left) shows categories (point.x)
+                    let is_horizontal = bars.direction == Direction::Horizontal;
+
+                    // Determine which field is the "category" and which is the "value"
+                    // based on direction and which axis we're computing for
+                    let is_value_axis = (is_x_axis && is_horizontal) || (!is_x_axis && !is_horizontal);
+
+                    if is_value_axis && bars.layout == Layout::Stacked {
+                        // For stacked bars on the value axis, compute cumulative sums
                         let mut sums: HashMap<i64, f64> = HashMap::new();
 
                         for series in &bars.series {
                             for point in &series.points {
-                                let x_key = (point.x * 1000.0).round() as i64;
-                                *sums.entry(x_key).or_insert(0.0) += point.y;
-
-                                // Still track X range
-                                min = min.min(point.x);
-                                max = max.max(point.x);
+                                let cat_key = (point.x * 1000.0).round() as i64;
+                                *sums.entry(cat_key).or_insert(0.0) += point.y;
                             }
                         }
 
-                        // Update max with stacked totals
+                        // Update with stacked totals
                         for sum in sums.values() {
                             max = max.max(*sum);
                             min = min.min(*sum);
                         }
-                    } else {
-                        // For grouped/overlaid bars or X-axis, use individual values
+                    } else if is_value_axis {
+                        // Value axis (non-stacked): use point.y (the values)
                         for series in &bars.series {
                             for point in &series.points {
-                                let val = if is_x_axis { point.x } else { point.y };
-                                min = min.min(val);
-                                max = max.max(val);
+                                min = min.min(point.y);
+                                max = max.max(point.y);
+                            }
+                        }
+                    } else {
+                        // Category axis: use point.x (the category indices)
+                        for series in &bars.series {
+                            for point in &series.points {
+                                min = min.min(point.x);
+                                max = max.max(point.x);
                             }
                         }
                     }
@@ -755,16 +768,21 @@ where
             }
         }
 
-        // For Y-axis with bar/waterfall charts, ensure we include zero
+        // For the value axis of bar/waterfall/area charts, ensure we include zero
         // (Line charts should fit to the data range)
-        if !is_x_axis {
-            let has_bars = self.marks.iter().any(|m| {
-                matches!(
-                    m,
-                    crate::Mark::Area(_) | crate::Mark::Bars(_) | crate::Mark::Waterfall(_)
-                )
+        // For vertical bars: value axis is Y; for horizontal bars: value axis is X
+        {
+            let has_vertical_bars = self.marks.iter().any(|m| {
+                matches!(m, crate::Mark::Area(_) | crate::Mark::Waterfall(_))
+                    || matches!(m, crate::Mark::Bars(b) if b.direction() == crate::mark::bar::Direction::Vertical)
             });
-            if has_bars {
+            let has_horizontal_bars = self
+                .marks
+                .iter()
+                .any(|m| matches!(m, crate::Mark::Bars(b) if b.direction() == crate::mark::bar::Direction::Horizontal));
+
+            let should_include_zero = (!is_x_axis && has_vertical_bars) || (is_x_axis && has_horizontal_bars);
+            if should_include_zero {
                 min = min.min(0.0);
             }
         }
