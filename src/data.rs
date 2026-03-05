@@ -7,7 +7,8 @@ pub use area::Area;
 pub use axis::{Axis, Orientation};
 pub use datum::{Datum, IntoDatums};
 pub use mark::{
-    Bars, Gauge, LegendEntry, Line, Mark, Pie, Rule, Waterfall, Xy, bar, bars, gauge, line, pie, rule, waterfall, xy,
+    Bars, Gauge, LegendEntry, Line, Mark, Pie, Rule, Waterfall, Xy, areas, bar, bars, gauge, line, pie, rule,
+    waterfall, xy,
 };
 
 /// Trait for types that can be converted into chart Data.
@@ -48,6 +49,7 @@ pub struct Data {
 /// Returns the default axis pair for a given mark type.
 fn axes_for_mark(mark: &Mark) -> (Option<Axis>, Option<Axis>) {
     match mark {
+        Mark::Area(_) => (Some(mark::Area::x_axis()), Some(mark::Area::y_axis())),
         Mark::Bars(bars) => {
             let (x, y) = Bars::axes(bars.direction());
             (Some(x), Some(y))
@@ -100,6 +102,12 @@ impl IntoData for Mark {
             palette: None,
             selection: None,
         }
+    }
+}
+
+impl IntoData for mark::Area {
+    fn into_data(self) -> Data {
+        Mark::from(self).into_data()
     }
 }
 
@@ -387,6 +395,11 @@ impl Data {
             Action::Set(item) => match item {
                 Item::Title(title) => {
                     self.title = Some(title);
+                }
+                Item::Area(index, property) => {
+                    if let Some(Mark::Area(area)) = self.primary.marks.get_mut(index) {
+                        property.apply(area);
+                    }
                 }
                 Item::Bars(index, property) => {
                     if let Some(Mark::Bars(bars)) = self.primary.marks.get_mut(index) {

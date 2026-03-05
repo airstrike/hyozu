@@ -68,6 +68,13 @@ impl Palette {
         // Special cases for single marks
         if marks.len() == 1 {
             return match &marks[0] {
+                Mark::Area(area) => {
+                    if area.series.len() >= 3 {
+                        Palette::Categorical
+                    } else {
+                        Palette::Sequential
+                    }
+                }
                 Mark::Pie(_) => Palette::Categorical,
                 Mark::Gauge(_) => Palette::Sequential,
                 Mark::Waterfall(_) => Palette::Sequential,
@@ -93,6 +100,7 @@ pub fn count_color_slots(marks: &[Mark]) -> usize {
     marks
         .iter()
         .map(|mark| match mark {
+            Mark::Area(area) => area.series.len(),
             Mark::Bars(bars) => bars.series.len(),
             Mark::Line(_) => 1,
             Mark::Xy(_) => 1,

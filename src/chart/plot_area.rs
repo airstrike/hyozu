@@ -6,6 +6,7 @@ use crate::data::Datum;
 use crate::core::text;
 use crate::widget::renderer::geometry;
 
+pub mod area;
 pub mod bars;
 pub mod gauge;
 pub mod line;
@@ -70,6 +71,7 @@ where
     Message: 'a,
     Renderer: text::Renderer + geometry::Renderer,
 {
+    Area(area::Area<'a, Message, Renderer>),
     Line(Line<'a, Message, Renderer>),
     Bars(Bars<'a, Message, Renderer>),
     Pie(Pie<'a, Message, Renderer>),
@@ -109,6 +111,7 @@ where
         let series = marks
             .iter()
             .map(|mark| match mark {
+                crate::Mark::Area(a) => Series::Area(area::Area::new(a)),
                 crate::Mark::Line(line) => Series::Line(Line::new(line)),
                 crate::Mark::Bars(bars) => Series::Bars(Bars::new(bars)),
                 crate::Mark::Pie(pie) => Series::Pie(Pie::new(pie)),
@@ -129,6 +132,7 @@ where
             .series
             .iter()
             .map(|s| match s {
+                Series::Area(a) => a.state(),
                 Series::Line(line) => line.state(),
                 Series::Bars(bars) => bars.state(),
                 Series::Pie(pie) => pie.state(),
@@ -156,6 +160,7 @@ where
                 // node still holds the old state type.  Detect this via
                 // the tag and rebuild the node from scratch.
                 let expected_tag = match series {
+                    Series::Area(_) => tree::Tag::of::<area::State>(),
                     Series::Line(_) => tree::Tag::of::<line::State>(),
                     Series::Bars(_) => tree::Tag::of::<bars::State>(),
                     Series::Pie(_) => tree::Tag::of::<pie::State>(),
@@ -167,6 +172,7 @@ where
 
                 if tree.tag != expected_tag {
                     *tree = match series {
+                        Series::Area(a) => a.state(),
                         Series::Line(line) => line.state(),
                         Series::Bars(bars) => bars.state(),
                         Series::Pie(pie) => pie.state(),
@@ -177,6 +183,7 @@ where
                     };
                 } else {
                     match series {
+                        Series::Area(a) => a.diff(tree),
                         Series::Line(line) => line.diff(tree),
                         Series::Bars(bars) => bars.diff(tree),
                         Series::Pie(pie) => pie.diff(tree),
@@ -188,6 +195,7 @@ where
                 }
             },
             |series| match series {
+                Series::Area(a) => a.state(),
                 Series::Line(line) => line.state(),
                 Series::Bars(bars) => bars.state(),
                 Series::Pie(pie) => pie.state(),
@@ -201,6 +209,7 @@ where
 
     /// Compute data bounds from all series.
     fn compute_data_bounds(&self) -> (f64, f64, f64, f64) {
+        use crate::mark::area::Layout as AreaLayout;
         use crate::mark::bar::{Direction, Layout};
         use std::collections::HashMap;
 
@@ -211,9 +220,7 @@ where
 
         for series in &self.series {
             match series {
-                Series::Bars(bars)
-                    if bars.data.direction == Direction::Horizontal =>
-                {
+                Series::Bars(bars) if bars.data.direction == Direction::Horizontal => {
                     // For horizontal: x-values are categories (y-axis),
                     // y-values are magnitudes (x-axis)
                     if bars.data.layout == Layout::Stacked {
@@ -237,6 +244,32 @@ where
                                 y_max = y_max.max(point.x);
                                 x_min = x_min.min(point.y);
                                 x_max = x_max.max(point.y);
+                            }
+                        }
+                    }
+                }
+                Series::Area(a) => {
+                    if a.data.layout == AreaLayout::Stacked {
+                        let mut sums: HashMap<i64, f64> = HashMap::new();
+                        for s in &a.data.series {
+                            for point in &s.points {
+                                let x_key = (point.x * 1000.0).round() as i64;
+                                *sums.entry(x_key).or_insert(0.0) += point.y;
+                                x_min = x_min.min(point.x);
+                                x_max = x_max.max(point.x);
+                            }
+                        }
+                        for sum in sums.values() {
+                            y_min = y_min.min(*sum);
+                            y_max = y_max.max(*sum);
+                        }
+                    } else {
+                        for s in &a.data.series {
+                            for point in &s.points {
+                                x_min = x_min.min(point.x);
+                                x_max = x_max.max(point.x);
+                                y_min = y_min.min(point.y);
+                                y_max = y_max.max(point.y);
                             }
                         }
                     }
@@ -331,17 +364,14 @@ where
             y_max = 1.0;
         }
 
-        // For bar/waterfall charts, extend the value axis to include zero
+        // For bar/waterfall/area charts, extend the value axis to include zero
         for series in &self.series {
             match series {
-                Series::Bars(bars)
-                    if bars.data.direction
-                        == crate::mark::bar::Direction::Horizontal =>
-                {
+                Series::Bars(bars) if bars.data.direction == crate::mark::bar::Direction::Horizontal => {
                     x_min = x_min.min(0.0);
                     break;
                 }
-                Series::Bars(_) | Series::Waterfall(_) => {
+                Series::Area(_) | Series::Bars(_) | Series::Waterfall(_) => {
                     y_min = y_min.min(0.0);
                     break;
                 }
@@ -429,6 +459,9 @@ where
         for (i, series) in self.series.iter().enumerate() {
             let series_tree = &mut tree.children[i];
             match series {
+                Series::Area(a) => {
+                    a.layout(series_tree, renderer, limits, &plane);
+                }
                 Series::Line(line) => {
                     line.layout(series_tree, renderer, limits, &plane);
                 }
@@ -482,6 +515,20 @@ where
         for (i, series) in self.series.iter().enumerate() {
             let series_tree = &tree.children[i];
             match series {
+                Series::Area(a) => {
+                    a.draw(
+                        series_tree,
+                        renderer,
+                        design,
+                        style,
+                        layout,
+                        cursor,
+                        viewport,
+                        color_offset,
+                        palette,
+                    );
+                    color_offset += a.data.series.len();
+                }
                 Series::Line(line) => {
                     line.draw(
                         series_tree,
