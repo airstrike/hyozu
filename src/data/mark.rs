@@ -1,6 +1,7 @@
 pub mod area;
 pub mod bar;
 pub mod gauge;
+pub mod heatmap;
 pub mod line;
 pub mod pie;
 pub mod rule;
@@ -10,6 +11,7 @@ pub mod xy;
 pub use area::{Area, IntoAreas, area, areas};
 pub use bar::{Bars, IntoBars, bar, bars};
 pub use gauge::{Gauge, gauge};
+pub use heatmap::{Heatmap, heatmap};
 pub use line::{IntoLines, Line, line};
 pub use pie::{Pie, pie};
 pub use rule::{Rule, rule};
@@ -36,6 +38,7 @@ pub enum Mark {
     Waterfall(Waterfall),
     Xy(Xy),
     Rule(Rule),
+    Heatmap(Heatmap),
 }
 
 impl Mark {
@@ -95,8 +98,8 @@ impl Mark {
                     }]
                 })
                 .unwrap_or_default(),
-            // Rule, Gauge don't contribute to legend
-            Mark::Rule(_) | Mark::Gauge(_) | Mark::Waterfall(_) => Vec::new(),
+            // Rule, Gauge, Heatmap don't contribute to legend
+            Mark::Rule(_) | Mark::Gauge(_) | Mark::Waterfall(_) | Mark::Heatmap(_) => Vec::new(),
         }
     }
 }
@@ -146,5 +149,11 @@ impl From<Xy> for Mark {
 impl From<Rule> for Mark {
     fn from(rule: Rule) -> Self {
         Mark::Rule(rule)
+    }
+}
+
+impl From<Heatmap> for Mark {
+    fn from(heatmap: Heatmap) -> Self {
+        Mark::Heatmap(heatmap)
     }
 }

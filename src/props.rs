@@ -19,6 +19,7 @@ pub mod area;
 pub mod axis;
 pub mod bar;
 pub mod gauge;
+pub mod heatmap;
 pub mod line;
 pub mod pie;
 pub mod rule;

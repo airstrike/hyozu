@@ -9,6 +9,7 @@ use crate::widget::renderer::geometry;
 pub mod area;
 pub mod bars;
 pub mod gauge;
+pub mod heatmap;
 pub mod line;
 pub mod pie;
 pub mod rule;
@@ -17,6 +18,7 @@ pub mod xy;
 
 pub use bars::Bars;
 pub use gauge::Gauge;
+pub use heatmap::Heatmap;
 pub use line::Line;
 pub use pie::Pie;
 pub use rule::Rule;
@@ -79,6 +81,7 @@ where
     Waterfall(Waterfall<'a, Message, Renderer>),
     Xy(Xy<'a, Message, Renderer>),
     Rule(Rule<'a, Message, Renderer>),
+    Heatmap(Heatmap<'a, Message, Renderer>),
 }
 
 /// State for a PlotArea - stores the coordinate plane for rendering
@@ -119,6 +122,7 @@ where
                 crate::Mark::Waterfall(wf) => Series::Waterfall(Waterfall::new(wf)),
                 crate::Mark::Xy(xy) => Series::Xy(Xy::new(xy)),
                 crate::Mark::Rule(rule) => Series::Rule(Rule::new(rule)),
+                crate::Mark::Heatmap(hm) => Series::Heatmap(Heatmap::new(hm)),
             })
             .collect();
 
@@ -140,6 +144,7 @@ where
                 Series::Waterfall(wf) => wf.state(),
                 Series::Xy(xy) => xy.state(),
                 Series::Rule(rule) => rule.state(),
+                Series::Heatmap(hm) => hm.state(),
             })
             .collect();
 
@@ -168,6 +173,7 @@ where
                     Series::Waterfall(_) => tree::Tag::of::<waterfall::State>(),
                     Series::Xy(_) => tree::Tag::of::<xy::State>(),
                     Series::Rule(_) => tree::Tag::of::<rule::State>(),
+                    Series::Heatmap(_) => tree::Tag::of::<heatmap::State>(),
                 };
 
                 if tree.tag != expected_tag {
@@ -180,6 +186,7 @@ where
                         Series::Waterfall(wf) => wf.state(),
                         Series::Xy(xy) => xy.state(),
                         Series::Rule(rule) => rule.state(),
+                        Series::Heatmap(hm) => hm.state(),
                     };
                 } else {
                     match series {
@@ -191,6 +198,7 @@ where
                         Series::Waterfall(wf) => wf.diff(tree),
                         Series::Xy(xy) => xy.diff(tree),
                         Series::Rule(rule) => rule.diff(tree),
+                        Series::Heatmap(hm) => hm.diff(tree),
                     }
                 }
             },
@@ -203,6 +211,7 @@ where
                 Series::Waterfall(wf) => wf.state(),
                 Series::Xy(xy) => xy.state(),
                 Series::Rule(rule) => rule.state(),
+                Series::Heatmap(hm) => hm.state(),
             },
         );
     }
@@ -349,6 +358,12 @@ where
                         x_max = x_max.max(rule.data.value());
                     }
                 },
+                Series::Heatmap(hm) => {
+                    x_min = x_min.min(0.0);
+                    x_max = x_max.max((hm.data.cols() as f64 - 1.0).max(0.0));
+                    y_min = y_min.min(0.0);
+                    y_max = y_max.max((hm.data.rows() as f64 - 1.0).max(0.0));
+                }
                 // Pie and Gauge don't use Cartesian bounds
                 Series::Pie(_) | Series::Gauge(_) => {}
             }
@@ -483,6 +498,9 @@ where
                 Series::Rule(rule) => {
                     rule.layout(series_tree, renderer, limits, &plane);
                 }
+                Series::Heatmap(hm) => {
+                    hm.layout(series_tree, renderer, limits, &plane);
+                }
             }
         }
 
@@ -610,6 +628,20 @@ where
                 Series::Rule(rule) => {
                     rule.draw(series_tree, renderer, design, style, layout, cursor, viewport);
                     // Rules don't consume color slots
+                }
+                Series::Heatmap(hm) => {
+                    hm.draw(
+                        series_tree,
+                        renderer,
+                        design,
+                        style,
+                        layout,
+                        cursor,
+                        viewport,
+                        color_offset,
+                        palette,
+                    );
+                    // Heatmap uses gradient sampling, not discrete slots
                 }
             }
         }
