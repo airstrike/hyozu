@@ -453,6 +453,11 @@ where
                             values.insert(OrderedFloat(i as f64));
                         }
                     }
+                    crate::Mark::Violin(v) => {
+                        for (i, _) in v.entries.iter().enumerate() {
+                            values.insert(OrderedFloat(i as f64));
+                        }
+                    }
                     crate::Mark::Rule(_) | crate::Mark::Pie(_) | crate::Mark::Gauge(_) => {}
                 }
             }
@@ -708,6 +713,38 @@ where
                             }
                         } else {
                             for (i, _) in bp.entries.iter().enumerate() {
+                                min = min.min(i as f64);
+                                max = max.max(i as f64);
+                            }
+                        }
+                    }
+                },
+                crate::Mark::Violin(v) => match v.direction {
+                    crate::mark::violin::Direction::Vertical => {
+                        if is_x_axis {
+                            for (i, _) in v.entries.iter().enumerate() {
+                                min = min.min(i as f64);
+                                max = max.max(i as f64);
+                            }
+                        } else {
+                            for e in &v.entries {
+                                for &(val, _) in &e.density {
+                                    min = min.min(val);
+                                    max = max.max(val);
+                                }
+                            }
+                        }
+                    }
+                    crate::mark::violin::Direction::Horizontal => {
+                        if is_x_axis {
+                            for e in &v.entries {
+                                for &(val, _) in &e.density {
+                                    min = min.min(val);
+                                    max = max.max(val);
+                                }
+                            }
+                        } else {
+                            for (i, _) in v.entries.iter().enumerate() {
                                 min = min.min(i as f64);
                                 max = max.max(i as f64);
                             }

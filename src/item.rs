@@ -42,6 +42,8 @@ pub enum Item {
     Rule(usize, props::rule::Property),
     /// A heatmap chart at the given index with a property change
     Heatmap(usize, props::heatmap::Property),
+    /// A violin chart at the given index with a property change
+    Violin(usize, props::violin::Property),
     /// The X axis
     XAxis(props::axis::Property),
     /// The Y axis
@@ -124,6 +126,12 @@ pub fn Rule(index: usize, property: props::rule::Property) -> Item {
 #[allow(non_snake_case)]
 pub fn Heatmap(index: usize, property: props::heatmap::Property) -> Item {
     Item::Heatmap(index, property)
+}
+
+/// Creates a violin item for a given mark index and property.
+#[allow(non_snake_case)]
+pub fn Violin(index: usize, property: props::violin::Property) -> Item {
+    Item::Violin(index, property)
 }
 
 /// Wraps an x-axis property into an item.

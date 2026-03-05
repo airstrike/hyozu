@@ -14,6 +14,7 @@ pub mod heatmap;
 pub mod line;
 pub mod pie;
 pub mod rule;
+pub mod violin;
 pub mod waterfall;
 pub mod xy;
 
@@ -24,6 +25,7 @@ pub use heatmap::Heatmap;
 pub use line::Line;
 pub use pie::Pie;
 pub use rule::Rule;
+pub use violin::Violin;
 pub use waterfall::Waterfall;
 pub use xy::Xy;
 
@@ -85,6 +87,7 @@ where
     Xy(Xy<'a, Message, Renderer>),
     Rule(Rule<'a, Message, Renderer>),
     Heatmap(Heatmap<'a, Message, Renderer>),
+    Violin(Violin<'a, Message, Renderer>),
 }
 
 /// State for a PlotArea - stores the coordinate plane for rendering
@@ -127,6 +130,7 @@ where
                 crate::Mark::Xy(xy) => Series::Xy(Xy::new(xy)),
                 crate::Mark::Rule(rule) => Series::Rule(Rule::new(rule)),
                 crate::Mark::Heatmap(hm) => Series::Heatmap(Heatmap::new(hm)),
+                crate::Mark::Violin(v) => Series::Violin(Violin::new(v)),
             })
             .collect();
 
@@ -150,6 +154,7 @@ where
                 Series::Xy(xy) => xy.state(),
                 Series::Rule(rule) => rule.state(),
                 Series::Heatmap(hm) => hm.state(),
+                Series::Violin(v) => v.state(),
             })
             .collect();
 
@@ -180,6 +185,7 @@ where
                     Series::Xy(_) => tree::Tag::of::<xy::State>(),
                     Series::Rule(_) => tree::Tag::of::<rule::State>(),
                     Series::Heatmap(_) => tree::Tag::of::<heatmap::State>(),
+                    Series::Violin(_) => tree::Tag::of::<violin::State>(),
                 };
 
                 if tree.tag != expected_tag {
@@ -194,6 +200,7 @@ where
                         Series::Xy(xy) => xy.state(),
                         Series::Rule(rule) => rule.state(),
                         Series::Heatmap(hm) => hm.state(),
+                        Series::Violin(v) => v.state(),
                     };
                 } else {
                     match series {
@@ -207,6 +214,7 @@ where
                         Series::Xy(xy) => xy.diff(tree),
                         Series::Rule(rule) => rule.diff(tree),
                         Series::Heatmap(hm) => hm.diff(tree),
+                        Series::Violin(v) => v.diff(tree),
                     }
                 }
             },
@@ -221,6 +229,7 @@ where
                 Series::Xy(xy) => xy.state(),
                 Series::Rule(rule) => rule.state(),
                 Series::Heatmap(hm) => hm.state(),
+                Series::Violin(v) => v.state(),
             },
         );
     }
@@ -399,6 +408,28 @@ where
                     y_min = y_min.min(0.0);
                     y_max = y_max.max((hm.data.rows() as f64 - 1.0).max(0.0));
                 }
+                Series::Violin(v) => match v.data.direction {
+                    crate::mark::violin::Direction::Vertical => {
+                        for (i, e) in v.data.entries.iter().enumerate() {
+                            x_min = x_min.min(i as f64);
+                            x_max = x_max.max(i as f64);
+                            for &(val, _) in &e.density {
+                                y_min = y_min.min(val);
+                                y_max = y_max.max(val);
+                            }
+                        }
+                    }
+                    crate::mark::violin::Direction::Horizontal => {
+                        for (i, e) in v.data.entries.iter().enumerate() {
+                            y_min = y_min.min(i as f64);
+                            y_max = y_max.max(i as f64);
+                            for &(val, _) in &e.density {
+                                x_min = x_min.min(val);
+                                x_max = x_max.max(val);
+                            }
+                        }
+                    }
+                },
                 // Pie and Gauge don't use Cartesian bounds
                 Series::Pie(_) | Series::Gauge(_) => {}
             }
@@ -538,6 +569,9 @@ where
                 }
                 Series::Heatmap(hm) => {
                     hm.layout(series_tree, renderer, limits, &plane);
+                }
+                Series::Violin(v) => {
+                    v.layout(series_tree, renderer, limits, &plane);
                 }
             }
         }
@@ -694,6 +728,20 @@ where
                         palette,
                     );
                     // Heatmap uses gradient sampling, not discrete slots
+                }
+                Series::Violin(v) => {
+                    v.draw(
+                        series_tree,
+                        renderer,
+                        design,
+                        style,
+                        layout,
+                        cursor,
+                        viewport,
+                        color_offset,
+                        palette,
+                    );
+                    color_offset += v.data.entries.len();
                 }
             }
         }

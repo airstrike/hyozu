@@ -6,6 +6,7 @@ pub mod heatmap;
 pub mod line;
 pub mod pie;
 pub mod rule;
+pub mod violin;
 pub mod waterfall;
 pub mod xy;
 
@@ -17,6 +18,7 @@ pub use heatmap::{Heatmap, heatmap};
 pub use line::{IntoLines, Line, line};
 pub use pie::{Pie, pie};
 pub use rule::{Rule, rule};
+pub use violin::{Violin, violin, violin_entry, violin_from_data};
 pub use waterfall::{Waterfall, waterfall};
 pub use xy::{Xy, xy};
 
@@ -42,6 +44,7 @@ pub enum Mark {
     Xy(Xy),
     Rule(Rule),
     Heatmap(Heatmap),
+    Violin(Violin),
 }
 
 impl Mark {
@@ -102,6 +105,16 @@ impl Mark {
                 })
                 .unwrap_or_default(),
             Mark::BoxPlot(bp) => bp
+                .entries
+                .iter()
+                .filter_map(|e| {
+                    e.name.as_ref().map(|name| LegendEntry {
+                        name: name.clone(),
+                        color: e.color,
+                    })
+                })
+                .collect(),
+            Mark::Violin(v) => v
                 .entries
                 .iter()
                 .filter_map(|e| {
@@ -174,5 +187,11 @@ impl From<Rule> for Mark {
 impl From<Heatmap> for Mark {
     fn from(heatmap: Heatmap) -> Self {
         Mark::Heatmap(heatmap)
+    }
+}
+
+impl From<Violin> for Mark {
+    fn from(violin: Violin) -> Self {
+        Mark::Violin(violin)
     }
 }
