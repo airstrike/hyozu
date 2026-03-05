@@ -36,6 +36,8 @@ pub enum Item {
     Xy(usize, props::xy::Property),
     /// A rule mark at the given index with a property change
     Rule(usize, props::rule::Property),
+    /// A violin chart at the given index with a property change
+    Violin(usize, props::violin::Property),
     /// The X axis
     XAxis(props::axis::Property),
     /// The Y axis
@@ -100,6 +102,12 @@ pub fn Xy(index: usize, property: props::xy::Property) -> Item {
 #[allow(non_snake_case)]
 pub fn Rule(index: usize, property: props::rule::Property) -> Item {
     Item::Rule(index, property)
+}
+
+/// Creates a violin item for a given mark index and property.
+#[allow(non_snake_case)]
+pub fn Violin(index: usize, property: props::violin::Property) -> Item {
+    Item::Violin(index, property)
 }
 
 /// Wraps an x-axis property into an item.

@@ -7,8 +7,9 @@ pub use area::Area;
 pub use axis::{Axis, Orientation};
 pub use datum::{Datum, IntoDatums};
 pub use mark::{
-    Bars, Gauge, LegendEntry, Line, Mark, Pie, Rule, Waterfall, Xy, bar, bars,
-    gauge, line, pie, rule, waterfall, xy,
+    Bars, Gauge, LegendEntry, Line, Mark, Pie, Rule, Violin, Waterfall, Xy,
+    bar, bars, gauge, line, pie, rule, violin, violin_entry, violin_from_data,
+    waterfall, xy,
 };
 
 /// Trait for types that can be converted into chart Data.
@@ -57,6 +58,7 @@ fn axes_for_mark(mark: &Mark) -> (Option<Axis>, Option<Axis>) {
             (Some(Waterfall::x_axis()), Some(Waterfall::y_axis()))
         }
         Mark::Xy(_) => (Some(Xy::x_axis()), Some(Xy::y_axis())),
+        Mark::Violin(v) => (Some(v.x_axis()), Some(v.y_axis())),
         Mark::Rule(_) => (Rule::x_axis(), Rule::y_axis()),
     }
 }
@@ -138,6 +140,12 @@ impl IntoData for Waterfall {
 }
 
 impl IntoData for Xy {
+    fn into_data(self) -> Data {
+        Mark::from(self).into_data()
+    }
+}
+
+impl IntoData for Violin {
     fn into_data(self) -> Data {
         Mark::from(self).into_data()
     }
@@ -449,6 +457,13 @@ impl Data {
                         self.primary.marks.get_mut(index)
                     {
                         property.apply(rule);
+                    }
+                }
+                Item::Violin(index, property) => {
+                    if let Some(Mark::Violin(violin)) =
+                        self.primary.marks.get_mut(index)
+                    {
+                        property.apply(violin);
                     }
                 }
                 Item::XAxis(property) => {

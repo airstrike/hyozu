@@ -21,5 +21,6 @@ pub mod gauge;
 pub mod line;
 pub mod pie;
 pub mod rule;
+pub mod violin;
 pub mod waterfall;
 pub mod xy;

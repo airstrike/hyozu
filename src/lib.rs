@@ -29,8 +29,9 @@ pub use data::data;
 
 pub use data::axis::{self, Axis, Orientation};
 pub use data::mark::{
-    self, Bars, Gauge, LegendEntry, Line, Mark, Pie, Rule, Waterfall, Xy, bar,
-    bars, gauge, line, pie, rule, waterfall, xy,
+    self, Bars, Gauge, LegendEntry, Line, Mark, Pie, Rule, Violin, Waterfall,
+    Xy, bar, bars, gauge, line, pie, rule, violin, violin_entry,
+    violin_from_data, waterfall, xy,
 };
 
 pub use map::Map;

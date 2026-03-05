@@ -81,6 +81,13 @@ impl Palette {
                     }
                 }
                 Mark::Line(_) | Mark::Xy(_) => Palette::Sequential,
+                Mark::Violin(v) => {
+                    if v.entries.len() >= 3 {
+                        Palette::Categorical
+                    } else {
+                        Palette::Sequential
+                    }
+                }
                 Mark::Rule(_) => Palette::Sequential,
             };
         }
@@ -101,6 +108,7 @@ pub fn count_color_slots(marks: &[Mark]) -> usize {
             Mark::Pie(pie) => pie.slices.len(),
             Mark::Gauge(_) => 1,
             Mark::Waterfall(_) => 3,
+            Mark::Violin(v) => v.entries.len(),
             Mark::Rule(_) => 0,
         })
         .sum::<usize>()

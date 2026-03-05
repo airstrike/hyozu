@@ -3,6 +3,7 @@ pub mod gauge;
 pub mod line;
 pub mod pie;
 pub mod rule;
+pub mod violin;
 pub mod waterfall;
 pub mod xy;
 
@@ -11,6 +12,7 @@ pub use gauge::{Gauge, gauge};
 pub use line::{IntoLines, Line, line};
 pub use pie::{Pie, pie};
 pub use rule::{Rule, rule};
+pub use violin::{Violin, violin, violin_entry, violin_from_data};
 pub use waterfall::{Waterfall, waterfall};
 pub use xy::{Xy, xy};
 
@@ -33,6 +35,7 @@ pub enum Mark {
     Waterfall(Waterfall),
     Xy(Xy),
     Rule(Rule),
+    Violin(Violin),
 }
 
 impl Mark {
@@ -82,6 +85,16 @@ impl Mark {
                     }]
                 })
                 .unwrap_or_default(),
+            Mark::Violin(v) => v
+                .entries
+                .iter()
+                .filter_map(|e| {
+                    e.name.as_ref().map(|name| LegendEntry {
+                        name: name.clone(),
+                        color: e.color,
+                    })
+                })
+                .collect(),
             // Rule, Gauge don't contribute to legend
             Mark::Rule(_) | Mark::Gauge(_) | Mark::Waterfall(_) => Vec::new(),
         }
@@ -127,5 +140,11 @@ impl From<Xy> for Mark {
 impl From<Rule> for Mark {
     fn from(rule: Rule) -> Self {
         Mark::Rule(rule)
+    }
+}
+
+impl From<Violin> for Mark {
+    fn from(violin: Violin) -> Self {
+        Mark::Violin(violin)
     }
 }

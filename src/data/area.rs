@@ -220,6 +220,28 @@ impl Area {
                         x_max = x_max.max(rule.value);
                     }
                 },
+                Mark::Violin(v) => match v.direction {
+                    crate::mark::violin::Direction::Vertical => {
+                        for (i, e) in v.entries.iter().enumerate() {
+                            x_min = x_min.min(i as f64);
+                            x_max = x_max.max(i as f64);
+                            for &(val, _) in &e.density {
+                                y_min = y_min.min(val);
+                                y_max = y_max.max(val);
+                            }
+                        }
+                    }
+                    crate::mark::violin::Direction::Horizontal => {
+                        for (i, e) in v.entries.iter().enumerate() {
+                            y_min = y_min.min(i as f64);
+                            y_max = y_max.max(i as f64);
+                            for &(val, _) in &e.density {
+                                x_min = x_min.min(val);
+                                x_max = x_max.max(val);
+                            }
+                        }
+                    }
+                },
                 // Pie and Gauge don't use Cartesian bounds
                 Mark::Pie(_) | Mark::Gauge(_) => {}
             }
