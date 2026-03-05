@@ -80,6 +80,13 @@ impl Palette {
                         Palette::Sequential
                     }
                 }
+                Mark::BoxPlot(bp) => {
+                    if bp.entries.len() >= 3 {
+                        Palette::Categorical
+                    } else {
+                        Palette::Sequential
+                    }
+                }
                 Mark::Line(_) | Mark::Xy(_) => Palette::Sequential,
                 Mark::Rule(_) => Palette::Sequential,
             };
@@ -96,6 +103,7 @@ pub fn count_color_slots(marks: &[Mark]) -> usize {
         .iter()
         .map(|mark| match mark {
             Mark::Bars(bars) => bars.series.len(),
+            Mark::BoxPlot(bp) => bp.entries.len(),
             Mark::Line(_) => 1,
             Mark::Xy(_) => 1,
             Mark::Pie(pie) => pie.slices.len(),

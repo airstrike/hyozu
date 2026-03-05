@@ -474,6 +474,11 @@ where
                             values.insert(OrderedFloat(point.x));
                         }
                     }
+                    crate::Mark::BoxPlot(bp) => {
+                        for (i, _) in bp.entries.iter().enumerate() {
+                            values.insert(OrderedFloat(i as f64));
+                        }
+                    }
                     crate::Mark::Rule(_)
                     | crate::Mark::Pie(_)
                     | crate::Mark::Gauge(_) => {}
@@ -685,6 +690,42 @@ where
                         max = max.max(rule.value);
                     }
                     _ => {}
+                },
+                crate::Mark::BoxPlot(bp) => match bp.direction {
+                    crate::mark::boxplot::Direction::Vertical => {
+                        if is_x_axis {
+                            for (i, _) in bp.entries.iter().enumerate() {
+                                min = min.min(i as f64);
+                                max = max.max(i as f64);
+                            }
+                        } else {
+                            for e in &bp.entries {
+                                min = min.min(e.min);
+                                max = max.max(e.max);
+                                for &o in &e.outliers {
+                                    min = min.min(o);
+                                    max = max.max(o);
+                                }
+                            }
+                        }
+                    }
+                    crate::mark::boxplot::Direction::Horizontal => {
+                        if is_x_axis {
+                            for e in &bp.entries {
+                                min = min.min(e.min);
+                                max = max.max(e.max);
+                                for &o in &e.outliers {
+                                    min = min.min(o);
+                                    max = max.max(o);
+                                }
+                            }
+                        } else {
+                            for (i, _) in bp.entries.iter().enumerate() {
+                                min = min.min(i as f64);
+                                max = max.max(i as f64);
+                            }
+                        }
+                    }
                 },
                 crate::Mark::Pie(_) | crate::Mark::Gauge(_) => {}
             }

@@ -7,8 +7,9 @@ pub use area::Area;
 pub use axis::{Axis, Orientation};
 pub use datum::{Datum, IntoDatums};
 pub use mark::{
-    Bars, Gauge, LegendEntry, Line, Mark, Pie, Rule, Waterfall, Xy, bar, bars,
-    gauge, line, pie, rule, waterfall, xy,
+    Bars, BoxPlot, Gauge, LegendEntry, Line, Mark, Pie, Rule, Waterfall, Xy,
+    bar, bars, boxplot, entry, entry_from_data, gauge, line, pie, rule,
+    waterfall, xy,
 };
 
 /// Trait for types that can be converted into chart Data.
@@ -50,6 +51,7 @@ pub struct Data {
 fn axes_for_mark(mark: &Mark) -> (Option<Axis>, Option<Axis>) {
     match mark {
         Mark::Bars(_) => (Some(Bars::x_axis()), Some(Bars::y_axis())),
+        Mark::BoxPlot(bp) => (Some(bp.x_axis()), Some(bp.y_axis())),
         Mark::Line(_) => (Some(Line::x_axis()), Some(Line::y_axis())),
         Mark::Pie(_) => (Pie::x_axis(), Pie::y_axis()),
         Mark::Gauge(_) => (Gauge::x_axis(), Gauge::y_axis()),
@@ -108,6 +110,12 @@ impl IntoData for Mark {
 }
 
 impl IntoData for Bars {
+    fn into_data(self) -> Data {
+        Mark::from(self).into_data()
+    }
+}
+
+impl IntoData for BoxPlot {
     fn into_data(self) -> Data {
         Mark::from(self).into_data()
     }
@@ -407,6 +415,13 @@ impl Data {
                         self.primary.marks.get_mut(index)
                     {
                         property.apply(bars);
+                    }
+                }
+                Item::BoxPlot(index, property) => {
+                    if let Some(Mark::BoxPlot(bp)) =
+                        self.primary.marks.get_mut(index)
+                    {
+                        property.apply(bp);
                     }
                 }
                 Item::Line(index, property) => {

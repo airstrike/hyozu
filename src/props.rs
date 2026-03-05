@@ -17,6 +17,7 @@
 
 pub mod axis;
 pub mod bar;
+pub mod boxplot;
 pub mod gauge;
 pub mod line;
 pub mod pie;

@@ -1,4 +1,5 @@
 pub mod bar;
+pub mod boxplot;
 pub mod gauge;
 pub mod line;
 pub mod pie;
@@ -7,6 +8,7 @@ pub mod waterfall;
 pub mod xy;
 
 pub use bar::{Bars, IntoBars, bar, bars};
+pub use boxplot::{BoxPlot, boxplot, entry, entry_from_data};
 pub use gauge::{Gauge, gauge};
 pub use line::{IntoLines, Line, line};
 pub use pie::{Pie, pie};
@@ -27,6 +29,7 @@ pub struct LegendEntry {
 #[derive(Debug, Clone)]
 pub enum Mark {
     Bars(Bars),
+    BoxPlot(BoxPlot),
     Line(Line),
     Pie(Pie),
     Gauge(Gauge),
@@ -82,6 +85,16 @@ impl Mark {
                     }]
                 })
                 .unwrap_or_default(),
+            Mark::BoxPlot(bp) => bp
+                .entries
+                .iter()
+                .filter_map(|e| {
+                    e.name.as_ref().map(|name| LegendEntry {
+                        name: name.clone(),
+                        color: e.color,
+                    })
+                })
+                .collect(),
             // Rule, Gauge don't contribute to legend
             Mark::Rule(_) | Mark::Gauge(_) | Mark::Waterfall(_) => Vec::new(),
         }
@@ -91,6 +104,12 @@ impl Mark {
 impl From<Bars> for Mark {
     fn from(bars: Bars) -> Self {
         Mark::Bars(bars)
+    }
+}
+
+impl From<BoxPlot> for Mark {
+    fn from(bp: BoxPlot) -> Self {
+        Mark::BoxPlot(bp)
     }
 }
 
