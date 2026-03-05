@@ -48,7 +48,10 @@ pub struct Data {
 /// Returns the default axis pair for a given mark type.
 fn axes_for_mark(mark: &Mark) -> (Option<Axis>, Option<Axis>) {
     match mark {
-        Mark::Bars(_) => (Some(Bars::x_axis()), Some(Bars::y_axis())),
+        Mark::Bars(bars) => {
+            let (x, y) = Bars::axes(bars.direction());
+            (Some(x), Some(y))
+        }
         Mark::Line(_) => (Some(Line::x_axis()), Some(Line::y_axis())),
         Mark::Pie(_) => (Pie::x_axis(), Pie::y_axis()),
         Mark::Gauge(_) => (Gauge::x_axis(), Gauge::y_axis()),

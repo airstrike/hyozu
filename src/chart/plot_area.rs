@@ -201,7 +201,7 @@ where
 
     /// Compute data bounds from all series.
     fn compute_data_bounds(&self) -> (f64, f64, f64, f64) {
-        use crate::mark::bar::Layout;
+        use crate::mark::bar::{Direction, Layout};
         use std::collections::HashMap;
 
         let mut x_min = f64::INFINITY;
@@ -211,7 +211,38 @@ where
 
         for series in &self.series {
             match series {
+                Series::Bars(bars)
+                    if bars.data.direction == Direction::Horizontal =>
+                {
+                    // For horizontal: x-values are categories (y-axis),
+                    // y-values are magnitudes (x-axis)
+                    if bars.data.layout == Layout::Stacked {
+                        let mut sums: HashMap<i64, f64> = HashMap::new();
+                        for bar_series in &bars.data.series {
+                            for point in &bar_series.points {
+                                let y_key = (point.x * 1000.0).round() as i64;
+                                *sums.entry(y_key).or_insert(0.0) += point.y;
+                                y_min = y_min.min(point.x);
+                                y_max = y_max.max(point.x);
+                            }
+                        }
+                        for sum in sums.values() {
+                            x_min = x_min.min(*sum);
+                            x_max = x_max.max(*sum);
+                        }
+                    } else {
+                        for bar_series in &bars.data.series {
+                            for point in &bar_series.points {
+                                y_min = y_min.min(point.x);
+                                y_max = y_max.max(point.x);
+                                x_min = x_min.min(point.y);
+                                x_max = x_max.max(point.y);
+                            }
+                        }
+                    }
+                }
                 Series::Bars(bars) => {
+                    // Vertical bars (default)
                     // For stacked layout, compute cumulative sums
                     if bars.data.layout == Layout::Stacked {
                         let mut sums: HashMap<i64, f64> = HashMap::new();
@@ -300,11 +331,21 @@ where
             y_max = 1.0;
         }
 
-        // For bar/waterfall charts, extend y to include zero
+        // For bar/waterfall charts, extend the value axis to include zero
         for series in &self.series {
-            if matches!(series, Series::Bars(_) | Series::Waterfall(_)) {
-                y_min = y_min.min(0.0);
-                break;
+            match series {
+                Series::Bars(bars)
+                    if bars.data.direction
+                        == crate::mark::bar::Direction::Horizontal =>
+                {
+                    x_min = x_min.min(0.0);
+                    break;
+                }
+                Series::Bars(_) | Series::Waterfall(_) => {
+                    y_min = y_min.min(0.0);
+                    break;
+                }
+                _ => {}
             }
         }
 
