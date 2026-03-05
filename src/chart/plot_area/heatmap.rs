@@ -6,6 +6,33 @@ use crate::data::Datum;
 use crate::widget::canvas::{Frame, Path, Text as CanvasText};
 use crate::widget::renderer::geometry;
 
+/// Interpolate between color stops in linear RGB at parameter `t` in 0..1.
+fn interpolate_stops(stops: &[crate::core::Color], t: f32) -> crate::core::Color {
+    if stops.is_empty() {
+        return crate::core::Color::BLACK;
+    }
+    if stops.len() == 1 || t <= 0.0 {
+        return stops[0];
+    }
+    if t >= 1.0 {
+        return stops[stops.len() - 1];
+    }
+
+    let segment_t = t * (stops.len() - 1) as f32;
+    let seg_idx = (segment_t.floor() as usize).min(stops.len() - 2);
+    let local_t = segment_t - seg_idx as f32;
+
+    let a = stops[seg_idx].into_linear();
+    let b = stops[seg_idx + 1].into_linear();
+
+    crate::core::Color::from_linear_rgba(
+        a[0] + (b[0] - a[0]) * local_t,
+        a[1] + (b[1] - a[1]) * local_t,
+        a[2] + (b[2] - a[2]) * local_t,
+        a[3] + (b[3] - a[3]) * local_t,
+    )
+}
+
 /// State for Heatmap - stores positioned cell rectangles.
 pub struct State {
     pub cell_rects: Vec<Rectangle>,
@@ -90,8 +117,8 @@ where
         layout: crate::core::Layout<'_>,
         _cursor: crate::core::mouse::Cursor,
         _viewport: &crate::core::Rectangle,
-        color_offset: usize,
-        palette: &crate::palette::Resolved,
+        _color_offset: usize,
+        _palette: &crate::palette::Resolved,
     ) where
         Theme: crate::design::Design + ?Sized,
     {
@@ -107,8 +134,6 @@ where
         let mut cell_frame = Frame::new(renderer, layout_bounds.size());
         let mut label_frame = Frame::new(renderer, layout_bounds.size());
 
-        let palette_len = palette.len();
-
         for row in 0..rows {
             for col in 0..cols {
                 let idx = row * cols + col;
@@ -117,16 +142,13 @@ where
 
                 // Normalize to 0..1
                 let t = if v_max > v_min {
-                    ((value - v_min) / (v_max - v_min)).clamp(0.0, 1.0)
+                    ((value - v_min) / (v_max - v_min)).clamp(0.0, 1.0) as f32
                 } else {
-                    0.5
+                    0.5_f32
                 };
 
-                // Sample color from palette gradient
-                let color_idx = ((t * (palette_len as f64 - 1.0)).round() as usize).min(palette_len - 1);
-                let cell_color = palette
-                    .get(color_offset + color_idx)
-                    .resolve(background, text_pair, None);
+                // Interpolate color from the heatmap's own color stops
+                let cell_color = interpolate_stops(&self.data.color_stops, t);
 
                 let path = Path::new(|builder| {
                     builder.rectangle(Point::new(rect.x, rect.y), Size::new(rect.width, rect.height));

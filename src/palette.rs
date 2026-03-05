@@ -123,7 +123,7 @@ pub fn count_color_slots(marks: &[Mark]) -> usize {
             Mark::Pie(pie) => pie.slices.len(),
             Mark::Gauge(_) => 1,
             Mark::Waterfall(_) => 3,
-            Mark::Heatmap(hm) => (hm.rows() * hm.cols()).clamp(16, 256),
+            Mark::Heatmap(_) => 0, // heatmap uses its own color_stops
             Mark::Violin(v) => v.entries.len(),
             Mark::Rule(_) => 0,
         })

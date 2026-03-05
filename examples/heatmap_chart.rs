@@ -30,7 +30,8 @@ impl App {
                     .col_names(["A", "B", "C", "D"])
                     .show_labels(true)
                     .label_format(|v| format!("{v:.1}"))
-                    .value_range(-1.0, 1.0),
+                    .value_range(-1.0, 1.0)
+                    .divergent(),
             )
             .title("Correlation Matrix"),
         }

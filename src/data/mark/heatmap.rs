@@ -15,6 +15,8 @@ pub struct Heatmap {
     pub(crate) show_labels: bool,
     pub(crate) label_format: Arc<dyn Fn(f64) -> String + Send + Sync>,
     pub(crate) value_range: Option<(f64, f64)>,
+    /// Gradient stops for color mapping. If empty, auto-selected based on data.
+    pub(crate) color_stops: Vec<crate::core::Color>,
 }
 
 impl std::fmt::Debug for Heatmap {
@@ -28,11 +30,50 @@ impl std::fmt::Debug for Heatmap {
             .field("show_labels", &self.show_labels)
             .field("label_format", &"<function>")
             .field("value_range", &self.value_range)
+            .field("color_stops", &self.color_stops)
             .finish()
     }
 }
 
+// === Built-in color scales ===
+
+use crate::core::Color as IcedColor;
+
+/// Blue → near-white → red. Good for correlation matrices and data centered on zero.
+pub fn divergent_stops() -> Vec<IcedColor> {
+    vec![
+        IcedColor::from_rgb8(0x33, 0x66, 0xAA), // steel blue
+        IcedColor::from_rgb8(0x88, 0xBB, 0xDD), // light blue
+        IcedColor::from_rgb8(0xEE, 0xEE, 0xEE), // near-white
+        IcedColor::from_rgb8(0xDD, 0x88, 0x66), // salmon
+        IcedColor::from_rgb8(0xBB, 0x33, 0x33), // brick red
+    ]
+}
+
+/// Light → dark single hue. Good for magnitudes and counts.
+pub fn sequential_stops() -> Vec<IcedColor> {
+    vec![
+        IcedColor::from_rgb8(0xEE, 0xF0, 0xF8), // very light blue-gray
+        IcedColor::from_rgb8(0x9E, 0xBC, 0xDB), // mid blue
+        IcedColor::from_rgb8(0x33, 0x66, 0xAA), // steel blue
+        IcedColor::from_rgb8(0x18, 0x3D, 0x7A), // dark blue
+    ]
+}
+
+/// Warm sequential: cream → amber → deep brown.
+pub fn warm_stops() -> Vec<IcedColor> {
+    vec![
+        IcedColor::from_rgb8(0xFD, 0xF0, 0xD5), // cream
+        IcedColor::from_rgb8(0xF4, 0xBB, 0x6A), // amber
+        IcedColor::from_rgb8(0xD4, 0x6B, 0x22), // burnt orange
+        IcedColor::from_rgb8(0x7C, 0x2D, 0x12), // deep brown
+    ]
+}
+
 /// Creates a heatmap from row-major values with given dimensions.
+///
+/// Defaults to a sequential (blue) color scale. Use `.divergent()` for data
+/// centered on zero, or `.color_stops(stops)` for a custom gradient.
 pub fn heatmap(values: impl Into<Vec<f64>>, rows: usize, cols: usize) -> Heatmap {
     Heatmap {
         values: values.into(),
@@ -43,6 +84,7 @@ pub fn heatmap(values: impl Into<Vec<f64>>, rows: usize, cols: usize) -> Heatmap
         show_labels: false,
         label_format: Arc::new(|v| format!("{v:.1}")),
         value_range: None,
+        color_stops: sequential_stops(),
     }
 }
 
@@ -92,6 +134,38 @@ impl Heatmap {
     pub fn value_range(mut self, min: f64, max: f64) -> Self {
         self.value_range = Some((min, max));
         self
+    }
+
+    /// Use a divergent color scale (blue → white → red).
+    /// Best for data centered on zero like correlation matrices.
+    pub fn divergent(mut self) -> Self {
+        self.color_stops = divergent_stops();
+        self
+    }
+
+    /// Use a sequential color scale (light → dark blue).
+    /// Best for magnitudes, counts, and non-negative data. This is the default.
+    pub fn sequential(mut self) -> Self {
+        self.color_stops = sequential_stops();
+        self
+    }
+
+    /// Use a warm sequential color scale (cream → amber → brown).
+    pub fn warm(mut self) -> Self {
+        self.color_stops = warm_stops();
+        self
+    }
+
+    /// Use custom gradient stops for color mapping.
+    /// Colors are interpolated in OKLch space between stops.
+    pub fn color_stops(mut self, stops: impl Into<Vec<crate::core::Color>>) -> Self {
+        self.color_stops = stops.into();
+        self
+    }
+
+    /// Returns the current color stops.
+    pub fn get_color_stops(&self) -> &[crate::core::Color] {
+        &self.color_stops
     }
 
     /// Get value at (row, col).

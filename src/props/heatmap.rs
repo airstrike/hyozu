@@ -10,6 +10,8 @@ pub enum Property {
     ShowLabels(bool),
     /// Explicit value range for color mapping (None = auto).
     ValueRange(Option<(f64, f64)>),
+    /// Gradient stops for color mapping.
+    ColorStops(Vec<crate::core::Color>),
 }
 
 impl Map for Property {}
@@ -20,8 +22,9 @@ impl Property {
         match self {
             Property::ShowLabels(show) => hm.show_labels = *show,
             Property::ValueRange(range) => hm.value_range = *range,
+            Property::ColorStops(stops) => hm.color_stops = stops.clone(),
         }
     }
 }
 
-pub use Property::{ShowLabels, ValueRange};
+pub use Property::{ColorStops, ShowLabels, ValueRange};
