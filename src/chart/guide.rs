@@ -474,6 +474,11 @@ where
                             values.insert(OrderedFloat(point.x));
                         }
                     }
+                    crate::Mark::Heatmap(hm) => {
+                        for col in 0..hm.cols() {
+                            values.insert(OrderedFloat(col as f64));
+                        }
+                    }
                     crate::Mark::Rule(_)
                     | crate::Mark::Pie(_)
                     | crate::Mark::Gauge(_) => {}
@@ -686,6 +691,15 @@ where
                     }
                     _ => {}
                 },
+                crate::Mark::Heatmap(hm) => {
+                    if is_x_axis {
+                        min = min.min(0.0);
+                        max = max.max((hm.cols() as f64 - 1.0).max(0.0));
+                    } else {
+                        min = min.min(0.0);
+                        max = max.max((hm.rows() as f64 - 1.0).max(0.0));
+                    }
+                }
                 crate::Mark::Pie(_) | crate::Mark::Gauge(_) => {}
             }
         }

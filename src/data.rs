@@ -7,8 +7,8 @@ pub use area::Area;
 pub use axis::{Axis, Orientation};
 pub use datum::{Datum, IntoDatums};
 pub use mark::{
-    Bars, Gauge, LegendEntry, Line, Mark, Pie, Rule, Waterfall, Xy, bar, bars,
-    gauge, line, pie, rule, waterfall, xy,
+    Bars, Gauge, Heatmap, LegendEntry, Line, Mark, Pie, Rule, Waterfall, Xy,
+    bar, bars, gauge, heatmap, line, pie, rule, waterfall, xy,
 };
 
 /// Trait for types that can be converted into chart Data.
@@ -58,6 +58,7 @@ fn axes_for_mark(mark: &Mark) -> (Option<Axis>, Option<Axis>) {
         }
         Mark::Xy(_) => (Some(Xy::x_axis()), Some(Xy::y_axis())),
         Mark::Rule(_) => (Rule::x_axis(), Rule::y_axis()),
+        Mark::Heatmap(hm) => (Some(hm.x_axis()), Some(hm.y_axis())),
     }
 }
 
@@ -138,6 +139,12 @@ impl IntoData for Waterfall {
 }
 
 impl IntoData for Xy {
+    fn into_data(self) -> Data {
+        Mark::from(self).into_data()
+    }
+}
+
+impl IntoData for Heatmap {
     fn into_data(self) -> Data {
         Mark::from(self).into_data()
     }
@@ -449,6 +456,13 @@ impl Data {
                         self.primary.marks.get_mut(index)
                     {
                         property.apply(rule);
+                    }
+                }
+                Item::Heatmap(index, property) => {
+                    if let Some(Mark::Heatmap(hm)) =
+                        self.primary.marks.get_mut(index)
+                    {
+                        property.apply(hm);
                     }
                 }
                 Item::XAxis(property) => {

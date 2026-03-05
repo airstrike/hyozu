@@ -220,6 +220,12 @@ impl Area {
                         x_max = x_max.max(rule.value);
                     }
                 },
+                Mark::Heatmap(hm) => {
+                    x_min = x_min.min(0.0);
+                    x_max = x_max.max((hm.cols() as f64 - 1.0).max(0.0));
+                    y_min = y_min.min(0.0);
+                    y_max = y_max.max((hm.rows() as f64 - 1.0).max(0.0));
+                }
                 // Pie and Gauge don't use Cartesian bounds
                 Mark::Pie(_) | Mark::Gauge(_) => {}
             }

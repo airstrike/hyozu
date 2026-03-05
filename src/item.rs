@@ -36,6 +36,8 @@ pub enum Item {
     Xy(usize, props::xy::Property),
     /// A rule mark at the given index with a property change
     Rule(usize, props::rule::Property),
+    /// A heatmap chart at the given index with a property change
+    Heatmap(usize, props::heatmap::Property),
     /// The X axis
     XAxis(props::axis::Property),
     /// The Y axis
@@ -100,6 +102,12 @@ pub fn Xy(index: usize, property: props::xy::Property) -> Item {
 #[allow(non_snake_case)]
 pub fn Rule(index: usize, property: props::rule::Property) -> Item {
     Item::Rule(index, property)
+}
+
+/// Creates a heatmap item for a given mark index and property.
+#[allow(non_snake_case)]
+pub fn Heatmap(index: usize, property: props::heatmap::Property) -> Item {
+    Item::Heatmap(index, property)
 }
 
 /// Wraps an x-axis property into an item.
