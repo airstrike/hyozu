@@ -452,6 +452,13 @@ where
 
             for mark in self.marks {
                 match mark {
+                    crate::Mark::Area(area) => {
+                        for series in &area.series {
+                            for point in &series.points {
+                                values.insert(OrderedFloat(point.x));
+                            }
+                        }
+                    }
                     crate::Mark::Bars(bars) => {
                         for series in &bars.series {
                             for point in &series.points {
@@ -597,6 +604,7 @@ where
     /// Find the min/max range for this axis dimension
     fn find_range(&self, is_x_axis: bool) -> (f64, f64) {
         use crate::bar::Layout;
+        use crate::mark::area::Layout as AreaLayout;
         use std::collections::HashMap;
 
         let mut min = f64::INFINITY;
@@ -604,6 +612,32 @@ where
 
         for mark in self.marks {
             match mark {
+                crate::Mark::Area(area) => {
+                    if !is_x_axis && area.layout == AreaLayout::Stacked {
+                        let mut sums: HashMap<i64, f64> = HashMap::new();
+                        for series in &area.series {
+                            for point in &series.points {
+                                let x_key = (point.x * 1000.0).round() as i64;
+                                *sums.entry(x_key).or_insert(0.0) += point.y;
+                                min = min.min(point.x);
+                                max = max.max(point.x);
+                            }
+                        }
+                        for sum in sums.values() {
+                            max = max.max(*sum);
+                            min = min.min(*sum);
+                        }
+                    } else {
+                        for series in &area.series {
+                            for point in &series.points {
+                                let val =
+                                    if is_x_axis { point.x } else { point.y };
+                                min = min.min(val);
+                                max = max.max(val);
+                            }
+                        }
+                    }
+                }
                 crate::Mark::Bars(bars) => {
                     if !is_x_axis && bars.layout == Layout::Stacked {
                         // For stacked bars Y-axis, compute cumulative sums
@@ -694,7 +728,12 @@ where
         // (Line charts should fit to the data range)
         if !is_x_axis {
             let has_bars = self.marks.iter().any(|m| {
-                matches!(m, crate::Mark::Bars(_) | crate::Mark::Waterfall(_))
+                matches!(
+                    m,
+                    crate::Mark::Area(_)
+                        | crate::Mark::Bars(_)
+                        | crate::Mark::Waterfall(_)
+                )
             });
             if has_bars {
                 min = min.min(0.0);

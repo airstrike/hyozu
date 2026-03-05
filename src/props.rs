@@ -15,6 +15,7 @@
 //!     .map(Message::Set)
 //! ```
 
+pub mod area;
 pub mod axis;
 pub mod bar;
 pub mod gauge;

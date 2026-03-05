@@ -137,6 +137,7 @@ impl Area {
     /// Computes the bounds of all marks in this area.
     pub fn bounds(&self) -> Bounds {
         use crate::bar::Layout;
+        use crate::mark::area::Layout as AreaLayout;
         use std::collections::HashMap;
 
         let mut x_min = f64::INFINITY;
@@ -146,6 +147,32 @@ impl Area {
 
         for mark in &self.marks {
             match mark {
+                Mark::Area(area_mark) => {
+                    if area_mark.layout == AreaLayout::Stacked {
+                        let mut sums: HashMap<i64, f64> = HashMap::new();
+                        for series in &area_mark.series {
+                            for point in &series.points {
+                                let x_key = (point.x * 1000.0).round() as i64;
+                                *sums.entry(x_key).or_insert(0.0) += point.y;
+                                x_min = x_min.min(point.x);
+                                x_max = x_max.max(point.x);
+                            }
+                        }
+                        for sum in sums.values() {
+                            y_min = y_min.min(*sum);
+                            y_max = y_max.max(*sum);
+                        }
+                    } else {
+                        for series in &area_mark.series {
+                            for point in &series.points {
+                                x_min = x_min.min(point.x);
+                                x_max = x_max.max(point.x);
+                                y_min = y_min.min(point.y);
+                                y_max = y_max.max(point.y);
+                            }
+                        }
+                    }
+                }
                 Mark::Bars(bars) => {
                     // For stacked layout, compute cumulative sums
                     if bars.layout == Layout::Stacked {
@@ -235,9 +262,12 @@ impl Area {
             y_max = 1.0;
         }
 
-        // For bar/waterfall charts, extend y to include zero
+        // For bar/waterfall/area charts, extend y to include zero
         for mark in &self.marks {
-            if matches!(mark, Mark::Bars(_) | Mark::Waterfall(_)) {
+            if matches!(
+                mark,
+                Mark::Area(_) | Mark::Bars(_) | Mark::Waterfall(_)
+            ) {
                 y_min = y_min.min(0.0);
                 break;
             }

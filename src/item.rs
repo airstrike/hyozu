@@ -22,6 +22,8 @@ use crate::props;
 pub enum Item {
     /// The chart title
     Title(String),
+    /// An area chart at the given index with a property change
+    Area(usize, props::area::Property),
     /// A bar chart at the given index with a property change
     Bars(usize, props::bar::Property),
     /// A line chart at the given index with a property change
@@ -52,6 +54,12 @@ impl Map for Item {}
 #[allow(non_snake_case)]
 pub fn Title(value: String) -> Item {
     Item::Title(value)
+}
+
+/// Creates an area item for a given mark index and property.
+#[allow(non_snake_case)]
+pub fn Area(index: usize, property: props::area::Property) -> Item {
+    Item::Area(index, property)
 }
 
 /// Creates a bars item for a given mark index and property.

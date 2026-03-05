@@ -1,3 +1,4 @@
+pub mod area;
 pub mod bar;
 pub mod gauge;
 pub mod line;
@@ -6,6 +7,7 @@ pub mod rule;
 pub mod waterfall;
 pub mod xy;
 
+pub use area::{Area, IntoAreas, area, areas};
 pub use bar::{Bars, IntoBars, bar, bars};
 pub use gauge::{Gauge, gauge};
 pub use line::{IntoLines, Line, line};
@@ -26,6 +28,7 @@ pub struct LegendEntry {
 /// Represents a visual mark in a chart (bars, lines, scatter, etc.)
 #[derive(Debug, Clone)]
 pub enum Mark {
+    Area(Area),
     Bars(Bars),
     Line(Line),
     Pie(Pie),
@@ -42,6 +45,16 @@ impl Mark {
     /// Only marks that have names set will produce entries.
     pub fn legend_entries(&self) -> Vec<LegendEntry> {
         match self {
+            Mark::Area(area) => area
+                .series
+                .iter()
+                .filter_map(|s| {
+                    s.name.as_ref().map(|name| LegendEntry {
+                        name: name.clone(),
+                        color: s.color,
+                    })
+                })
+                .collect(),
             Mark::Bars(bars) => bars
                 .series
                 .iter()
@@ -85,6 +98,12 @@ impl Mark {
             // Rule, Gauge don't contribute to legend
             Mark::Rule(_) | Mark::Gauge(_) | Mark::Waterfall(_) => Vec::new(),
         }
+    }
+}
+
+impl From<Area> for Mark {
+    fn from(area: Area) -> Self {
+        Mark::Area(area)
     }
 }
 
