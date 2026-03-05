@@ -26,6 +26,8 @@ pub enum Item {
     Area(usize, props::area::Property),
     /// A bar chart at the given index with a property change
     Bars(usize, props::bar::Property),
+    /// A box plot chart at the given index with a property change
+    BoxPlot(usize, props::boxplot::Property),
     /// A line chart at the given index with a property change
     Line(usize, props::line::Property),
     /// A pie chart at the given index with a property change
@@ -74,6 +76,12 @@ pub fn Area(index: usize, property: props::area::Property) -> Item {
 #[allow(non_snake_case)]
 pub fn Bars(index: usize, property: props::bar::Property) -> Item {
     Item::Bars(index, property)
+}
+
+/// Creates a box plot item for a given mark index and property.
+#[allow(non_snake_case)]
+pub fn BoxPlot(index: usize, property: props::boxplot::Property) -> Item {
+    Item::BoxPlot(index, property)
 }
 
 /// Creates a line item for a given mark index and property.

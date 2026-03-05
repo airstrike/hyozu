@@ -8,6 +8,7 @@ use crate::widget::renderer::geometry;
 
 pub mod area;
 pub mod bars;
+pub mod boxplot;
 pub mod gauge;
 pub mod heatmap;
 pub mod line;
@@ -17,6 +18,7 @@ pub mod waterfall;
 pub mod xy;
 
 pub use bars::Bars;
+pub use boxplot::BoxPlot;
 pub use gauge::Gauge;
 pub use heatmap::Heatmap;
 pub use line::Line;
@@ -76,6 +78,7 @@ where
     Area(area::Area<'a, Message, Renderer>),
     Line(Line<'a, Message, Renderer>),
     Bars(Bars<'a, Message, Renderer>),
+    BoxPlot(BoxPlot<'a, Message, Renderer>),
     Pie(Pie<'a, Message, Renderer>),
     Gauge(Gauge<'a, Message, Renderer>),
     Waterfall(Waterfall<'a, Message, Renderer>),
@@ -117,6 +120,7 @@ where
                 crate::Mark::Area(a) => Series::Area(area::Area::new(a)),
                 crate::Mark::Line(line) => Series::Line(Line::new(line)),
                 crate::Mark::Bars(bars) => Series::Bars(Bars::new(bars)),
+                crate::Mark::BoxPlot(bp) => Series::BoxPlot(BoxPlot::new(bp)),
                 crate::Mark::Pie(pie) => Series::Pie(Pie::new(pie)),
                 crate::Mark::Gauge(gauge) => Series::Gauge(Gauge::new(gauge)),
                 crate::Mark::Waterfall(wf) => Series::Waterfall(Waterfall::new(wf)),
@@ -139,6 +143,7 @@ where
                 Series::Area(a) => a.state(),
                 Series::Line(line) => line.state(),
                 Series::Bars(bars) => bars.state(),
+                Series::BoxPlot(bp) => bp.state(),
                 Series::Pie(pie) => pie.state(),
                 Series::Gauge(gauge) => gauge.state(),
                 Series::Waterfall(wf) => wf.state(),
@@ -168,6 +173,7 @@ where
                     Series::Area(_) => tree::Tag::of::<area::State>(),
                     Series::Line(_) => tree::Tag::of::<line::State>(),
                     Series::Bars(_) => tree::Tag::of::<bars::State>(),
+                    Series::BoxPlot(_) => tree::Tag::of::<boxplot::State>(),
                     Series::Pie(_) => tree::Tag::of::<pie::State>(),
                     Series::Gauge(_) => tree::Tag::of::<gauge::State>(),
                     Series::Waterfall(_) => tree::Tag::of::<waterfall::State>(),
@@ -181,6 +187,7 @@ where
                         Series::Area(a) => a.state(),
                         Series::Line(line) => line.state(),
                         Series::Bars(bars) => bars.state(),
+                        Series::BoxPlot(bp) => bp.state(),
                         Series::Pie(pie) => pie.state(),
                         Series::Gauge(gauge) => gauge.state(),
                         Series::Waterfall(wf) => wf.state(),
@@ -193,6 +200,7 @@ where
                         Series::Area(a) => a.diff(tree),
                         Series::Line(line) => line.diff(tree),
                         Series::Bars(bars) => bars.diff(tree),
+                        Series::BoxPlot(bp) => bp.diff(tree),
                         Series::Pie(pie) => pie.diff(tree),
                         Series::Gauge(gauge) => gauge.diff(tree),
                         Series::Waterfall(wf) => wf.diff(tree),
@@ -206,6 +214,7 @@ where
                 Series::Area(a) => a.state(),
                 Series::Line(line) => line.state(),
                 Series::Bars(bars) => bars.state(),
+                Series::BoxPlot(bp) => bp.state(),
                 Series::Pie(pie) => pie.state(),
                 Series::Gauge(gauge) => gauge.state(),
                 Series::Waterfall(wf) => wf.state(),
@@ -348,6 +357,32 @@ where
                         y_max = y_max.max(point.y);
                     }
                 }
+                Series::BoxPlot(bp) => match bp.data.direction {
+                    crate::mark::boxplot::Direction::Vertical => {
+                        for (i, e) in bp.data.entries.iter().enumerate() {
+                            x_min = x_min.min(i as f64);
+                            x_max = x_max.max(i as f64);
+                            y_min = y_min.min(e.min);
+                            y_max = y_max.max(e.max);
+                            for &o in &e.outliers {
+                                y_min = y_min.min(o);
+                                y_max = y_max.max(o);
+                            }
+                        }
+                    }
+                    crate::mark::boxplot::Direction::Horizontal => {
+                        for (i, e) in bp.data.entries.iter().enumerate() {
+                            y_min = y_min.min(i as f64);
+                            y_max = y_max.max(i as f64);
+                            x_min = x_min.min(e.min);
+                            x_max = x_max.max(e.max);
+                            for &o in &e.outliers {
+                                x_min = x_min.min(o);
+                                x_max = x_max.max(o);
+                            }
+                        }
+                    }
+                },
                 Series::Rule(rule) => match rule.data.orientation() {
                     crate::mark::rule::RuleOrientation::Horizontal => {
                         y_min = y_min.min(rule.data.value());
@@ -483,6 +518,9 @@ where
                 Series::Bars(bars) => {
                     bars.layout(series_tree, renderer, limits, &plane);
                 }
+                Series::BoxPlot(bp) => {
+                    bp.layout(series_tree, renderer, limits, &plane);
+                }
                 Series::Pie(pie) => {
                     pie.layout(series_tree, renderer, limits, &plane);
                 }
@@ -576,6 +614,20 @@ where
                         selection,
                     );
                     color_offset += bars.data.series.len();
+                }
+                Series::BoxPlot(bp) => {
+                    bp.draw(
+                        series_tree,
+                        renderer,
+                        design,
+                        style,
+                        layout,
+                        cursor,
+                        viewport,
+                        color_offset,
+                        palette,
+                    );
+                    color_offset += bp.data.entries.len();
                 }
                 Series::Pie(pie) => {
                     pie.draw(

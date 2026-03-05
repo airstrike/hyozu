@@ -255,6 +255,32 @@ impl Area {
                     y_min = y_min.min(0.0);
                     y_max = y_max.max((hm.rows() as f64 - 1.0).max(0.0));
                 }
+                Mark::BoxPlot(bp) => match bp.direction {
+                    crate::mark::boxplot::Direction::Vertical => {
+                        for (i, e) in bp.entries.iter().enumerate() {
+                            x_min = x_min.min(i as f64);
+                            x_max = x_max.max(i as f64);
+                            y_min = y_min.min(e.min);
+                            y_max = y_max.max(e.max);
+                            for &o in &e.outliers {
+                                y_min = y_min.min(o);
+                                y_max = y_max.max(o);
+                            }
+                        }
+                    }
+                    crate::mark::boxplot::Direction::Horizontal => {
+                        for (i, e) in bp.entries.iter().enumerate() {
+                            y_min = y_min.min(i as f64);
+                            y_max = y_max.max(i as f64);
+                            x_min = x_min.min(e.min);
+                            x_max = x_max.max(e.max);
+                            for &o in &e.outliers {
+                                x_min = x_min.min(o);
+                                x_max = x_max.max(o);
+                            }
+                        }
+                    }
+                },
                 // Pie and Gauge don't use Cartesian bounds
                 Mark::Pie(_) | Mark::Gauge(_) => {}
             }
