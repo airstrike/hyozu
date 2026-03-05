@@ -300,11 +300,7 @@ impl Axis {
     /// Set bounds for this axis.
     ///
     /// Pass `None` to auto-scale that bound from data.
-    pub fn with_bounds(
-        mut self,
-        lower: impl Into<Option<f64>>,
-        upper: impl Into<Option<f64>>,
-    ) -> Self {
+    pub fn with_bounds(mut self, lower: impl Into<Option<f64>>, upper: impl Into<Option<f64>>) -> Self {
         self.lower_bound = lower.into();
         self.upper_bound = upper.into();
         self

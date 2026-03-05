@@ -53,13 +53,7 @@ where
     }
 
     /// Layout the rule — convert value to pixel position
-    pub fn layout(
-        &self,
-        tree: &mut Tree,
-        _renderer: &Renderer,
-        _limits: &Limits,
-        plane: &Plane,
-    ) -> Node {
+    pub fn layout(&self, tree: &mut Tree, _renderer: &Renderer, _limits: &Limits, plane: &Plane) -> Node {
         let state = tree.state.downcast_mut::<State>();
 
         match self.data.orientation {
@@ -107,25 +101,17 @@ where
         let path = Path::new(|builder| match self.data.orientation {
             RuleOrientation::Horizontal => {
                 builder.move_to(crate::core::Point::new(0.0, state.position));
-                builder.line_to(crate::core::Point::new(
-                    layout_bounds.width,
-                    state.position,
-                ));
+                builder.line_to(crate::core::Point::new(layout_bounds.width, state.position));
             }
             RuleOrientation::Vertical => {
                 builder.move_to(crate::core::Point::new(state.position, 0.0));
-                builder.line_to(crate::core::Point::new(
-                    state.position,
-                    layout_bounds.height,
-                ));
+                builder.line_to(crate::core::Point::new(state.position, layout_bounds.height));
             }
         });
 
         frame.stroke(
             &path,
-            Stroke::default()
-                .with_width(self.data.width)
-                .with_color(line_color),
+            Stroke::default().with_width(self.data.width).with_color(line_color),
         );
 
         // Draw label if configured
@@ -135,10 +121,7 @@ where
 
             let (position, align_x, align_y) = match self.data.orientation {
                 RuleOrientation::Horizontal => (
-                    crate::core::Point::new(
-                        layout_bounds.width - 4.0,
-                        state.position - 4.0,
-                    ),
+                    crate::core::Point::new(layout_bounds.width - 4.0, state.position - 4.0),
                     crate::core::alignment::Horizontal::Right.into(),
                     crate::core::alignment::Vertical::Bottom,
                 ),
@@ -164,11 +147,8 @@ where
         }
 
         let geometry = frame.into_geometry();
-        renderer.with_translation(
-            crate::core::Vector::new(layout_bounds.x, layout_bounds.y),
-            |renderer| {
-                renderer.draw_geometry(geometry);
-            },
-        );
+        renderer.with_translation(crate::core::Vector::new(layout_bounds.x, layout_bounds.y), |renderer| {
+            renderer.draw_geometry(geometry);
+        });
     }
 }

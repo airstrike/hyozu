@@ -13,10 +13,7 @@ impl Map for Property {}
 
 impl Property {
     /// Applies this property to a Waterfall mark.
-    pub fn apply(
-        &self,
-        waterfall: &mut crate::data::mark::waterfall::Waterfall,
-    ) {
+    pub fn apply(&self, waterfall: &mut crate::data::mark::waterfall::Waterfall) {
         match self {
             Property::Connector(v) => waterfall.connector = *v,
         }

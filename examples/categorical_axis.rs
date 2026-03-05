@@ -36,12 +36,6 @@ impl App {
     }
 
     fn view(&self) -> iced::Element<'_, Message> {
-        center(
-            chart(&self.data)
-                .design(&Theme::Dark)
-                .width(800)
-                .height(600),
-        )
-        .into()
+        center(chart(&self.data).design(&Theme::Dark).width(800).height(600)).into()
     }
 }

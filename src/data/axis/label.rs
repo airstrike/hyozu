@@ -199,8 +199,7 @@ where
     fn add(mut self, transform: F) -> Self::Output {
         // If we already have values, transform them
         if let Some(values) = self.values {
-            self.values =
-                Some(values.iter().map(|s| transform(s).to_string()).collect());
+            self.values = Some(values.iter().map(|s| transform(s).to_string()).collect());
         }
         // Otherwise, this doesn't make sense - you can't transform values that don't exist
         // Just return self unchanged

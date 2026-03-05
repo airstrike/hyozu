@@ -122,10 +122,7 @@ impl Line {
     }
 
     /// Configure data labels for the line points.
-    pub fn data_labels(
-        mut self,
-        label: impl Into<Option<label::Label>>,
-    ) -> Self {
+    pub fn data_labels(mut self, label: impl Into<Option<label::Label>>) -> Self {
         self.label = label.into();
         self
     }
@@ -149,10 +146,7 @@ impl Line {
     /// // Only first and last with diamond markers
     /// let mark = line([1, 2, 3, 4]).markers(Shape::Diamond + Show::FirstAndLast);
     /// ```
-    pub fn markers(
-        mut self,
-        marker: impl Into<Option<marker::Marker>>,
-    ) -> Self {
+    pub fn markers(mut self, marker: impl Into<Option<marker::Marker>>) -> Self {
         self.marker = marker.into();
         self
     }
@@ -211,8 +205,6 @@ impl From<Line> for crate::Data {
 
 impl<const N: usize> From<[Line; N]> for crate::Data {
     fn from(lines: [Line; N]) -> Self {
-        crate::Data::from(
-            lines.into_iter().map(crate::Mark::Line).collect::<Vec<_>>(),
-        )
+        crate::Data::from(lines.into_iter().map(crate::Mark::Line).collect::<Vec<_>>())
     }
 }

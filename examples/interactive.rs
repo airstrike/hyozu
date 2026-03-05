@@ -1,10 +1,10 @@
 use iced::widget::{center, column, container, pick_list, radio, row, scrollable, slider, text};
-use iced::{keyboard, Center, Fill, Function, Subscription, Task, Theme};
+use iced::{Center, Fill, Function, Subscription, Task, Theme, keyboard};
 
 use hyozu::axis::Placement;
 use hyozu::data::Action;
 use hyozu::target::Target;
-use hyozu::{bar, bars, chart, item, pie, props, Data, Map, Palette};
+use hyozu::{Data, Map, Palette, bar, bars, chart, item, pie, props};
 
 pub fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
@@ -369,16 +369,18 @@ impl App {
 
             let on_hole = |v| props::pie::Hole(v).map(item::Pie.with(0)).map(Message::Set);
 
-            column![column![
-                text("Hole Size").size(14),
-                row![
-                    slider(0.0..=0.9, hole, on_hole).step(0.05).width(Fill),
-                    text(format!("{hole:.2}")),
+            column![
+                column![
+                    text("Hole Size").size(14),
+                    row![
+                        slider(0.0..=0.9, hole, on_hole).step(0.05).width(Fill),
+                        text(format!("{hole:.2}")),
+                    ]
+                    .spacing(10)
+                    .align_y(Center),
                 ]
-                .spacing(10)
-                .align_y(Center),
+                .spacing(4),
             ]
-            .spacing(4),]
             .spacing(12)
             .into()
         };
@@ -438,11 +440,8 @@ impl App {
             .padding(15),
         )
         .direction(scrollable::Direction::Vertical(
-                scrollable::Scrollbar::new()
-                    .width(0)
-                    .margin(0)
-                    .scroller_width(1),
-            ))
+            scrollable::Scrollbar::new().width(0).margin(0).scroller_width(1),
+        ))
         .spacing(0);
 
         let chart_area = chart(data).design(&self.theme).on_action(Message::Action).padding(20);

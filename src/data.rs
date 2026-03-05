@@ -7,8 +7,7 @@ pub use area::Area;
 pub use axis::{Axis, Orientation};
 pub use datum::{Datum, IntoDatums};
 pub use mark::{
-    Bars, Gauge, LegendEntry, Line, Mark, Pie, Rule, Waterfall, Xy, bar, bars,
-    gauge, line, pie, rule, waterfall, xy,
+    Bars, Gauge, LegendEntry, Line, Mark, Pie, Rule, Waterfall, Xy, bar, bars, gauge, line, pie, rule, waterfall, xy,
 };
 
 /// Trait for types that can be converted into chart Data.
@@ -53,9 +52,7 @@ fn axes_for_mark(mark: &Mark) -> (Option<Axis>, Option<Axis>) {
         Mark::Line(_) => (Some(Line::x_axis()), Some(Line::y_axis())),
         Mark::Pie(_) => (Pie::x_axis(), Pie::y_axis()),
         Mark::Gauge(_) => (Gauge::x_axis(), Gauge::y_axis()),
-        Mark::Waterfall(_) => {
-            (Some(Waterfall::x_axis()), Some(Waterfall::y_axis()))
-        }
+        Mark::Waterfall(_) => (Some(Waterfall::x_axis()), Some(Waterfall::y_axis())),
         Mark::Xy(_) => (Some(Xy::x_axis()), Some(Xy::y_axis())),
         Mark::Rule(_) => (Rule::x_axis(), Rule::y_axis()),
     }
@@ -87,11 +84,7 @@ impl From<Vec<Mark>> for Area {
             .map(axes_for_mark)
             .unwrap_or((None, None));
 
-        Self {
-            marks,
-            x_axis,
-            y_axis,
-        }
+        Self { marks, x_axis, y_axis }
     }
 }
 
@@ -248,13 +241,8 @@ impl Data {
     /// // Pin lower bound at 0, auto-scale upper
     /// Data::from(line).x_axis_bounds(0.0, None)
     /// ```
-    pub fn x_axis_bounds(
-        mut self,
-        lower: impl Into<Option<f64>>,
-        upper: impl Into<Option<f64>>,
-    ) -> Self {
-        self.primary =
-            self.primary.x_axis(|axis| axis.with_bounds(lower, upper));
+    pub fn x_axis_bounds(mut self, lower: impl Into<Option<f64>>, upper: impl Into<Option<f64>>) -> Self {
+        self.primary = self.primary.x_axis(|axis| axis.with_bounds(lower, upper));
         self
     }
 
@@ -273,13 +261,8 @@ impl Data {
     /// // Pin lower bound at 0, auto-scale upper
     /// Data::from(line).y_axis_bounds(0.0, None)
     /// ```
-    pub fn y_axis_bounds(
-        mut self,
-        lower: impl Into<Option<f64>>,
-        upper: impl Into<Option<f64>>,
-    ) -> Self {
-        self.primary =
-            self.primary.y_axis(|axis| axis.with_bounds(lower, upper));
+    pub fn y_axis_bounds(mut self, lower: impl Into<Option<f64>>, upper: impl Into<Option<f64>>) -> Self {
+        self.primary = self.primary.y_axis(|axis| axis.with_bounds(lower, upper));
         self
     }
 
@@ -403,51 +386,37 @@ impl Data {
                     self.title = Some(title);
                 }
                 Item::Bars(index, property) => {
-                    if let Some(Mark::Bars(bars)) =
-                        self.primary.marks.get_mut(index)
-                    {
+                    if let Some(Mark::Bars(bars)) = self.primary.marks.get_mut(index) {
                         property.apply(bars);
                     }
                 }
                 Item::Line(index, property) => {
-                    if let Some(Mark::Line(line)) =
-                        self.primary.marks.get_mut(index)
-                    {
+                    if let Some(Mark::Line(line)) = self.primary.marks.get_mut(index) {
                         property.apply(line);
                     }
                 }
                 Item::Pie(index, property) => {
-                    if let Some(Mark::Pie(pie)) =
-                        self.primary.marks.get_mut(index)
-                    {
+                    if let Some(Mark::Pie(pie)) = self.primary.marks.get_mut(index) {
                         property.apply(pie);
                     }
                 }
                 Item::Gauge(index, property) => {
-                    if let Some(Mark::Gauge(gauge)) =
-                        self.primary.marks.get_mut(index)
-                    {
+                    if let Some(Mark::Gauge(gauge)) = self.primary.marks.get_mut(index) {
                         property.apply(gauge);
                     }
                 }
                 Item::Waterfall(index, property) => {
-                    if let Some(Mark::Waterfall(wf)) =
-                        self.primary.marks.get_mut(index)
-                    {
+                    if let Some(Mark::Waterfall(wf)) = self.primary.marks.get_mut(index) {
                         property.apply(wf);
                     }
                 }
                 Item::Xy(index, property) => {
-                    if let Some(Mark::Xy(xy)) =
-                        self.primary.marks.get_mut(index)
-                    {
+                    if let Some(Mark::Xy(xy)) = self.primary.marks.get_mut(index) {
                         property.apply(xy);
                     }
                 }
                 Item::Rule(index, property) => {
-                    if let Some(Mark::Rule(rule)) =
-                        self.primary.marks.get_mut(index)
-                    {
+                    if let Some(Mark::Rule(rule)) = self.primary.marks.get_mut(index) {
                         property.apply(rule);
                     }
                 }
@@ -505,10 +474,9 @@ mod tests {
 
     #[test]
     fn test_data_title_chainable() {
-        let data =
-            vec![Mark::Bars(bars([100, 200])), Mark::Bars(bars([300, 400]))]
-                .into_data()
-                .title("Multi-Series Chart");
+        let data = vec![Mark::Bars(bars([100, 200])), Mark::Bars(bars([300, 400]))]
+            .into_data()
+            .title("Multi-Series Chart");
 
         assert_eq!(data.primary.marks.len(), 2);
         assert_eq!(data.title, Some("Multi-Series Chart".to_string()));

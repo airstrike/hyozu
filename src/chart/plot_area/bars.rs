@@ -54,13 +54,7 @@ where
     }
 
     /// Layout the bars - calculates bar positions and sizes
-    pub fn layout(
-        &self,
-        tree: &mut Tree,
-        _renderer: &Renderer,
-        _limits: &Limits,
-        plane: &Plane,
-    ) -> Node {
+    pub fn layout(&self, tree: &mut Tree, _renderer: &Renderer, _limits: &Limits, plane: &Plane) -> Node {
         use crate::mark::bar::Layout;
 
         let state = tree.state.downcast_mut::<State>();
@@ -71,13 +65,7 @@ where
         }
 
         // Determine number of bins (x-positions) - use max points across all series
-        let num_bins = self
-            .data
-            .series
-            .iter()
-            .map(|s| s.points.len())
-            .max()
-            .unwrap_or(0);
+        let num_bins = self.data.series.iter().map(|s| s.points.len()).max().unwrap_or(0);
 
         if num_bins == 0 {
             state.series_rects.clear();
@@ -102,8 +90,7 @@ where
                 // - bar_length: proportion of bin width to use for bars
                 // - spacing: spacing between bars as proportion of bar width
                 // Total bar units: N bars + spacing * (N - 1) gaps
-                let total_bar_units = num_series as f32
-                    + spacing_prop * (num_series as f32 - 1.0);
+                let total_bar_units = num_series as f32 + spacing_prop * (num_series as f32 - 1.0);
                 let bar_width = if total_bar_units > 0.0 {
                     (bin_width * bar_length) / total_bar_units
                 } else {
@@ -128,14 +115,10 @@ where
 
                                 // Use plane to transform data coordinate to pixel
                                 // For grouped layout, position bars within the group with spacing
-                                let bar_center_x =
-                                    plane.to_pixel(Datum::x(bin_idx as f64)).x;
+                                let bar_center_x = plane.to_pixel(Datum::x(bin_idx as f64)).x;
                                 let total_group_width = bin_width * bar_length;
-                                let group_start =
-                                    bar_center_x - total_group_width / 2.0;
-                                let x = group_start
-                                    + series_idx as f32
-                                        * (bar_width + spacing_px);
+                                let group_start = bar_center_x - total_group_width / 2.0;
+                                let x = group_start + series_idx as f32 * (bar_width + spacing_px);
 
                                 Rectangle {
                                     x,
@@ -170,8 +153,7 @@ where
                                 cumulative_tops[bin_idx] = y;
 
                                 // Use plane to transform data coordinate to pixel
-                                let bar_center_x =
-                                    plane.to_pixel(Datum::x(bin_idx as f64)).x;
+                                let bar_center_x = plane.to_pixel(Datum::x(bin_idx as f64)).x;
                                 let x = bar_center_x - bar_width / 2.0;
 
                                 Rectangle {
@@ -210,8 +192,7 @@ where
                                 let bar_height = (zero_y - pixel_point.y).abs();
 
                                 // Use plane to transform data coordinate to pixel
-                                let bar_center_x =
-                                    plane.to_pixel(Datum::x(bin_idx as f64)).x;
+                                let bar_center_x = plane.to_pixel(Datum::x(bin_idx as f64)).x;
                                 let x = bar_center_x - bar_width / 2.0;
 
                                 Rectangle {
@@ -266,13 +247,7 @@ where
         let mut all_bar_colors: Vec<Vec<crate::core::Color>> = Vec::new();
 
         // Draw each series
-        for (series_idx, (series, rects)) in self
-            .data
-            .series
-            .iter()
-            .zip(state.series_rects.iter())
-            .enumerate()
-        {
+        for (series_idx, (series, rects)) in self.data.series.iter().zip(state.series_rects.iter()).enumerate() {
             // Determine base color for this series
             let base_color = if let Some(series_color) = series.color {
                 series_color.resolve(background, text_pair, None)
@@ -324,50 +299,41 @@ where
             if let Some(label_config) = &series.label {
                 let label_size = label_config.size.map(|p| p.0).unwrap_or(12.0);
 
-                for (bar_idx, (rect, point)) in
-                    rects.iter().zip(series.points.iter()).enumerate()
-                {
+                for (bar_idx, (rect, point)) in rects.iter().zip(series.points.iter()).enumerate() {
                     // Format the label text
                     let label_text = (label_config.format)(point.y);
 
                     // Calculate label position in local coordinates
-                    let (label_x, label_y, align_x, align_y) =
-                        match label_config.position {
-                            Position::Above => (
-                                rect.x + rect.width / 2.0,
-                                rect.y - 4.0,
-                                crate::core::alignment::Horizontal::Center
-                                    .into(),
-                                crate::core::alignment::Vertical::Bottom,
-                            ),
-                            Position::End => (
-                                rect.x + rect.width / 2.0,
-                                rect.y + 4.0,
-                                crate::core::alignment::Horizontal::Center
-                                    .into(),
-                                crate::core::alignment::Vertical::Top,
-                            ),
-                            Position::Center => (
-                                rect.x + rect.width / 2.0,
-                                rect.y + rect.height / 2.0,
-                                crate::core::alignment::Horizontal::Center
-                                    .into(),
-                                crate::core::alignment::Vertical::Center,
-                            ),
-                            Position::Base => (
-                                rect.x + rect.width / 2.0,
-                                rect.y + rect.height - 4.0,
-                                crate::core::alignment::Horizontal::Center
-                                    .into(),
-                                crate::core::alignment::Vertical::Bottom,
-                            ),
-                        };
+                    let (label_x, label_y, align_x, align_y) = match label_config.position {
+                        Position::Above => (
+                            rect.x + rect.width / 2.0,
+                            rect.y - 4.0,
+                            crate::core::alignment::Horizontal::Center.into(),
+                            crate::core::alignment::Vertical::Bottom,
+                        ),
+                        Position::End => (
+                            rect.x + rect.width / 2.0,
+                            rect.y + 4.0,
+                            crate::core::alignment::Horizontal::Center.into(),
+                            crate::core::alignment::Vertical::Top,
+                        ),
+                        Position::Center => (
+                            rect.x + rect.width / 2.0,
+                            rect.y + rect.height / 2.0,
+                            crate::core::alignment::Horizontal::Center.into(),
+                            crate::core::alignment::Vertical::Center,
+                        ),
+                        Position::Base => (
+                            rect.x + rect.width / 2.0,
+                            rect.y + rect.height - 4.0,
+                            crate::core::alignment::Horizontal::Center.into(),
+                            crate::core::alignment::Vertical::Bottom,
+                        ),
+                    };
 
                     // Resolve label color based on position
                     // Default to CONTRAST (adaptive color) if not specified
-                    let label_color_spec = label_config
-                        .color
-                        .unwrap_or(crate::color::Color::CONTRAST);
+                    let label_color_spec = label_config.color.unwrap_or(crate::color::Color::CONTRAST);
 
                     // Use per-bar resolved color for contrast
                     let this_bar_color = all_bar_colors[series_idx][bar_idx];
@@ -375,42 +341,29 @@ where
                     let label_color = match label_config.position {
                         Position::Above => {
                             // Check if label position is inside any other bar's rectangle (local coords)
-                            let label_point =
-                                crate::core::Point::new(label_x, label_y);
+                            let label_point = crate::core::Point::new(label_x, label_y);
 
                             // Find which bar (if any) contains this label position
-                            let containing_bar = all_bar_colors
-                                .iter()
-                                .zip(state.series_rects.iter())
-                                .find_map(|(colors, other_rects)| {
+                            let containing_bar = all_bar_colors.iter().zip(state.series_rects.iter()).find_map(
+                                |(colors, other_rects)| {
                                     other_rects
                                         .iter()
                                         .zip(colors.iter())
-                                        .find(|(other_rect, _)| {
-                                            other_rect.contains(label_point)
-                                        })
+                                        .find(|(other_rect, _)| other_rect.contains(label_point))
                                         .map(|(_, color)| *color)
-                                });
+                                },
+                            );
 
                             if let Some(other_color) = containing_bar {
-                                label_color_spec.resolve(
-                                    other_color,
-                                    text_pair,
-                                    Some(background),
-                                )
+                                label_color_spec.resolve(other_color, text_pair, Some(background))
                             } else {
                                 // Label is outside all bars - resolve against chart background
-                                label_color_spec
-                                    .resolve(background, text_pair, None)
+                                label_color_spec.resolve(background, text_pair, None)
                             }
                         }
                         _ => {
                             // Inside label (End, Center, Base): resolve against bar's visual color
-                            label_color_spec.resolve(
-                                this_bar_color,
-                                text_pair,
-                                Some(background),
-                            )
+                            label_color_spec.resolve(this_bar_color, text_pair, Some(background))
                         }
                     };
 
@@ -440,25 +393,16 @@ where
             let inner_color = crate::core::Color::from_rgba(0.0, 0.0, 0.0, 0.5);
             let outer_color = crate::core::Color::from_rgba(1.0, 1.0, 1.0, 0.6);
 
-            let should_highlight =
-                |series_idx: usize, bar_idx: usize| -> bool {
-                    match target {
-                        Target::Mark(m) => *m == mark_index,
-                        Target::Series { mark, series } => {
-                            *mark == mark_index && *series == series_idx
-                        }
-                        Target::Entry {
-                            mark,
-                            series,
-                            index,
-                        } => {
-                            *mark == mark_index
-                                && *series == series_idx
-                                && *index == bar_idx
-                        }
-                        _ => false,
+            let should_highlight = |series_idx: usize, bar_idx: usize| -> bool {
+                match target {
+                    Target::Mark(m) => *m == mark_index,
+                    Target::Series { mark, series } => *mark == mark_index && *series == series_idx,
+                    Target::Entry { mark, series, index } => {
+                        *mark == mark_index && *series == series_idx && *index == bar_idx
                     }
-                };
+                    _ => false,
+                }
+            };
 
             for (series_idx, rects) in state.series_rects.iter().enumerate() {
                 for (bar_idx, rect) in rects.iter().enumerate() {
@@ -472,22 +416,11 @@ where
                         };
                         let outer_path = Path::new(|b| {
                             b.rectangle(
-                                crate::core::Point::new(
-                                    outer_rect.x,
-                                    outer_rect.y,
-                                ),
-                                crate::core::Size::new(
-                                    outer_rect.width,
-                                    outer_rect.height,
-                                ),
+                                crate::core::Point::new(outer_rect.x, outer_rect.y),
+                                crate::core::Size::new(outer_rect.width, outer_rect.height),
                             );
                         });
-                        selection_frame.stroke(
-                            &outer_path,
-                            Stroke::default()
-                                .with_color(outer_color)
-                                .with_width(1.0),
-                        );
+                        selection_frame.stroke(&outer_path, Stroke::default().with_color(outer_color).with_width(1.0));
 
                         // Inner black stroke on exact rect
                         let inner_path = Path::new(|b| {
@@ -496,20 +429,14 @@ where
                                 crate::core::Size::new(rect.width, rect.height),
                             );
                         });
-                        selection_frame.stroke(
-                            &inner_path,
-                            Stroke::default()
-                                .with_color(inner_color)
-                                .with_width(1.0),
-                        );
+                        selection_frame.stroke(&inner_path, Stroke::default().with_color(inner_color).with_width(1.0));
                     }
                 }
             }
         }
 
         // Draw all bars, then all labels, then selection on top
-        let translation =
-            crate::core::Vector::new(layout_bounds.x, layout_bounds.y);
+        let translation = crate::core::Vector::new(layout_bounds.x, layout_bounds.y);
 
         let bar_geometry = bar_frame.into_geometry();
         renderer.with_translation(translation, |renderer| {

@@ -44,10 +44,7 @@ pub fn line_rect(p1: Point, p2: Point, rect: Rectangle) -> bool {
 
 /// Check if two rectangles intersect.
 pub fn rects(a: Rectangle, b: Rectangle) -> bool {
-    a.x < b.x + b.width
-        && a.x + a.width > b.x
-        && a.y < b.y + b.height
-        && a.y + a.height > b.y
+    a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
 }
 
 /// Check if two line segments intersect.
@@ -57,9 +54,7 @@ pub fn segments(p1: Point, p2: Point, p3: Point, p4: Point) -> bool {
     let d3 = direction(p1, p2, p3);
     let d4 = direction(p1, p2, p4);
 
-    if ((d1 > 0.0 && d2 < 0.0) || (d1 < 0.0 && d2 > 0.0))
-        && ((d3 > 0.0 && d4 < 0.0) || (d3 < 0.0 && d4 > 0.0))
-    {
+    if ((d1 > 0.0 && d2 < 0.0) || (d1 < 0.0 && d2 > 0.0)) && ((d3 > 0.0 && d4 < 0.0) || (d3 < 0.0 && d4 > 0.0)) {
         return true;
     }
 
@@ -86,8 +81,5 @@ fn direction(p1: Point, p2: Point, p3: Point) -> f32 {
 
 /// Check if point is on segment (assuming collinear).
 fn on_segment(p1: Point, p2: Point, p: Point) -> bool {
-    p.x >= p1.x.min(p2.x)
-        && p.x <= p1.x.max(p2.x)
-        && p.y >= p1.y.min(p2.y)
-        && p.y <= p1.y.max(p2.y)
+    p.x >= p1.x.min(p2.x) && p.x <= p1.x.max(p2.x) && p.y >= p1.y.min(p2.y) && p.y <= p1.y.max(p2.y)
 }

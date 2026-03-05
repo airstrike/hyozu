@@ -61,13 +61,7 @@ where
     }
 
     /// Layout the waterfall — compute bar positions from running totals
-    pub fn layout(
-        &self,
-        tree: &mut Tree,
-        _renderer: &Renderer,
-        _limits: &Limits,
-        plane: &Plane,
-    ) -> Node {
+    pub fn layout(&self, tree: &mut Tree, _renderer: &Renderer, _limits: &Limits, plane: &Plane) -> Node {
         let state = tree.state.downcast_mut::<State>();
 
         if self.data.entries.is_empty() {
@@ -111,10 +105,8 @@ where
                 EntryKind::Increase => {
                     let prev_total = running_total;
                     running_total += entry.value;
-                    let bottom_y =
-                        plane.to_pixel(Datum::new(0.0, prev_total)).y;
-                    let top_y =
-                        plane.to_pixel(Datum::new(0.0, running_total)).y;
+                    let bottom_y = plane.to_pixel(Datum::new(0.0, prev_total)).y;
+                    let top_y = plane.to_pixel(Datum::new(0.0, running_total)).y;
                     let height = (bottom_y - top_y).abs();
                     let y = top_y.min(bottom_y);
 
@@ -130,8 +122,7 @@ where
                     let prev_total = running_total;
                     running_total += entry.value; // value is negative
                     let top_y = plane.to_pixel(Datum::new(0.0, prev_total)).y;
-                    let bottom_y =
-                        plane.to_pixel(Datum::new(0.0, running_total)).y;
+                    let bottom_y = plane.to_pixel(Datum::new(0.0, running_total)).y;
                     let height = (bottom_y - top_y).abs();
                     let y = top_y.min(bottom_y);
 
@@ -179,17 +170,12 @@ where
         let mut frame = Frame::new(renderer, layout_bounds.size());
 
         // Waterfall uses semantic colors directly from the seed
-        let increase_color = crate::color::Color::Fixed(seed.success)
-            .resolve(background, text_pair, None);
-        let decrease_color = crate::color::Color::Fixed(seed.danger)
-            .resolve(background, text_pair, None);
-        let total_color = crate::color::Color::Fixed(seed.primary)
-            .resolve(background, text_pair, None);
+        let increase_color = crate::color::Color::Fixed(seed.success).resolve(background, text_pair, None);
+        let decrease_color = crate::color::Color::Fixed(seed.danger).resolve(background, text_pair, None);
+        let total_color = crate::color::Color::Fixed(seed.primary).resolve(background, text_pair, None);
 
         // Draw bars
-        for (i, (rect, entry)) in
-            state.rects.iter().zip(self.data.entries.iter()).enumerate()
-        {
+        for (i, (rect, entry)) in state.rects.iter().zip(self.data.entries.iter()).enumerate() {
             let color = if let Some(entry_color) = entry.color {
                 entry_color.resolve(background, text_pair, None)
             } else {
@@ -224,45 +210,30 @@ where
                 let y = state.tops[i];
 
                 let path = Path::new(|builder| {
-                    builder.move_to(crate::core::Point::new(
-                        from_rect.x + from_rect.width,
-                        y,
-                    ));
+                    builder.move_to(crate::core::Point::new(from_rect.x + from_rect.width, y));
                     builder.line_to(crate::core::Point::new(to_rect.x, y));
                 });
 
-                frame.stroke(
-                    &path,
-                    Stroke::default()
-                        .with_width(1.0)
-                        .with_color(connector_color),
-                );
+                frame.stroke(&path, Stroke::default().with_width(1.0).with_color(connector_color));
             }
         }
 
         // Draw labels above bars
         let label_size = theme.font_size();
-        let label_color =
-            theme.text_color().resolve(background, text_pair, None);
+        let label_color = theme.text_color().resolve(background, text_pair, None);
 
         for (rect, entry) in state.rects.iter().zip(self.data.entries.iter()) {
             if let Some(label_text) = &entry.label {
                 let negative = entry.value < 0.0;
                 let (y, align_y) = if negative {
-                    (
-                        rect.y + rect.height + 4.0,
-                        crate::core::alignment::Vertical::Top,
-                    )
+                    (rect.y + rect.height + 4.0, crate::core::alignment::Vertical::Top)
                 } else {
                     (rect.y - 4.0, crate::core::alignment::Vertical::Bottom)
                 };
 
                 frame.fill_text(CanvasText {
                     content: label_text.clone(),
-                    position: crate::core::Point::new(
-                        rect.x + rect.width / 2.0,
-                        y,
-                    ),
+                    position: crate::core::Point::new(rect.x + rect.width / 2.0, y),
                     color: label_color,
                     size: label_size.into(),
                     font: theme.font(),
@@ -276,11 +247,8 @@ where
         }
 
         let geometry = frame.into_geometry();
-        renderer.with_translation(
-            crate::core::Vector::new(layout_bounds.x, layout_bounds.y),
-            |renderer| {
-                renderer.draw_geometry(geometry);
-            },
-        );
+        renderer.with_translation(crate::core::Vector::new(layout_bounds.x, layout_bounds.y), |renderer| {
+            renderer.draw_geometry(geometry);
+        });
     }
 }

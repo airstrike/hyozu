@@ -48,17 +48,14 @@ impl Plane {
     /// Transform a data point (f64) to pixel coordinates (f32) within the plane bounds.
     pub fn to_pixel(&self, datum: Datum) -> crate::core::Point {
         let x = if self.x_max > self.x_min {
-            self.bounds.x
-                + (((datum.x - self.x_min) / (self.x_max - self.x_min)) as f32)
-                    * self.bounds.width
+            self.bounds.x + (((datum.x - self.x_min) / (self.x_max - self.x_min)) as f32) * self.bounds.width
         } else {
             self.bounds.x + self.bounds.width / 2.0
         };
 
         let y = if self.y_max > self.y_min {
             self.bounds.y + self.bounds.height
-                - (((datum.y - self.y_min) / (self.y_max - self.y_min)) as f32)
-                    * self.bounds.height
+                - (((datum.y - self.y_min) / (self.y_max - self.y_min)) as f32) * self.bounds.height
         } else {
             self.bounds.y + self.bounds.height / 2.0
         };
@@ -116,9 +113,7 @@ where
                 crate::Mark::Bars(bars) => Series::Bars(Bars::new(bars)),
                 crate::Mark::Pie(pie) => Series::Pie(Pie::new(pie)),
                 crate::Mark::Gauge(gauge) => Series::Gauge(Gauge::new(gauge)),
-                crate::Mark::Waterfall(wf) => {
-                    Series::Waterfall(Waterfall::new(wf))
-                }
+                crate::Mark::Waterfall(wf) => Series::Waterfall(Waterfall::new(wf)),
                 crate::Mark::Xy(xy) => Series::Xy(Xy::new(xy)),
                 crate::Mark::Rule(rule) => Series::Rule(Rule::new(rule)),
             })
@@ -323,14 +318,13 @@ where
         renderer: &Renderer,
         limits: &Limits,
         axis_bounds: Option<(f64, f64, f64, f64)>, // (x_min, x_max, y_min, y_max) from axes
-        axis_layout: AxisLayout, // Physical dimensions of axes
+        axis_layout: AxisLayout,                   // Physical dimensions of axes
     ) -> Node {
         let state = tree.state.downcast_mut::<State>();
         let size = limits.max();
 
         // Use axis bounds if provided, otherwise compute from data
-        let (x_min, x_max, y_min, y_max) =
-            axis_bounds.unwrap_or_else(|| self.compute_data_bounds());
+        let (x_min, x_max, y_min, y_max) = axis_bounds.unwrap_or_else(|| self.compute_data_bounds());
 
         // Compute obstacle rectangles from axis layout
         // These are relative to plot area origin (0,0 is top-left of plot)
@@ -508,15 +502,7 @@ where
                     color_offset += 1;
                 }
                 Series::Waterfall(wf) => {
-                    wf.draw(
-                        series_tree,
-                        renderer,
-                        design,
-                        style,
-                        layout,
-                        cursor,
-                        viewport,
-                    );
+                    wf.draw(series_tree, renderer, design, style, layout, cursor, viewport);
                     color_offset += 3;
                 }
                 Series::Xy(xy) => {
@@ -534,15 +520,7 @@ where
                     color_offset += 1;
                 }
                 Series::Rule(rule) => {
-                    rule.draw(
-                        series_tree,
-                        renderer,
-                        design,
-                        style,
-                        layout,
-                        cursor,
-                        viewport,
-                    );
+                    rule.draw(series_tree, renderer, design, style, layout, cursor, viewport);
                     // Rules don't consume color slots
                 }
             }

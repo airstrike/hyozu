@@ -65,17 +65,10 @@ where
     }
 
     /// Layout the pie — compute angles from values
-    pub fn layout(
-        &self,
-        tree: &mut Tree,
-        _renderer: &Renderer,
-        limits: &Limits,
-        _plane: &Plane,
-    ) -> Node {
+    pub fn layout(&self, tree: &mut Tree, _renderer: &Renderer, limits: &Limits, _plane: &Plane) -> Node {
         let state = tree.state.downcast_mut::<State>();
 
-        let total: f64 =
-            self.data.slices.iter().map(|s| s.value.max(0.0)).sum();
+        let total: f64 = self.data.slices.iter().map(|s| s.value.max(0.0)).sum();
 
         if total == 0.0 {
             state.slice_angles.clear();
@@ -152,25 +145,18 @@ where
         let gap_offset = self.data.gap / 2.0;
 
         // Compute total for label percentages
-        let total: f64 =
-            self.data.slices.iter().map(|s| s.value.max(0.0)).sum();
+        let total: f64 = self.data.slices.iter().map(|s| s.value.max(0.0)).sum();
 
         // Track resolved colors for label contrast
         let mut slice_colors = Vec::with_capacity(self.data.slices.len());
 
         // Draw each slice
-        for (i, ((start_angle, end_angle), slice)) in state
-            .slice_angles
-            .iter()
-            .zip(self.data.slices.iter())
-            .enumerate()
+        for (i, ((start_angle, end_angle), slice)) in state.slice_angles.iter().zip(self.data.slices.iter()).enumerate()
         {
             let color = if let Some(slice_color) = slice.color {
                 slice_color.resolve(background, text_pair, None)
             } else {
-                palette
-                    .get(color_offset + i)
-                    .resolve(background, text_pair, None)
+                palette.get(color_offset + i).resolve(background, text_pair, None)
             };
             slice_colors.push(color);
 
@@ -188,33 +174,23 @@ where
             let path = Path::new(|builder| {
                 if inner_radius > 0.0 {
                     // Donut wedge
-                    let inner_start = crate::core::Point::new(
-                        scx + inner_radius * start.cos(),
-                        scy + inner_radius * start.sin(),
-                    );
-                    let outer_start = crate::core::Point::new(
-                        scx + radius * start.cos(),
-                        scy + radius * start.sin(),
-                    );
+                    let inner_start =
+                        crate::core::Point::new(scx + inner_radius * start.cos(), scy + inner_radius * start.sin());
+                    let outer_start = crate::core::Point::new(scx + radius * start.cos(), scy + radius * start.sin());
 
                     builder.move_to(inner_start);
                     builder.line_to(outer_start);
                     trace_arc(builder, scx, scy, radius, start, end);
 
-                    let inner_end = crate::core::Point::new(
-                        scx + inner_radius * end.cos(),
-                        scy + inner_radius * end.sin(),
-                    );
+                    let inner_end =
+                        crate::core::Point::new(scx + inner_radius * end.cos(), scy + inner_radius * end.sin());
                     builder.line_to(inner_end);
                     trace_arc(builder, scx, scy, inner_radius, end, start);
                     builder.close();
                 } else {
                     // Full pie wedge from center
                     builder.move_to(crate::core::Point::new(scx, scy));
-                    let outer_start = crate::core::Point::new(
-                        scx + radius * start.cos(),
-                        scy + radius * start.sin(),
-                    );
+                    let outer_start = crate::core::Point::new(scx + radius * start.cos(), scy + radius * start.sin());
                     builder.line_to(outer_start);
                     trace_arc(builder, scx, scy, radius, start, end);
                     builder.close();
@@ -226,11 +202,8 @@ where
 
         // Draw slice labels (second pass — on top of slices)
         if total > 0.0 {
-            for (i, ((start_angle, end_angle), slice)) in state
-                .slice_angles
-                .iter()
-                .zip(self.data.slices.iter())
-                .enumerate()
+            for (i, ((start_angle, end_angle), slice)) in
+                state.slice_angles.iter().zip(self.data.slices.iter()).enumerate()
             {
                 let label = match &slice.label {
                     Some(l) => l,
@@ -262,9 +235,7 @@ where
                     text_pair.resolve(slice_fill, Some(background))
                 };
 
-                let font_size = label
-                    .size
-                    .unwrap_or(crate::core::Pixels(theme.font_size()));
+                let font_size = label.size.unwrap_or(crate::core::Pixels(theme.font_size()));
 
                 frame.fill_text(CanvasText {
                     content: label_text,
@@ -295,18 +266,12 @@ where
                 match target {
                     Target::Mark(m) => *m == mark_index,
                     Target::Series { mark, .. } => *mark == mark_index,
-                    Target::Entry {
-                        mark,
-                        series: _,
-                        index,
-                    } => *mark == mark_index && *index == slice_idx,
+                    Target::Entry { mark, series: _, index } => *mark == mark_index && *index == slice_idx,
                     _ => false,
                 }
             };
 
-            for (i, (start_angle, end_angle)) in
-                state.slice_angles.iter().enumerate()
-            {
+            for (i, (start_angle, end_angle)) in state.slice_angles.iter().enumerate() {
                 if !should_highlight(i) {
                     continue;
                 }
@@ -327,32 +292,24 @@ where
                 // Build the wedge path for stroking
                 let highlight_path = Path::new(|builder| {
                     if inner_radius > 0.0 {
-                        let inner_start = crate::core::Point::new(
-                            scx + inner_radius * start.cos(),
-                            scy + inner_radius * start.sin(),
-                        );
-                        let outer_start = crate::core::Point::new(
-                            scx + radius * start.cos(),
-                            scy + radius * start.sin(),
-                        );
+                        let inner_start =
+                            crate::core::Point::new(scx + inner_radius * start.cos(), scy + inner_radius * start.sin());
+                        let outer_start =
+                            crate::core::Point::new(scx + radius * start.cos(), scy + radius * start.sin());
 
                         builder.move_to(inner_start);
                         builder.line_to(outer_start);
                         trace_arc(builder, scx, scy, radius, start, end);
 
-                        let inner_end = crate::core::Point::new(
-                            scx + inner_radius * end.cos(),
-                            scy + inner_radius * end.sin(),
-                        );
+                        let inner_end =
+                            crate::core::Point::new(scx + inner_radius * end.cos(), scy + inner_radius * end.sin());
                         builder.line_to(inner_end);
                         trace_arc(builder, scx, scy, inner_radius, end, start);
                         builder.close();
                     } else {
                         builder.move_to(crate::core::Point::new(scx, scy));
-                        let outer_start = crate::core::Point::new(
-                            scx + radius * start.cos(),
-                            scy + radius * start.sin(),
-                        );
+                        let outer_start =
+                            crate::core::Point::new(scx + radius * start.cos(), scy + radius * start.sin());
                         builder.line_to(outer_start);
                         trace_arc(builder, scx, scy, radius, start, end);
                         builder.close();
@@ -373,8 +330,7 @@ where
             }
         }
 
-        let translation =
-            crate::core::Vector::new(layout_bounds.x, layout_bounds.y);
+        let translation = crate::core::Vector::new(layout_bounds.x, layout_bounds.y);
 
         let geometry = frame.into_geometry();
         renderer.with_translation(translation, |renderer| {
@@ -401,9 +357,7 @@ fn trace_arc(
     end_angle: f32,
 ) {
     let sweep = end_angle - start_angle;
-    let segments = ((sweep.abs() / std::f32::consts::TAU)
-        * ARC_SEGMENTS_PER_TAU as f32)
-        .ceil() as usize;
+    let segments = ((sweep.abs() / std::f32::consts::TAU) * ARC_SEGMENTS_PER_TAU as f32).ceil() as usize;
     let segments = segments.max(1);
 
     for i in 1..=segments {

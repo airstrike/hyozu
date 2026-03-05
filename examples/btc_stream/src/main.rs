@@ -127,16 +127,13 @@ impl App {
         let pair = TradingPair::default();
 
         // Fetch historical prices at startup - sip starts after historical arrives
-        let historical_task =
-            Task::future(fetch_historical_prices(pair)).map(move |result| {
-                match result {
-                    Ok(points) => Message::HistoricalPrices(pair, points),
-                    Err(e) => {
-                        eprintln!("Failed to fetch historical: {}", e);
-                        Message::HistoricalPrices(pair, vec![])
-                    }
-                }
-            });
+        let historical_task = Task::future(fetch_historical_prices(pair)).map(move |result| match result {
+            Ok(points) => Message::HistoricalPrices(pair, points),
+            Err(e) => {
+                eprintln!("Failed to fetch historical: {}", e);
+                Message::HistoricalPrices(pair, vec![])
+            }
+        });
 
         (
             Self {
@@ -164,12 +161,8 @@ impl App {
         self.sip_handle = None;
 
         let pair = self.trading_pair;
-        let (sip_task, handle) = Task::sip(
-            fetch_ticker(pair),
-            Message::TickerReceived,
-            Message::SipFinished,
-        )
-        .abortable();
+        let (sip_task, handle) =
+            Task::sip(fetch_ticker(pair), Message::TickerReceived, Message::SipFinished).abortable();
 
         self.sip_handle = Some(handle.abort_on_drop());
         sip_task
@@ -231,17 +224,13 @@ impl App {
                     self.data = Data::default();
 
                     // Fetch historical for new pair
-                    return Task::future(fetch_historical_prices(pair)).map(
-                        move |result| match result {
-                            Ok(points) => {
-                                Message::HistoricalPrices(pair, points)
-                            }
-                            Err(e) => {
-                                eprintln!("Failed to fetch historical: {}", e);
-                                Message::HistoricalPrices(pair, vec![])
-                            }
-                        },
-                    );
+                    return Task::future(fetch_historical_prices(pair)).map(move |result| match result {
+                        Ok(points) => Message::HistoricalPrices(pair, points),
+                        Err(e) => {
+                            eprintln!("Failed to fetch historical: {}", e);
+                            Message::HistoricalPrices(pair, vec![])
+                        }
+                    });
                 }
             }
             Message::SipFinished(result) => {
@@ -255,19 +244,12 @@ impl App {
 
     fn rebuild_chart(&mut self) {
         // Create (timestamp, price) points for proper time-based x-axis
-        let points: Vec<(f32, f32)> = self
-            .points
-            .iter()
-            .map(|p| (p.timestamp as f32, p.price))
-            .collect();
+        let points: Vec<(f32, f32)> = self.points.iter().map(|p| (p.timestamp as f32, p.price)).collect();
 
-        self.data = Data::from(line(points).data_labels(
-            line::label::Show::LastOnly
-                + line::label::Position::Right
-                + currency,
-        ))
-        .x_axis(|_| line::Line::time_axis())
-        .y_axis_labels(currency);
+        self.data =
+            Data::from(line(points).data_labels(line::label::Show::LastOnly + line::label::Position::Right + currency))
+                .x_axis(|_| line::Line::time_axis())
+                .y_axis_labels(currency);
     }
 
     fn view(&self) -> Element<'_, Message> {
@@ -278,9 +260,7 @@ impl App {
                 let selected = self.trading_pair == pair;
                 button(text(pair.label()).size(11))
                     .padding([4, 8])
-                    .style(move |theme, status| {
-                        segment_button(theme, status, selected)
-                    })
+                    .style(move |theme, status| segment_button(theme, status, selected))
                     .on_press(Message::SetTradingPair(pair))
                     .into()
             });
@@ -288,14 +268,7 @@ impl App {
                 .style(|theme: &Theme| {
                     let palette = theme.extended_palette();
                     container::Style {
-                        background: Some(
-                            palette
-                                .background
-                                .weak
-                                .color
-                                .scale_alpha(0.3)
-                                .into(),
-                        ),
+                        background: Some(palette.background.weak.color.scale_alpha(0.3).into()),
                         ..Default::default()
                     }
                 })
@@ -322,13 +295,9 @@ impl App {
             (None, None) => row![text("connecting...")],
         };
 
-        let header = row![
-            container(status).width(Fill),
-            Space::new().height(Shrink),
-            picker
-        ]
-        .spacing(20)
-        .align_y(iced::Alignment::Center);
+        let header = row![container(status).width(Fill), Space::new().height(Shrink), picker]
+            .spacing(20)
+            .align_y(iced::Alignment::Center);
 
         let content = if self.loading_pair.is_some() {
             column![header, text("loading data...")].spacing(10)
@@ -349,11 +318,7 @@ impl App {
 }
 
 /// Custom button style for segment picker
-fn segment_button(
-    theme: &Theme,
-    status: button::Status,
-    selected: bool,
-) -> button::Style {
+fn segment_button(theme: &Theme, status: button::Status, selected: bool) -> button::Style {
     let palette = theme.extended_palette();
     let muted = palette.background.base.text.scale_alpha(0.5);
     let less_muted = palette.background.base.text.scale_alpha(0.8);
@@ -383,8 +348,7 @@ fn fetch_ticker(pair: TradingPair) -> impl task::Straw<(), TickerData, String> {
             .enable_http1()
             .build();
 
-        let client: Client<_, Empty<Bytes>> =
-            Client::builder(TokioExecutor::new()).build(https);
+        let client: Client<_, Empty<Bytes>> = Client::builder(TokioExecutor::new()).build(https);
 
         loop {
             match fetch_single_ticker(&client, pair).await {
@@ -402,23 +366,12 @@ fn fetch_ticker(pair: TradingPair) -> impl task::Straw<(), TickerData, String> {
     })
 }
 
-async fn fetch_single_ticker<C>(
-    client: &Client<C, Empty<Bytes>>,
-    pair: TradingPair,
-) -> Result<TickerData, String>
+async fn fetch_single_ticker<C>(client: &Client<C, Empty<Bytes>>, pair: TradingPair) -> Result<TickerData, String>
 where
-    C: hyper_util::client::legacy::connect::Connect
-        + Clone
-        + Send
-        + Sync
-        + 'static,
+    C: hyper_util::client::legacy::connect::Connect + Clone + Send + Sync + 'static,
 {
-    let url = format!(
-        "https://api.kraken.com/0/public/Ticker?pair={}",
-        pair.api_pair()
-    );
-    let uri: hyper::Uri =
-        url.parse().map_err(|e| format!("Invalid URI: {}", e))?;
+    let url = format!("https://api.kraken.com/0/public/Ticker?pair={}", pair.api_pair());
+    let uri: hyper::Uri = url.parse().map_err(|e| format!("Invalid URI: {}", e))?;
 
     let req = Request::builder()
         .method("GET")
@@ -439,11 +392,10 @@ where
         .map_err(|e| format!("Body read error: {}", e))?
         .to_bytes();
 
-    let kraken: KrakenResponse =
-        serde_json::from_slice(&body).map_err(|e| {
-            let body_str = String::from_utf8_lossy(&body);
-            format!("JSON parse error: {} - body: {}", e, body_str)
-        })?;
+    let kraken: KrakenResponse = serde_json::from_slice(&body).map_err(|e| {
+        let body_str = String::from_utf8_lossy(&body);
+        format!("JSON parse error: {} - body: {}", e, body_str)
+    })?;
 
     if !kraken.error.is_empty() {
         return Err(format!("Kraken error: {:?}", kraken.error));
@@ -477,25 +429,21 @@ where
 }
 
 /// Fetch historical OHLC data from Kraken
-async fn fetch_historical_prices(
-    pair: TradingPair,
-) -> Result<Vec<PricePoint>, String> {
+async fn fetch_historical_prices(pair: TradingPair) -> Result<Vec<PricePoint>, String> {
     let https = HttpsConnectorBuilder::new()
         .with_webpki_roots()
         .https_only()
         .enable_http1()
         .build();
 
-    let client: Client<_, Empty<Bytes>> =
-        Client::builder(TokioExecutor::new()).build(https);
+    let client: Client<_, Empty<Bytes>> = Client::builder(TokioExecutor::new()).build(https);
 
     // OHLC endpoint with 1-minute interval
     let url = format!(
         "https://api.kraken.com/0/public/OHLC?pair={}&interval=1",
         pair.api_pair()
     );
-    let uri: hyper::Uri =
-        url.parse().map_err(|e| format!("Invalid URI: {}", e))?;
+    let uri: hyper::Uri = url.parse().map_err(|e| format!("Invalid URI: {}", e))?;
 
     let req = Request::builder()
         .method("GET")
@@ -517,8 +465,7 @@ async fn fetch_historical_prices(
         .to_bytes();
 
     // OHLC response format: {"error":[],"result":{"XXBTZUSD":[[time,open,high,low,close,vwap,volume,count],...]}}
-    let json: serde_json::Value = serde_json::from_slice(&body)
-        .map_err(|e| format!("JSON parse error: {}", e))?;
+    let json: serde_json::Value = serde_json::from_slice(&body).map_err(|e| format!("JSON parse error: {}", e))?;
 
     if let Some(errors) = json.get("error").and_then(|e| e.as_array()) {
         if !errors.is_empty() {

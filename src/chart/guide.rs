@@ -24,9 +24,7 @@ impl PartialOrd for OrderedFloat {
 
 impl Ord for OrderedFloat {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.0
-            .partial_cmp(&other.0)
-            .unwrap_or(std::cmp::Ordering::Less)
+        self.0.partial_cmp(&other.0).unwrap_or(std::cmp::Ordering::Less)
     }
 }
 
@@ -111,8 +109,7 @@ impl TimeInterval {
 
     /// Floor a unix timestamp (seconds) to this interval's boundary using jiff
     fn floor(&self, timestamp_secs: i64) -> i64 {
-        let ts = Timestamp::from_second(timestamp_secs)
-            .unwrap_or(Timestamp::UNIX_EPOCH);
+        let ts = Timestamp::from_second(timestamp_secs).unwrap_or(Timestamp::UNIX_EPOCH);
         let zoned = ts.to_zoned(TimeZone::UTC);
 
         match self.unit {
@@ -123,11 +120,7 @@ impl TimeInterval {
             }
             TimeUnit::Minute => {
                 // Floor to interval multiple of minutes from midnight
-                let midnight = zoned
-                    .start_of_day()
-                    .unwrap_or(zoned)
-                    .timestamp()
-                    .as_second();
+                let midnight = zoned.start_of_day().unwrap_or(zoned).timestamp().as_second();
                 let secs_since_midnight = timestamp_secs - midnight;
                 let step = self.count * 60;
                 let aligned = (secs_since_midnight / step) * step;
@@ -135,11 +128,7 @@ impl TimeInterval {
             }
             TimeUnit::Hour => {
                 // Floor to interval multiple of hours from midnight
-                let midnight = zoned
-                    .start_of_day()
-                    .unwrap_or(zoned)
-                    .timestamp()
-                    .as_second();
+                let midnight = zoned.start_of_day().unwrap_or(zoned).timestamp().as_second();
                 let secs_since_midnight = timestamp_secs - midnight;
                 let step = self.count * 3600;
                 let aligned = (secs_since_midnight / step) * step;
@@ -156,8 +145,7 @@ impl TimeInterval {
                 // Floor to start of month, aligned to interval
                 let dt = zoned.datetime();
                 let month = dt.month();
-                let aligned_month =
-                    ((month - 1) / self.count as i8) * self.count as i8 + 1;
+                let aligned_month = ((month - 1) / self.count as i8) * self.count as i8 + 1;
                 jiff::civil::date(dt.year(), aligned_month, 1)
                     .to_zoned(TimeZone::UTC)
                     .unwrap()
@@ -167,8 +155,7 @@ impl TimeInterval {
             TimeUnit::Year => {
                 // Floor to start of year, aligned to interval
                 let year = zoned.datetime().year();
-                let aligned_year =
-                    (year / self.count as i16) * self.count as i16;
+                let aligned_year = (year / self.count as i16) * self.count as i16;
                 jiff::civil::date(aligned_year, 1, 1)
                     .to_zoned(TimeZone::UTC)
                     .unwrap()
@@ -180,8 +167,7 @@ impl TimeInterval {
 
     /// Advance a timestamp by this interval using jiff
     fn advance(&self, timestamp_secs: i64) -> i64 {
-        let ts = Timestamp::from_second(timestamp_secs)
-            .unwrap_or(Timestamp::UNIX_EPOCH);
+        let ts = Timestamp::from_second(timestamp_secs).unwrap_or(Timestamp::UNIX_EPOCH);
         let zoned = ts.to_zoned(TimeZone::UTC);
 
         let span = match self.unit {
@@ -199,8 +185,7 @@ impl TimeInterval {
 
     /// Move backward by one interval step
     fn retreat(&self, timestamp_secs: i64) -> i64 {
-        let ts = Timestamp::from_second(timestamp_secs)
-            .unwrap_or(Timestamp::UNIX_EPOCH);
+        let ts = Timestamp::from_second(timestamp_secs).unwrap_or(Timestamp::UNIX_EPOCH);
         let zoned = ts.to_zoned(TimeZone::UTC);
 
         let span = match self.unit {
@@ -218,8 +203,7 @@ impl TimeInterval {
 
     /// Format a timestamp using the appropriate format for this interval's unit
     fn format(&self, timestamp_secs: i64) -> String {
-        let ts = Timestamp::from_second(timestamp_secs)
-            .unwrap_or(Timestamp::UNIX_EPOCH);
+        let ts = Timestamp::from_second(timestamp_secs).unwrap_or(Timestamp::UNIX_EPOCH);
         let zoned = ts.to_zoned(TimeZone::UTC);
         zoned.strftime(self.unit.format_str()).to_string()
     }
@@ -246,7 +230,7 @@ const TIME_INTERVALS: &[TimeInterval] = &[
     TimeInterval::new(TimeUnit::Hour, 12),
     TimeInterval::new(TimeUnit::Day, 1),
     TimeInterval::new(TimeUnit::Day, 2),
-    TimeInterval::new(TimeUnit::Day, 7), // week
+    TimeInterval::new(TimeUnit::Day, 7),  // week
     TimeInterval::new(TimeUnit::Day, 14), // 2 weeks
     TimeInterval::new(TimeUnit::Month, 1),
     TimeInterval::new(TimeUnit::Month, 2),
@@ -262,10 +246,7 @@ const TIME_INTERVALS: &[TimeInterval] = &[
 ];
 
 /// Select the best time interval for a given range and target tick count
-fn select_time_interval(
-    range_seconds: f64,
-    target_count: usize,
-) -> TimeInterval {
+fn select_time_interval(range_seconds: f64, target_count: usize) -> TimeInterval {
     let target_step = range_seconds / target_count as f64;
 
     for interval in TIME_INTERVALS {
@@ -343,14 +324,8 @@ fn nice_time_ticks_with_interval(
 }
 
 /// Generate nice time-aligned tick positions
-fn nice_time_ticks(
-    min: f64,
-    max: f64,
-    target_count: usize,
-    alignment: Alignment,
-) -> Vec<f64> {
-    let (ticks, _) =
-        nice_time_ticks_with_interval(min, max, target_count, alignment);
+fn nice_time_ticks(min: f64, max: f64, target_count: usize, alignment: Alignment) -> Vec<f64> {
+    let (ticks, _) = nice_time_ticks_with_interval(min, max, target_count, alignment);
     ticks.into_iter().map(|t| t as f64).collect()
 }
 
@@ -402,24 +377,17 @@ where
     /// Uses `Kind::bounds()` to apply kind-appropriate normalization (padding,
     /// nice numbers, zero-anchoring) based on the axis kind.
     fn compute_axis_bounds(&self) -> Bounds {
-        let is_x_axis = matches!(
-            self.axis.orientation(),
-            Orientation::Bottom | Orientation::Top
-        );
+        let is_x_axis = matches!(self.axis.orientation(), Orientation::Bottom | Orientation::Top);
 
         // Get data range
         let (data_min, data_max) = self.find_range(is_x_axis);
 
         // Check for explicit user bounds
-        let has_explicit_bounds =
-            self.axis.lower_bound.is_some() && self.axis.upper_bound.is_some();
+        let has_explicit_bounds = self.axis.lower_bound.is_some() && self.axis.upper_bound.is_some();
 
         if has_explicit_bounds {
             // User specified exact bounds - use as-is
-            Bounds::exact(
-                self.axis.lower_bound.unwrap(),
-                self.axis.upper_bound.unwrap(),
-            )
+            Bounds::exact(self.axis.lower_bound.unwrap(), self.axis.upper_bound.unwrap())
         } else {
             // Apply partial overrides if any, then let Kind compute proper bounds
             let min = self.axis.lower_bound.unwrap_or(data_min);
@@ -430,17 +398,11 @@ where
 
     /// Derive tick positions, label positions, and label text from data
     /// Returns (label_info, tick_positions) based on label placement
-    fn compute_ticks_and_labels(
-        &self,
-        bounds: Bounds,
-    ) -> (Vec<(f64, String)>, Vec<f64>) {
+    fn compute_ticks_and_labels(&self, bounds: Bounds) -> (Vec<(f64, String)>, Vec<f64>) {
         use crate::axis::label;
         use crate::axis::tick::Frequency;
 
-        let is_x_axis = matches!(
-            self.axis.orientation(),
-            Orientation::Bottom | Orientation::Top
-        );
+        let is_x_axis = matches!(self.axis.orientation(), Orientation::Bottom | Orientation::Top);
         let is_categorical = is_x_axis && self.axis.is_categorical();
 
         let (axis_min, axis_max) = (bounds.min(), bounds.max());
@@ -474,9 +436,7 @@ where
                             values.insert(OrderedFloat(point.x));
                         }
                     }
-                    crate::Mark::Rule(_)
-                    | crate::Mark::Pie(_)
-                    | crate::Mark::Gauge(_) => {}
+                    crate::Mark::Rule(_) | crate::Mark::Pie(_) | crate::Mark::Gauge(_) => {}
                 }
             }
 
@@ -495,8 +455,7 @@ where
         // For time axes, get the interval for smart formatting
         let time_interval = if self.axis.kind() == Kind::Time {
             let alignment = self.axis.ticks.alignment;
-            let (_, interval) =
-                nice_time_ticks_with_interval(axis_min, axis_max, 6, alignment);
+            let (_, interval) = nice_time_ticks_with_interval(axis_min, axis_max, 6, alignment);
             Some(interval)
         } else {
             None
@@ -538,18 +497,12 @@ where
         };
 
         // Determine tick and label positions based on placement
-        let placement = self
-            .axis
-            .labels
-            .placement
-            .unwrap_or(label::Placement::OnTicks);
+        let placement = self.axis.labels.placement.unwrap_or(label::Placement::OnTicks);
         let (label_info, tick_positions) = match placement {
             label::Placement::OnTicks => {
                 // Labels and ticks at same positions
-                let labels: Vec<(f64, String)> = filtered_positions
-                    .iter()
-                    .map(|&pos| (pos, format_label(pos)))
-                    .collect();
+                let labels: Vec<(f64, String)> =
+                    filtered_positions.iter().map(|&pos| (pos, format_label(pos))).collect();
                 let ticks = filtered_positions.clone();
                 (labels, ticks)
             }
@@ -558,17 +511,11 @@ where
                     // For categorical data with BetweenTicks:
                     // - Labels at data positions (centers): [0, 1, 2, 3, 4, 5]
                     // - Ticks at boundaries (between): [-0.5, 0.5, 1.5, 2.5, 3.5, 4.5, 5.5]
-                    let labels: Vec<(f64, String)> = filtered_positions
-                        .iter()
-                        .map(|&pos| (pos, format_label(pos)))
-                        .collect();
+                    let labels: Vec<(f64, String)> =
+                        filtered_positions.iter().map(|&pos| (pos, format_label(pos))).collect();
 
-                    let min = filtered_positions
-                        .iter()
-                        .fold(f64::INFINITY, |a, &b| a.min(b));
-                    let _max = filtered_positions
-                        .iter()
-                        .fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+                    let min = filtered_positions.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+                    let _max = filtered_positions.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
 
                     // Generate boundary ticks
                     let mut ticks = Vec::new();
@@ -581,10 +528,8 @@ where
                     (labels, ticks)
                 } else {
                     // For continuous data, fall back to OnTicks
-                    let labels: Vec<(f64, String)> = filtered_positions
-                        .iter()
-                        .map(|&pos| (pos, format_label(pos)))
-                        .collect();
+                    let labels: Vec<(f64, String)> =
+                        filtered_positions.iter().map(|&pos| (pos, format_label(pos))).collect();
                     let ticks = filtered_positions.clone();
                     (labels, ticks)
                 }
@@ -629,8 +574,7 @@ where
                         // For grouped/overlaid bars or X-axis, use individual values
                         for series in &bars.series {
                             for point in &series.points {
-                                let val =
-                                    if is_x_axis { point.x } else { point.y };
+                                let val = if is_x_axis { point.x } else { point.y };
                                 min = min.min(val);
                                 max = max.max(val);
                             }
@@ -672,15 +616,11 @@ where
                     }
                 }
                 crate::Mark::Rule(rule) => match rule.orientation {
-                    crate::mark::rule::RuleOrientation::Horizontal
-                        if !is_x_axis =>
-                    {
+                    crate::mark::rule::RuleOrientation::Horizontal if !is_x_axis => {
                         min = min.min(rule.value);
                         max = max.max(rule.value);
                     }
-                    crate::mark::rule::RuleOrientation::Vertical
-                        if is_x_axis =>
-                    {
+                    crate::mark::rule::RuleOrientation::Vertical if is_x_axis => {
                         min = min.min(rule.value);
                         max = max.max(rule.value);
                     }
@@ -693,9 +633,10 @@ where
         // For Y-axis with bar/waterfall charts, ensure we include zero
         // (Line charts should fit to the data range)
         if !is_x_axis {
-            let has_bars = self.marks.iter().any(|m| {
-                matches!(m, crate::Mark::Bars(_) | crate::Mark::Waterfall(_))
-            });
+            let has_bars = self
+                .marks
+                .iter()
+                .any(|m| matches!(m, crate::Mark::Bars(_) | crate::Mark::Waterfall(_)));
             if has_bars {
                 min = min.min(0.0);
             }
@@ -711,13 +652,7 @@ where
 
     /// Generate nice tick positions within [min, max]
     /// Bounds are assumed to already be nice (from compute_axis_bounds)
-    fn nice_ticks(
-        &self,
-        min: f64,
-        max: f64,
-        target_count: usize,
-        alignment: Alignment,
-    ) -> Vec<f64> {
+    fn nice_ticks(&self, min: f64, max: f64, target_count: usize, alignment: Alignment) -> Vec<f64> {
         if min >= max {
             return vec![min];
         }
@@ -763,8 +698,7 @@ where
     pub(super) fn state(&self) -> Tree {
         // Compute bounds first, then ticks within bounds
         let bounds = self.compute_axis_bounds();
-        let (label_info, _tick_positions) =
-            self.compute_ticks_and_labels(bounds);
+        let (label_info, _tick_positions) = self.compute_ticks_and_labels(bounds);
 
         // Create a tree for each label's paragraph
         let children = label_info.iter().map(|_| Tree::empty()).collect();
@@ -786,24 +720,14 @@ where
         let bounds = self.compute_axis_bounds();
         let (label_info, _) = self.compute_ticks_and_labels(bounds);
 
-        tree.diff_children_custom(
-            &label_info,
-            |_tree, _tick| {},
-            |_tick| Tree::empty(),
-        );
+        tree.diff_children_custom(&label_info, |_tree, _tick| {}, |_tick| Tree::empty());
     }
 
     /// Layout the guide, measuring text labels and positioning ticks.
-    pub fn layout(
-        &self,
-        tree: &mut Tree,
-        renderer: &Renderer,
-        limits: &Limits,
-    ) -> Node {
+    pub fn layout(&self, tree: &mut Tree, renderer: &Renderer, limits: &Limits) -> Node {
         // Compute bounds first, then generate ticks within those bounds
         let bounds = self.compute_axis_bounds();
-        let (label_info, tick_positions) =
-            self.compute_ticks_and_labels(bounds);
+        let (label_info, tick_positions) = self.compute_ticks_and_labels(bounds);
 
         // Update state with computed values
         let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
@@ -814,9 +738,7 @@ where
         let labels = &state.label_info;
         let (min_value, max_value) = (state.bounds.min(), state.bounds.max());
 
-        if labels.is_empty()
-            || (!self.axis.has_ticks() && !self.axis.has_labels())
-        {
+        if labels.is_empty() || (!self.axis.has_ticks() && !self.axis.has_labels()) {
             return Node::new(Size::ZERO);
         }
 
@@ -880,10 +802,7 @@ where
                 bounds: Size::INFINITE,
                 size: self.axis.label_size().unwrap_or(12.0.into()),
                 line_height: text::LineHeight::default(),
-                font: self
-                    .axis
-                    .font()
-                    .unwrap_or_else(|| renderer.default_font()),
+                font: self.axis.font().unwrap_or_else(|| renderer.default_font()),
                 align_x: text::Alignment::Left,
                 align_y: alignment::Vertical::Top,
                 shaping: text::Shaping::Basic,
@@ -906,9 +825,7 @@ where
             }
 
             let y = if value_range > 0.0 {
-                (max_size.height as f64
-                    - ((tick_value - min_value) / value_range)
-                        * max_size.height as f64) as f32
+                (max_size.height as f64 - ((tick_value - min_value) / value_range) * max_size.height as f64) as f32
             } else {
                 max_size.height / 2.0
             };
@@ -967,10 +884,7 @@ where
                 bounds: Size::INFINITE,
                 size: self.axis.label_size().unwrap_or(12.0.into()),
                 line_height: text::LineHeight::default(),
-                font: self
-                    .axis
-                    .font()
-                    .unwrap_or_else(|| renderer.default_font()),
+                font: self.axis.font().unwrap_or_else(|| renderer.default_font()),
                 align_x: text::Alignment::Left,
                 align_y: alignment::Vertical::Top,
                 shaping: text::Shaping::Basic,
@@ -984,16 +898,14 @@ where
             // Calculate X position for this tick within our width
             let tick_value = *pos;
             let x = if value_range > 0.0 {
-                (((tick_value - min_value) / value_range)
-                    * max_size.width as f64) as f32
+                (((tick_value - min_value) / value_range) * max_size.width as f64) as f32
             } else {
                 max_size.width / 2.0
             };
 
             // Create a node for this tick positioned at the calculated x
             children.push(
-                Node::new(Size::new(label_width, 20.0))
-                    .move_to(Point::ORIGIN + crate::core::Vector::new(x, 0.0)),
+                Node::new(Size::new(label_width, 20.0)).move_to(Point::ORIGIN + crate::core::Vector::new(x, 0.0)),
             );
         }
 
@@ -1113,8 +1025,7 @@ where
                     } else {
                         0.5
                     };
-                    let pixel_y =
-                        bounds.y + bounds.height - normalized * bounds.height;
+                    let pixel_y = bounds.y + bounds.height - normalized * bounds.height;
 
                     // Horizontal tick mark
                     renderer.fill_quad(
@@ -1135,9 +1046,7 @@ where
         }
 
         // Then, draw labels at their positions from layout
-        for ((i, (_pos, _label)), child_layout) in
-            label_data.iter().enumerate().zip(layout.children())
-        {
+        for ((i, (_pos, _label)), child_layout) in label_data.iter().enumerate().zip(layout.children()) {
             let child_bounds = child_layout.bounds();
 
             // Draw label if we have it
@@ -1162,10 +1071,7 @@ where
                     Orientation::Left => {
                         // Right align, vertically center on tick
                         Point::new(
-                            bounds.x + bounds.width
-                                - tick_length
-                                - label_offset
-                                - paragraph_bounds.width,
+                            bounds.x + bounds.width - tick_length - label_offset - paragraph_bounds.width,
                             child_bounds.y - paragraph_bounds.height / 2.0,
                         )
                     }
@@ -1180,20 +1086,12 @@ where
                         // Center horizontally on tick, position above tick mark
                         Point::new(
                             child_bounds.x - paragraph_bounds.width / 2.0,
-                            bounds.y + bounds.height
-                                - tick_length
-                                - label_offset
-                                - paragraph_bounds.height,
+                            bounds.y + bounds.height - tick_length - label_offset - paragraph_bounds.height,
                         )
                     }
                 };
 
-                renderer.fill_paragraph(
-                    paragraph.raw(),
-                    anchor,
-                    label_color,
-                    *viewport,
-                );
+                renderer.fill_paragraph(paragraph.raw(), anchor, label_color, *viewport);
             }
         }
     }
@@ -1319,8 +1217,7 @@ mod tests {
         let min = base as f64;
         let max = min + 3600.0;
 
-        let (ticks, interval) =
-            nice_time_ticks_with_interval(min, max, 6, Alignment::Auto);
+        let (ticks, interval) = nice_time_ticks_with_interval(min, max, 6, Alignment::Auto);
 
         // Should select 10-minute intervals
         assert_eq!(interval.unit, TimeUnit::Minute);
@@ -1328,12 +1225,7 @@ mod tests {
 
         // Verify ticks are at 10-minute boundaries
         for tick in &ticks {
-            assert_eq!(
-                tick % 600,
-                0,
-                "Tick {} not aligned to 10 minutes",
-                tick
-            );
+            assert_eq!(tick % 600, 0, "Tick {} not aligned to 10 minutes", tick);
         }
 
         // Should have 6-7 ticks (depends on whether 13:00 is included)

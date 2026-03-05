@@ -104,10 +104,7 @@ impl Label {
     }
 
     /// Set a custom format function for the label text.
-    pub fn format(
-        mut self,
-        f: impl Fn(f64) -> String + Send + Sync + 'static,
-    ) -> Self {
+    pub fn format(mut self, f: impl Fn(f64) -> String + Send + Sync + 'static) -> Self {
         self.format = Arc::new(f);
         self
     }
@@ -160,9 +157,7 @@ impl std::ops::Add<Show> for Position {
     }
 }
 
-impl<F: Fn(f64) -> String + Send + Sync + 'static> std::ops::Add<F>
-    for Position
-{
+impl<F: Fn(f64) -> String + Send + Sync + 'static> std::ops::Add<F> for Position {
     type Output = Label;
     fn add(self, format: F) -> Label {
         Label::from(self).format(format)

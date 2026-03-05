@@ -18,10 +18,7 @@ pub enum Property {
     /// Label property (applies to all series)
     Label(label::Property),
     /// A property of a specific series
-    Series {
-        index: usize,
-        property: series::Property,
-    },
+    Series { index: usize, property: series::Property },
 }
 
 impl Map for Property {}

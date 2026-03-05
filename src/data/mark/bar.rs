@@ -367,8 +367,6 @@ impl From<Bars> for crate::Data {
 
 impl<const N: usize> From<[Bars; N]> for crate::Data {
     fn from(bars: [Bars; N]) -> Self {
-        crate::Data::from(
-            bars.into_iter().map(crate::Mark::Bars).collect::<Vec<_>>(),
-        )
+        crate::Data::from(bars.into_iter().map(crate::Mark::Bars).collect::<Vec<_>>())
     }
 }

@@ -35,9 +35,7 @@ impl Resolved {
         let n = n.max(1);
         let colors = match palette {
             Palette::Categorical => generate_categorical(seed, n),
-            Palette::Sequential => {
-                generate_sequential(seed.primary, seed.background, n)
-            }
+            Palette::Sequential => generate_sequential(seed.primary, seed.background, n),
             Palette::Gradient(stops) => generate_gradient(stops, n),
         };
         Self { colors }
@@ -162,12 +160,7 @@ fn from_oklch(oklch: Oklch) -> crate::core::Color {
     let g = -1.268438 * l + 2.6097574 * m - 0.34131938 * s;
     let b = -0.0041960863 * l - 0.7034186 * m + 1.7076147 * s;
 
-    crate::core::Color::from_linear_rgba(
-        r.clamp(0.0, 1.0),
-        g.clamp(0.0, 1.0),
-        b.clamp(0.0, 1.0),
-        alpha,
-    )
+    crate::core::Color::from_linear_rgba(r.clamp(0.0, 1.0), g.clamp(0.0, 1.0), b.clamp(0.0, 1.0), alpha)
 }
 
 /// Determine if a background is dark (OKLch lightness < 0.5).
@@ -178,11 +171,7 @@ fn is_dark_background(bg: crate::core::Color) -> bool {
 /// Shift a color's lightness to distinguish it from the original.
 /// Each `pass` (1, 2, ...) shifts further.
 /// Light backgrounds → lighter; dark backgrounds → darker.
-pub fn shift_lightness(
-    color: crate::core::Color,
-    background: crate::core::Color,
-    pass: usize,
-) -> crate::core::Color {
+pub fn shift_lightness(color: crate::core::Color, background: crate::core::Color, pass: usize) -> crate::core::Color {
     let mut oklch = to_oklch(color);
     let shift = 0.12 * pass as f32;
     if is_dark_background(background) {
@@ -199,13 +188,7 @@ pub fn shift_lightness(
 fn generate_categorical(seed: &PaletteSeed, n: usize) -> Vec<Color> {
     // Base pool reordered for max visual separation:
     // primary, secondary, success, warning, danger
-    let base_pool = [
-        seed.primary,
-        seed.secondary,
-        seed.success,
-        seed.warning,
-        seed.danger,
-    ];
+    let base_pool = [seed.primary, seed.secondary, seed.success, seed.warning, seed.danger];
 
     let mut colors = Vec::with_capacity(n);
 
@@ -230,11 +213,7 @@ fn generate_categorical(seed: &PaletteSeed, n: usize) -> Vec<Color> {
 }
 
 /// Generate sequential colors: shades of one hue.
-fn generate_sequential(
-    primary: crate::core::Color,
-    background: crate::core::Color,
-    n: usize,
-) -> Vec<Color> {
+fn generate_sequential(primary: crate::core::Color, background: crate::core::Color, n: usize) -> Vec<Color> {
     if n == 1 {
         return vec![Color::Fixed(primary)];
     }
@@ -278,8 +257,7 @@ fn generate_gradient(stops: &[crate::core::Color], n: usize) -> Vec<Color> {
             let t = i as f32 / (n - 1).max(1) as f32;
             // Map t to segment
             let segment_t = t * (oklch_stops.len() - 1) as f32;
-            let seg_idx =
-                (segment_t.floor() as usize).min(oklch_stops.len() - 2);
+            let seg_idx = (segment_t.floor() as usize).min(oklch_stops.len() - 2);
             let local_t = segment_t - seg_idx as f32;
 
             let a = &oklch_stops[seg_idx];

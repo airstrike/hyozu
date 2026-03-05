@@ -55,12 +55,7 @@ where
     }
 
     /// Layout the title, measuring text and calculating size
-    pub fn layout(
-        &self,
-        tree: &mut Tree,
-        renderer: &Renderer,
-        limits: &Limits,
-    ) -> Node {
+    pub fn layout(&self, tree: &mut Tree, renderer: &Renderer, limits: &Limits) -> Node {
         let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
 
         // Update paragraph with title text
@@ -82,8 +77,7 @@ where
         let padding = 10.0; // Padding above and below title
 
         // Title takes full width, height is text height plus padding
-        let size =
-            Size::new(limits.max().width, text_size.height + padding * 2.0);
+        let size = Size::new(limits.max().width, text_size.height + padding * 2.0);
 
         Node::new(size)
     }
@@ -108,12 +102,10 @@ where
         // Get text color from theme, resolved relative to background
         let background = design.background_color();
         let text_pair = design.text_pair();
-        let text_color =
-            design.text_color().resolve(background, text_pair, None);
+        let text_color = design.text_color().resolve(background, text_pair, None);
 
         // Draw title text centered at top with padding
-        let position =
-            Point::new(bounds.x + bounds.width / 2.0, bounds.y + padding);
+        let position = Point::new(bounds.x + bounds.width / 2.0, bounds.y + padding);
 
         renderer.fill_text(
             crate::core::text::Text {

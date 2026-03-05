@@ -54,21 +54,10 @@ where
     }
 
     /// Layout the scatter — transform data to pixel coordinates
-    pub fn layout(
-        &self,
-        tree: &mut Tree,
-        _renderer: &Renderer,
-        _limits: &Limits,
-        plane: &Plane,
-    ) -> Node {
+    pub fn layout(&self, tree: &mut Tree, _renderer: &Renderer, _limits: &Limits, plane: &Plane) -> Node {
         let state = tree.state.downcast_mut::<State>();
 
-        state.pixel_points = self
-            .data
-            .points
-            .iter()
-            .map(|p| plane.to_pixel(*p))
-            .collect();
+        state.pixel_points = self.data.points.iter().map(|p| plane.to_pixel(*p)).collect();
 
         Node::new(Size::ZERO)
     }
@@ -103,9 +92,7 @@ where
         let color = if let Some(data_color) = self.data.color {
             data_color.resolve(background, text_pair, None)
         } else {
-            palette
-                .get(color_offset)
-                .resolve(background, text_pair, None)
+            palette.get(color_offset).resolve(background, text_pair, None)
         };
 
         let marker_config = &self.data.marker;
@@ -126,124 +113,46 @@ where
                     );
                 }
                 Shape::Diamond => {
-                    builder.move_to(Point::new(
-                        pixel_point.x,
-                        pixel_point.y - half,
-                    ));
-                    builder.line_to(Point::new(
-                        pixel_point.x + half,
-                        pixel_point.y,
-                    ));
-                    builder.line_to(Point::new(
-                        pixel_point.x,
-                        pixel_point.y + half,
-                    ));
-                    builder.line_to(Point::new(
-                        pixel_point.x - half,
-                        pixel_point.y,
-                    ));
+                    builder.move_to(Point::new(pixel_point.x, pixel_point.y - half));
+                    builder.line_to(Point::new(pixel_point.x + half, pixel_point.y));
+                    builder.line_to(Point::new(pixel_point.x, pixel_point.y + half));
+                    builder.line_to(Point::new(pixel_point.x - half, pixel_point.y));
                     builder.close();
                 }
                 Shape::Triangle => {
-                    builder.move_to(Point::new(
-                        pixel_point.x,
-                        pixel_point.y - half,
-                    ));
-                    builder.line_to(Point::new(
-                        pixel_point.x + half,
-                        pixel_point.y + half,
-                    ));
-                    builder.line_to(Point::new(
-                        pixel_point.x - half,
-                        pixel_point.y + half,
-                    ));
+                    builder.move_to(Point::new(pixel_point.x, pixel_point.y - half));
+                    builder.line_to(Point::new(pixel_point.x + half, pixel_point.y + half));
+                    builder.line_to(Point::new(pixel_point.x - half, pixel_point.y + half));
                     builder.close();
                 }
                 Shape::TriangleDown => {
-                    builder.move_to(Point::new(
-                        pixel_point.x,
-                        pixel_point.y + half,
-                    ));
-                    builder.line_to(Point::new(
-                        pixel_point.x + half,
-                        pixel_point.y - half,
-                    ));
-                    builder.line_to(Point::new(
-                        pixel_point.x - half,
-                        pixel_point.y - half,
-                    ));
+                    builder.move_to(Point::new(pixel_point.x, pixel_point.y + half));
+                    builder.line_to(Point::new(pixel_point.x + half, pixel_point.y - half));
+                    builder.line_to(Point::new(pixel_point.x - half, pixel_point.y - half));
                     builder.close();
                 }
                 Shape::Cross => {
                     let arm = half * 0.3;
-                    builder.move_to(Point::new(
-                        pixel_point.x - arm,
-                        pixel_point.y - half,
-                    ));
-                    builder.line_to(Point::new(
-                        pixel_point.x + arm,
-                        pixel_point.y - half,
-                    ));
-                    builder.line_to(Point::new(
-                        pixel_point.x + arm,
-                        pixel_point.y - arm,
-                    ));
-                    builder.line_to(Point::new(
-                        pixel_point.x + half,
-                        pixel_point.y - arm,
-                    ));
-                    builder.line_to(Point::new(
-                        pixel_point.x + half,
-                        pixel_point.y + arm,
-                    ));
-                    builder.line_to(Point::new(
-                        pixel_point.x + arm,
-                        pixel_point.y + arm,
-                    ));
-                    builder.line_to(Point::new(
-                        pixel_point.x + arm,
-                        pixel_point.y + half,
-                    ));
-                    builder.line_to(Point::new(
-                        pixel_point.x - arm,
-                        pixel_point.y + half,
-                    ));
-                    builder.line_to(Point::new(
-                        pixel_point.x - arm,
-                        pixel_point.y + arm,
-                    ));
-                    builder.line_to(Point::new(
-                        pixel_point.x - half,
-                        pixel_point.y + arm,
-                    ));
-                    builder.line_to(Point::new(
-                        pixel_point.x - half,
-                        pixel_point.y - arm,
-                    ));
-                    builder.line_to(Point::new(
-                        pixel_point.x - arm,
-                        pixel_point.y - arm,
-                    ));
+                    builder.move_to(Point::new(pixel_point.x - arm, pixel_point.y - half));
+                    builder.line_to(Point::new(pixel_point.x + arm, pixel_point.y - half));
+                    builder.line_to(Point::new(pixel_point.x + arm, pixel_point.y - arm));
+                    builder.line_to(Point::new(pixel_point.x + half, pixel_point.y - arm));
+                    builder.line_to(Point::new(pixel_point.x + half, pixel_point.y + arm));
+                    builder.line_to(Point::new(pixel_point.x + arm, pixel_point.y + arm));
+                    builder.line_to(Point::new(pixel_point.x + arm, pixel_point.y + half));
+                    builder.line_to(Point::new(pixel_point.x - arm, pixel_point.y + half));
+                    builder.line_to(Point::new(pixel_point.x - arm, pixel_point.y + arm));
+                    builder.line_to(Point::new(pixel_point.x - half, pixel_point.y + arm));
+                    builder.line_to(Point::new(pixel_point.x - half, pixel_point.y - arm));
+                    builder.line_to(Point::new(pixel_point.x - arm, pixel_point.y - arm));
                     builder.close();
                 }
                 Shape::X => {
                     let diag = half * 0.707;
-                    builder.move_to(Point::new(
-                        pixel_point.x - diag,
-                        pixel_point.y - diag,
-                    ));
-                    builder.line_to(Point::new(
-                        pixel_point.x + diag,
-                        pixel_point.y + diag,
-                    ));
-                    builder.move_to(Point::new(
-                        pixel_point.x + diag,
-                        pixel_point.y - diag,
-                    ));
-                    builder.line_to(Point::new(
-                        pixel_point.x - diag,
-                        pixel_point.y + diag,
-                    ));
+                    builder.move_to(Point::new(pixel_point.x - diag, pixel_point.y - diag));
+                    builder.line_to(Point::new(pixel_point.x + diag, pixel_point.y + diag));
+                    builder.move_to(Point::new(pixel_point.x + diag, pixel_point.y - diag));
+                    builder.line_to(Point::new(pixel_point.x - diag, pixel_point.y + diag));
                 }
             });
 
@@ -260,8 +169,7 @@ where
 
             // Stroke
             if let Some(stroke_color_spec) = marker_config.stroke {
-                let stroke_color =
-                    stroke_color_spec.resolve(background, text_pair, None);
+                let stroke_color = stroke_color_spec.resolve(background, text_pair, None);
                 frame.stroke(
                     &path,
                     Stroke::default()
@@ -279,11 +187,8 @@ where
         }
 
         let geometry = frame.into_geometry();
-        renderer.with_translation(
-            crate::core::Vector::new(layout_bounds.x, layout_bounds.y),
-            |renderer| {
-                renderer.draw_geometry(geometry);
-            },
-        );
+        renderer.with_translation(crate::core::Vector::new(layout_bounds.x, layout_bounds.y), |renderer| {
+            renderer.draw_geometry(geometry);
+        });
     }
 }

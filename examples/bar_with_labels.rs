@@ -68,18 +68,13 @@ impl App {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::LoadData => {
-                let bars = bars!([1500, 1600, 1800, 1900, 2100, 2000], [
-                    800, 1200, 1000, 1400, 900, 1100
-                ],)
-                .data_labels(bar::label::Position::End + currency)
-                .stacked();
+                let bars = bars!([1500, 1600, 1800, 1900, 2100, 2000], [800, 1200, 1000, 1400, 900, 1100],)
+                    .data_labels(bar::label::Position::End + currency)
+                    .stacked();
 
                 let data = Data::from(bars)
                     .title("Monthly Sales with Labels")
-                    .x_axis_labels(
-                        Placement::OnTicks
-                            + ["Jan", "Feb", "Mar", "Apr", "May", "Jun"],
-                    );
+                    .x_axis_labels(Placement::OnTicks + ["Jan", "Feb", "Mar", "Apr", "May", "Jun"]);
 
                 self.data = data;
             }
@@ -130,12 +125,12 @@ impl App {
                 return None;
             };
             match key {
-                Key::Named(Named::PageDown)
-                | Key::Named(Named::ArrowRight)
-                | Key::Named(Named::ArrowDown) => Some(Message::NextTheme),
-                Key::Named(Named::PageUp)
-                | Key::Named(Named::ArrowLeft)
-                | Key::Named(Named::ArrowUp) => Some(Message::PreviousTheme),
+                Key::Named(Named::PageDown) | Key::Named(Named::ArrowRight) | Key::Named(Named::ArrowDown) => {
+                    Some(Message::NextTheme)
+                }
+                Key::Named(Named::PageUp) | Key::Named(Named::ArrowLeft) | Key::Named(Named::ArrowUp) => {
+                    Some(Message::PreviousTheme)
+                }
                 Key::Named(Named::Home) => Some(Message::FirstTheme),
                 Key::Named(Named::End) => Some(Message::LastTheme),
                 _ => None,
@@ -146,11 +141,9 @@ impl App {
     fn view(&self) -> iced::Element<'_, Message> {
         // Read current values from data using ? chains
         let position =
-            (|| Some(self.data.bars(0)?.series(0)?.label()?.position()))()
-                .unwrap_or(bar::label::Position::Above);
+            (|| Some(self.data.bars(0)?.series(0)?.label()?.position()))().unwrap_or(bar::label::Position::Above);
 
-        let x_axis_placement = (|| self.data.x_axis_ref()?.placement())()
-            .unwrap_or(Placement::OnTicks);
+        let x_axis_placement = (|| self.data.x_axis_ref()?.placement())().unwrap_or(Placement::OnTicks);
 
         let stacked = self
             .data
@@ -166,8 +159,7 @@ impl App {
                 .map(Message::Set)
         };
 
-        let on_placement =
-            |p| props::axis::Placement(p).map(item::XAxis).map(Message::Set);
+        let on_placement = |p| props::axis::Placement(p).map(item::XAxis).map(Message::Set);
 
         let on_layout = |stacked: bool| {
             props::bar::Layout(if stacked {
@@ -182,12 +174,7 @@ impl App {
         let position_controls = column![
             row![
                 "X-Axis Labels:",
-                radio(
-                    "On Ticks",
-                    Placement::OnTicks,
-                    Some(x_axis_placement),
-                    on_placement
-                ),
+                radio("On Ticks", Placement::OnTicks, Some(x_axis_placement), on_placement),
                 radio(
                     "Between Ticks",
                     Placement::BetweenTicks,
@@ -199,48 +186,24 @@ impl App {
             .spacing(10),
             row![
                 "Bar Labels:",
-                radio(
-                    "Above",
-                    bar::label::Position::Above,
-                    Some(position),
-                    on_position
-                ),
-                radio(
-                    "End",
-                    bar::label::Position::End,
-                    Some(position),
-                    on_position
-                ),
-                radio(
-                    "Center",
-                    bar::label::Position::Center,
-                    Some(position),
-                    on_position
-                ),
-                radio(
-                    "Base",
-                    bar::label::Position::Base,
-                    Some(position),
-                    on_position
-                ),
+                radio("Above", bar::label::Position::Above, Some(position), on_position),
+                radio("End", bar::label::Position::End, Some(position), on_position),
+                radio("Center", bar::label::Position::Center, Some(position), on_position),
+                radio("Base", bar::label::Position::Base, Some(position), on_position),
             ]
             .align_y(Center)
             .spacing(10)
         ]
         .spacing(10);
 
-        let layout_controls =
-            row![checkbox(stacked).label("Stacked").on_toggle(on_layout)]
-                .align_y(Center)
-                .spacing(10);
+        let layout_controls = row![checkbox(stacked).label("Stacked").on_toggle(on_layout)]
+            .align_y(Center)
+            .spacing(10);
 
         let theme_picker = row![
             "Theme:",
-            pick_list(
-                Some(self.theme.clone()),
-                self.all_themes.clone(),
-                |t: &Theme| t.to_string(),
-            )
+            pick_list(Some(self.theme.clone()), self.all_themes.clone(), |t: &Theme| t
+                .to_string(),)
             .on_select(Message::ThemeChanged)
             .width(Fill)
             .placeholder("Paper (default)"),
@@ -253,12 +216,9 @@ impl App {
             .align_y(Center);
 
         center(
-            column![
-                controls,
-                chart(&self.data).design(&self.theme).padding(20)
-            ]
-            .align_x(Center)
-            .spacing(20),
+            column![controls, chart(&self.data).design(&self.theme).padding(20)]
+                .align_x(Center)
+                .spacing(20),
         )
         .padding(20)
         .into()

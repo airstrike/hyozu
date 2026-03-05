@@ -35,8 +35,7 @@ impl App {
         let size = 0.75; // Default bar length (75% of available width)
         let spacing = 0.0; // Default spacing (no spacing)
 
-        let (simple, with_placement, with_transform, full_control) =
-            Self::create_charts(size, spacing);
+        let (simple, with_placement, with_transform, full_control) = Self::create_charts(size, spacing);
 
         (
             Self {
@@ -55,14 +54,10 @@ impl App {
         let months = ["January", "February", "March", "April", "May", "Jun"];
 
         // 1. Simple categorical labels
-        let simple = Data::from(
-            bars([1200, 1900, 1500, 2200])
-                .with_size(size)
-                .with_spacing(spacing),
-        )
-        .title("Simple")
-        .x_axis_labels(["Q1", "Q2", "Q3", "Q4"])
-        .y_axis_labels(|v| format!("${:.0}", v));
+        let simple = Data::from(bars([1200, 1900, 1500, 2200]).with_size(size).with_spacing(spacing))
+            .title("Simple")
+            .x_axis_labels(["Q1", "Q2", "Q3", "Q4"])
+            .y_axis_labels(|v| format!("${:.0}", v));
 
         // 2. Placement + labels with convenience methods
         let with_placement = Data::from(
@@ -72,9 +67,7 @@ impl App {
                 .data_labels(bar::label::Position::End),
         )
         .title("Grouped Bars, Labels on End")
-        .x_axis_labels(
-            Placement::BetweenTicks + months + |m| m[..3].to_string(),
-        )
+        .x_axis_labels(Placement::BetweenTicks + months + |m| m[..3].to_string())
         .y_axis_labels(|v| format!("{:.0}%", v));
 
         // 3. Transform labels with .map()
@@ -85,19 +78,13 @@ impl App {
                 .data_labels(None),
         )
         .title("Simple label formatting")
-        .x_axis_labels(
-            Placement::OnTicks + months.map(|m| m[..1].to_uppercase()),
-        )
+        .x_axis_labels(Placement::OnTicks + months.map(|m| m[..1].to_uppercase()))
         .y_axis_labels(|v| format!("${:.0}k", v / 1000.0));
 
         // 4. Multiple axis properties (use .x_axis() as escape hatch)
-        let full_control = Data::from(
-            bars([45, 67, 52, 78]).with_size(size).with_spacing(spacing),
-        )
-        .title("Different label API")
-        .x_axis(|axis| {
-            axis.labels(Placement::OnTicks + ["North", "South", "East", "West"])
-        });
+        let full_control = Data::from(bars([45, 67, 52, 78]).with_size(size).with_spacing(spacing))
+            .title("Different label API")
+            .x_axis(|axis| axis.labels(Placement::OnTicks + ["North", "South", "East", "West"]));
 
         (simple, with_placement, with_transform, full_control)
     }
@@ -107,12 +94,8 @@ impl App {
             Message::Set(ref item) => {
                 // Update local state for display
                 match item {
-                    item::Item::Bars(_, props::bar::Property::Size(v)) => {
-                        self.size = *v
-                    }
-                    item::Item::Bars(_, props::bar::Property::Spacing(v)) => {
-                        self.spacing = *v
-                    }
+                    item::Item::Bars(_, props::bar::Property::Size(v)) => self.size = *v,
+                    item::Item::Bars(_, props::bar::Property::Spacing(v)) => self.spacing = *v,
                     _ => {}
                 }
 
@@ -134,35 +117,23 @@ impl App {
                     row![
                         row![
                             text("Bar Length:"),
-                            Element::from(
-                                slider(0.1..=1.0, self.size, props::bar::Size)
-                                    .step(0.01)
-                                    .width(200)
-                            )
-                            .map(item::Bars.with(0))
-                            .map(Message::Set),
-                            text!("{:.0}%", self.size * 100.0)
-                                .width(40)
-                                .align_x(End),
+                            Element::from(slider(0.1..=1.0, self.size, props::bar::Size).step(0.01).width(200))
+                                .map(item::Bars.with(0))
+                                .map(Message::Set),
+                            text!("{:.0}%", self.size * 100.0).width(40).align_x(End),
                         ]
                         .spacing(5)
                         .align_y(Center),
                         row![
                             text("Spacing:"),
                             Element::from(
-                                slider(
-                                    0.0..=1.0,
-                                    self.spacing,
-                                    props::bar::Spacing
-                                )
-                                .step(0.01)
-                                .width(200)
+                                slider(0.0..=1.0, self.spacing, props::bar::Spacing)
+                                    .step(0.01)
+                                    .width(200)
                             )
                             .map(item::Bars.with(0))
                             .map(Message::Set),
-                            text!("{:.0}%", self.spacing * 100.0)
-                                .width(40)
-                                .align_x(End),
+                            text!("{:.0}%", self.spacing * 100.0).width(40).align_x(End),
                         ]
                         .spacing(5)
                         .align_y(Center),

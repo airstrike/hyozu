@@ -132,11 +132,7 @@ impl App {
         ])
         .with_name("Virginica");
 
-        let marks: Vec<Mark> = vec![
-            Mark::from(setosa),
-            Mark::from(versicolor),
-            Mark::from(virginica),
-        ];
+        let marks: Vec<Mark> = vec![Mark::from(setosa), Mark::from(versicolor), Mark::from(virginica)];
 
         (
             Self {
@@ -197,12 +193,12 @@ impl App {
                 return None;
             };
             match key {
-                Key::Named(Named::PageDown)
-                | Key::Named(Named::ArrowRight)
-                | Key::Named(Named::ArrowDown) => Some(Message::NextTheme),
-                Key::Named(Named::PageUp)
-                | Key::Named(Named::ArrowLeft)
-                | Key::Named(Named::ArrowUp) => Some(Message::PreviousTheme),
+                Key::Named(Named::PageDown) | Key::Named(Named::ArrowRight) | Key::Named(Named::ArrowDown) => {
+                    Some(Message::NextTheme)
+                }
+                Key::Named(Named::PageUp) | Key::Named(Named::ArrowLeft) | Key::Named(Named::ArrowUp) => {
+                    Some(Message::PreviousTheme)
+                }
                 Key::Named(Named::Home) => Some(Message::FirstTheme),
                 Key::Named(Named::End) => Some(Message::LastTheme),
                 _ => None,
@@ -213,11 +209,8 @@ impl App {
     fn view(&self) -> iced::Element<'_, Message> {
         let theme_picker = row![
             "Theme:",
-            pick_list(
-                Some(self.theme.clone()),
-                self.all_themes.clone(),
-                |t: &Theme| t.to_string(),
-            )
+            pick_list(Some(self.theme.clone()), self.all_themes.clone(), |t: &Theme| t
+                .to_string(),)
             .on_select(Message::ThemeChanged)
             .width(Fill)
             .placeholder("Paper (default)"),
@@ -226,12 +219,9 @@ impl App {
         .spacing(10);
 
         center(
-            column![
-                theme_picker,
-                hyozu::chart(&self.data).design(&self.theme).padding(20)
-            ]
-            .align_x(Center)
-            .spacing(20),
+            column![theme_picker, hyozu::chart(&self.data).design(&self.theme).padding(20)]
+                .align_x(Center)
+                .spacing(20),
         )
         .padding(20)
         .into()

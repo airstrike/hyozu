@@ -59,13 +59,7 @@ where
     }
 
     /// Layout the gauge — compute angles
-    pub fn layout(
-        &self,
-        tree: &mut Tree,
-        _renderer: &Renderer,
-        _limits: &Limits,
-        _plane: &Plane,
-    ) -> Node {
+    pub fn layout(&self, tree: &mut Tree, _renderer: &Renderer, _limits: &Limits, _plane: &Plane) -> Node {
         let state = tree.state.downcast_mut::<State>();
 
         let range = self.data.max - self.data.min;
@@ -137,18 +131,13 @@ where
         let range = self.data.max - self.data.min;
         if range > 0.0 {
             for zone in &self.data.zones {
-                let zone_start_prop = ((zone.from - self.data.min) / range)
-                    .clamp(0.0, 1.0)
-                    as f32;
-                let zone_end_prop =
-                    ((zone.to - self.data.min) / range).clamp(0.0, 1.0) as f32;
+                let zone_start_prop = ((zone.from - self.data.min) / range).clamp(0.0, 1.0) as f32;
+                let zone_end_prop = ((zone.to - self.data.min) / range).clamp(0.0, 1.0) as f32;
 
-                let zone_start =
-                    start_angle + zone_start_prop * state.sweep_rad;
+                let zone_start = start_angle + zone_start_prop * state.sweep_rad;
                 let zone_end = start_angle + zone_end_prop * state.sweep_rad;
 
-                let zone_color =
-                    zone.color.resolve(background, text_pair, None);
+                let zone_color = zone.color.resolve(background, text_pair, None);
 
                 draw_arc_segment(
                     &mut frame,
@@ -164,9 +153,7 @@ where
         }
 
         // Draw value arc
-        let value_color = palette
-            .get(color_offset)
-            .resolve(background, text_pair, None);
+        let value_color = palette.get(color_offset).resolve(background, text_pair, None);
 
         if state.value_angle > 0.001 {
             draw_arc_segment(
@@ -210,10 +197,7 @@ where
                 frame.fill_text(CanvasText {
                     content: unit.clone(),
                     position: crate::core::Point::new(cx, cy + font_size * 0.5),
-                    color: crate::core::Color {
-                        a: 0.6,
-                        ..text_color
-                    },
+                    color: crate::core::Color { a: 0.6, ..text_color },
                     size: unit_size.into(),
                     font: theme.font(),
                     align_x: crate::core::alignment::Horizontal::Center.into(),
@@ -243,10 +227,7 @@ where
             };
 
             // Min label at start of arc
-            let min_pos = crate::core::Point::new(
-                cx + label_r * start_angle.cos(),
-                cy + label_r * start_angle.sin(),
-            );
+            let min_pos = crate::core::Point::new(cx + label_r * start_angle.cos(), cy + label_r * start_angle.sin());
             frame.fill_text(CanvasText {
                 content: format_val(self.data.min),
                 position: min_pos,
@@ -262,10 +243,7 @@ where
 
             // Max label at end of arc
             let end_angle = start_angle + state.sweep_rad;
-            let max_pos = crate::core::Point::new(
-                cx + label_r * end_angle.cos(),
-                cy + label_r * end_angle.sin(),
-            );
+            let max_pos = crate::core::Point::new(cx + label_r * end_angle.cos(), cy + label_r * end_angle.sin());
             frame.fill_text(CanvasText {
                 content: format_val(self.data.max),
                 position: max_pos,
@@ -281,12 +259,9 @@ where
         }
 
         let geometry = frame.into_geometry();
-        renderer.with_translation(
-            crate::core::Vector::new(layout_bounds.x, layout_bounds.y),
-            |renderer| {
-                renderer.draw_geometry(geometry);
-            },
-        );
+        renderer.with_translation(crate::core::Vector::new(layout_bounds.x, layout_bounds.y), |renderer| {
+            renderer.draw_geometry(geometry);
+        });
     }
 }
 
@@ -320,10 +295,8 @@ fn draw_arc_segment<R: geometry::Renderer>(
         trace_arc(builder, cx, cy, outer_radius, start_angle, end_angle);
 
         // Line from outer end to inner end
-        let inner_end = crate::core::Point::new(
-            cx + inner_radius * end_angle.cos(),
-            cy + inner_radius * end_angle.sin(),
-        );
+        let inner_end =
+            crate::core::Point::new(cx + inner_radius * end_angle.cos(), cy + inner_radius * end_angle.sin());
         builder.line_to(inner_end);
 
         // Trace inner arc backward
@@ -345,9 +318,7 @@ fn trace_arc(
     end_angle: f32,
 ) {
     let sweep = end_angle - start_angle;
-    let segments = ((sweep.abs() / std::f32::consts::TAU)
-        * ARC_SEGMENTS_PER_TAU as f32)
-        .ceil() as usize;
+    let segments = ((sweep.abs() / std::f32::consts::TAU) * ARC_SEGMENTS_PER_TAU as f32).ceil() as usize;
     let segments = segments.max(1);
 
     for i in 1..=segments {

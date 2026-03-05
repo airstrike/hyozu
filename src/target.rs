@@ -12,11 +12,7 @@ pub enum Target {
     /// A specific series within a mark.
     Series { mark: usize, series: usize },
     /// A specific data entry within a series.
-    Entry {
-        mark: usize,
-        series: usize,
-        index: usize,
-    },
+    Entry { mark: usize, series: usize, index: usize },
     /// The X axis.
     XAxis,
     /// The Y axis.

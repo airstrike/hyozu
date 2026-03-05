@@ -44,9 +44,7 @@ impl Label {
     /// Creates a label with a custom format function.
     ///
     /// The function receives `(value, percentage)` where percentage is 0.0..1.0.
-    pub fn custom(
-        f: impl Fn(f64, f64) -> String + Send + Sync + 'static,
-    ) -> Self {
+    pub fn custom(f: impl Fn(f64, f64) -> String + Send + Sync + 'static) -> Self {
         Self {
             format: Arc::new(f),
             color: None,

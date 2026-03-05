@@ -127,10 +127,7 @@ impl Gauge {
     }
 
     /// Sets a custom format function for the value display.
-    pub fn format(
-        mut self,
-        f: impl Fn(f64) -> String + Send + Sync + 'static,
-    ) -> Self {
+    pub fn format(mut self, f: impl Fn(f64) -> String + Send + Sync + 'static) -> Self {
         self.format = Some(Arc::new(f));
         self
     }

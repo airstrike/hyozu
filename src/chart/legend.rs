@@ -71,12 +71,7 @@ where
     ///
     /// Measures text widths using Paragraph API and computes
     /// the height needed for a horizontal row of entries.
-    pub fn layout(
-        &self,
-        tree: &mut Tree,
-        renderer: &Renderer,
-        limits: &Limits,
-    ) -> Node {
+    pub fn layout(&self, tree: &mut Tree, renderer: &Renderer, limits: &Limits) -> Node {
         if self.entries.is_empty() {
             return Node::new(Size::ZERO);
         }
@@ -160,8 +155,7 @@ where
         // Vertically center within the row
         let y_top = bounds.y + PADDING_TOP;
 
-        let text_color =
-            design.text_color().resolve(background, text_pair, None);
+        let text_color = design.text_color().resolve(background, text_pair, None);
 
         for (i, entry) in self.entries.iter().enumerate() {
             // Resolve swatch color
@@ -204,10 +198,7 @@ where
                     ellipsis: crate::core::text::Ellipsis::default(),
                     hint_factor: renderer.scale_factor(),
                 },
-                crate::core::Point::new(
-                    x + swatch_size + SWATCH_TEXT_GAP,
-                    y_top,
-                ),
+                crate::core::Point::new(x + swatch_size + SWATCH_TEXT_GAP, y_top),
                 text_color,
                 *viewport,
             );

@@ -8,10 +8,7 @@ pub mod value;
 use std::borrow::Cow;
 
 use crate::core::widget::{Tree, tree};
-use crate::core::{
-    Element, Event, Layout, Length, Padding, Rectangle, Size, Widget, layout,
-    mouse,
-};
+use crate::core::{Element, Event, Layout, Length, Padding, Rectangle, Size, Widget, layout, mouse};
 use crate::widget::Renderer;
 
 use crate::{Action, Data, design};
@@ -20,12 +17,8 @@ use scene::Scene;
 const DEFAULT_PADDING: Padding = Padding::new(10.0);
 
 /// Chart widget for displaying data visualizations.
-pub struct Chart<
-    'a,
-    Message,
-    Design = crate::core::Theme,
-    Theme = crate::core::Theme,
-> where
+pub struct Chart<'a, Message, Design = crate::core::Theme, Theme = crate::core::Theme>
+where
     Design: design::Design + Clone,
 {
     scene: Scene<'a, Message, Renderer>,
@@ -48,9 +41,7 @@ struct State {
 ///
 /// The Theme type is inferred from context (e.g., the Element type in your view).
 /// Call `.design()` to use a custom design type separate from your Theme.
-pub fn chart<'a, Message, Theme>(
-    data: &'a Data,
-) -> Chart<'a, Message, Theme, Theme>
+pub fn chart<'a, Message, Theme>(data: &'a Data) -> Chart<'a, Message, Theme, Theme>
 where
     Theme: design::Design + Clone,
 {
@@ -124,17 +115,13 @@ where
     }
 
     /// Sets the style of the [`Chart`].
-    pub fn style(
-        mut self,
-        style: impl Fn(&dyn design::Design) -> Style + 'a,
-    ) -> Self {
+    pub fn style(mut self, style: impl Fn(&dyn design::Design) -> Style + 'a) -> Self {
         self.style = Box::new(style);
         self
     }
 }
 
-impl<'a, Message, Design, Theme> Widget<Message, Theme, Renderer>
-    for Chart<'a, Message, Design, Theme>
+impl<'a, Message, Design, Theme> Widget<Message, Theme, Renderer> for Chart<'a, Message, Design, Theme>
 where
     Design: design::Design + Clone + 'a,
     Theme: design::Design,
@@ -163,12 +150,7 @@ where
         }
     }
 
-    fn layout(
-        &mut self,
-        tree: &mut Tree,
-        renderer: &Renderer,
-        limits: &layout::Limits,
-    ) -> layout::Node {
+    fn layout(&mut self, tree: &mut Tree, renderer: &Renderer, limits: &layout::Limits) -> layout::Node {
         use crate::core::Point;
 
         let size = limits.resolve(self.width, self.height, Size::ZERO);
@@ -183,11 +165,9 @@ where
         let scene_tree = &mut tree.children[0];
 
         // Delegate layout to scene with padded limits
-        let scene_node = self.scene.layout(
-            scene_tree,
-            renderer,
-            &layout::Limits::new(Size::ZERO, inner_size),
-        );
+        let scene_node = self
+            .scene
+            .layout(scene_tree, renderer, &layout::Limits::new(Size::ZERO, inner_size));
 
         // Position scene node with padding offset
         layout::Node::with_children(size, vec![
@@ -221,19 +201,11 @@ where
         let chart_bounds = layout.bounds();
         let plot_area_offset = self.scene.plot_area_offset();
         let scene_tree = &tree.children[0];
-        let plot_area_state = scene_tree.children[6]
-            .state
-            .downcast_ref::<plot_area::State>();
+        let plot_area_state = scene_tree.children[6].state.downcast_ref::<plot_area::State>();
         let plot_bounds = match &plot_area_state.plane {
             Some(plane) => Rectangle {
-                x: chart_bounds.x
-                    + self.padding.left
-                    + plot_area_offset.x
-                    + plane.bounds.x,
-                y: chart_bounds.y
-                    + self.padding.top
-                    + plot_area_offset.y
-                    + plane.bounds.y,
+                x: chart_bounds.x + self.padding.left + plot_area_offset.x + plane.bounds.x,
+                y: chart_bounds.y + self.padding.top + plot_area_offset.y + plane.bounds.y,
                 width: plane.bounds.width,
                 height: plane.bounds.height,
             },
@@ -255,9 +227,7 @@ where
                     // Use position_in to get plot-area-local coordinates
                     let Some(local) = cursor.position_in(plot_bounds) else {
                         // Released outside plot area — deselect
-                        shell.publish(on_action(Action::Clicked(
-                            crate::target::Target::Mark(usize::MAX),
-                        )));
+                        shell.publish(on_action(Action::Clicked(crate::target::Target::Mark(usize::MAX))));
                         return;
                     };
 
@@ -268,77 +238,48 @@ where
                     let bars_tag = tree::Tag::of::<plot_area::bars::State>();
                     let pie_tag = tree::Tag::of::<plot_area::pie::State>();
 
-                    for (mark_idx, mark_tree) in
-                        plot_area_tree.children.iter().enumerate()
-                    {
+                    for (mark_idx, mark_tree) in plot_area_tree.children.iter().enumerate() {
                         if mark_tree.tag == bars_tag {
-                            let bars_state = mark_tree
-                                .state
-                                .downcast_ref::<plot_area::bars::State>(
-                            );
+                            let bars_state = mark_tree.state.downcast_ref::<plot_area::bars::State>();
 
-                            for (series_idx, rects) in
-                                bars_state.series_rects.iter().enumerate()
-                            {
-                                for (bar_idx, rect) in rects.iter().enumerate()
-                                {
+                            for (series_idx, rects) in bars_state.series_rects.iter().enumerate() {
+                                for (bar_idx, rect) in rects.iter().enumerate() {
                                     if rect.contains(local) {
-                                        shell.publish(on_action(
-                                            Action::Clicked(
-                                                crate::target::Target::Entry {
-                                                    mark: mark_idx,
-                                                    series: series_idx,
-                                                    index: bar_idx,
-                                                },
-                                            ),
-                                        ));
+                                        shell.publish(on_action(Action::Clicked(crate::target::Target::Entry {
+                                            mark: mark_idx,
+                                            series: series_idx,
+                                            index: bar_idx,
+                                        })));
                                         return;
                                     }
                                 }
                             }
                         } else if mark_tree.tag == pie_tag {
-                            let pie_state = mark_tree
-                                .state
-                                .downcast_ref::<plot_area::pie::State>(
-                            );
+                            let pie_state = mark_tree.state.downcast_ref::<plot_area::pie::State>();
 
                             let (cx, cy) = pie_state.center;
                             let dx = local.x - cx;
                             let dy = local.y - cy;
                             let dist = (dx * dx + dy * dy).sqrt();
 
-                            if dist >= pie_state.inner_radius
-                                && dist <= pie_state.outer_radius
-                            {
+                            if dist >= pie_state.inner_radius && dist <= pie_state.outer_radius {
                                 // Compute angle (atan2 gives -PI..PI, matching our -PI/2 start)
                                 let mut angle = dy.atan2(dx);
                                 // Normalize: our slices start at -PI/2 and go to ~3PI/2
                                 // atan2 returns -PI..PI, so angles in top-left quadrant
                                 // may need adjustment
-                                let first_start = pie_state
-                                    .slice_angles
-                                    .first()
-                                    .map(|(s, _)| *s)
-                                    .unwrap_or(0.0);
+                                let first_start = pie_state.slice_angles.first().map(|(s, _)| *s).unwrap_or(0.0);
                                 if angle < first_start {
                                     angle += std::f32::consts::TAU;
                                 }
 
-                                for (slice_idx, (start_angle, end_angle)) in
-                                    pie_state.slice_angles.iter().enumerate()
-                                {
-                                    if angle >= *start_angle
-                                        && angle <= *end_angle
-                                    {
-                                        shell.publish(on_action(
-                                            Action::Clicked(
-                                                crate::target::Target::Entry {
-                                                    mark: mark_idx,
-                                                    series: 0,
-                                                    index: slice_idx,
-                                                },
-                                            ),
-                                        ));
+                                for (slice_idx, (start_angle, end_angle)) in pie_state.slice_angles.iter().enumerate() {
+                                    if angle >= *start_angle && angle <= *end_angle {
+                                        shell.publish(on_action(Action::Clicked(crate::target::Target::Entry {
+                                            mark: mark_idx,
+                                            series: 0,
+                                            index: slice_idx,
+                                        })));
                                         return;
                                     }
                                 }
@@ -347,9 +288,7 @@ where
                     }
 
                     // No element hit — report empty click
-                    shell.publish(on_action(Action::Clicked(
-                        crate::target::Target::Mark(usize::MAX),
-                    )));
+                    shell.publish(on_action(Action::Clicked(crate::target::Target::Mark(usize::MAX))));
                 }
             }
             _ => {}
@@ -391,8 +330,7 @@ where
     }
 }
 
-impl<'a, Message, Design, Theme> From<Chart<'a, Message, Design, Theme>>
-    for Element<'a, Message, Theme, Renderer>
+impl<'a, Message, Design, Theme> From<Chart<'a, Message, Design, Theme>> for Element<'a, Message, Theme, Renderer>
 where
     Message: 'a,
     Design: design::Design + Clone + 'a,
@@ -404,11 +342,7 @@ where
 }
 
 /// Draws the background of a [`Chart`] given its [`Style`] and its `bounds`.
-pub fn draw_background(
-    renderer: &mut Renderer,
-    style: &Style,
-    bounds: Rectangle,
-) {
+pub fn draw_background(renderer: &mut Renderer, style: &Style, bounds: Rectangle) {
     use crate::core::renderer::Renderer as _;
 
     if style.background.is_some() || style.border.width > 0.0 {
@@ -442,11 +376,9 @@ pub fn default(design: &dyn design::Design) -> Style {
         border: crate::core::Border {
             width: 1.0,
             radius: 5.0.into(),
-            color: design.divider_color().resolve(
-                design.background_color(),
-                design.text_pair(),
-                None,
-            ),
+            color: design
+                .divider_color()
+                .resolve(design.background_color(), design.text_pair(), None),
         },
     }
 }
@@ -463,11 +395,9 @@ pub fn bordered(design: &dyn design::Design) -> Style {
         border: crate::core::Border {
             width: 1.0,
             radius: 0.0.into(),
-            color: design.divider_color().resolve(
-                design.background_color(),
-                design.text_pair(),
-                None,
-            ),
+            color: design
+                .divider_color()
+                .resolve(design.background_color(), design.text_pair(), None),
         },
     }
 }
@@ -479,11 +409,9 @@ pub fn filled(design: &dyn design::Design) -> Style {
         border: crate::core::Border {
             width: 1.0,
             radius: 5.0.into(),
-            color: design.divider_color().resolve(
-                design.background_color(),
-                design.text_pair(),
-                None,
-            ),
+            color: design
+                .divider_color()
+                .resolve(design.background_color(), design.text_pair(), None),
         },
     }
 }

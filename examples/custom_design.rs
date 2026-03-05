@@ -105,21 +105,13 @@ impl App {
         ]
         .spacing(8);
 
-        let chart = chart(&self.data)
-            .design(&self.palette)
-            .style(hyozu::chart::filled);
+        let chart = chart(&self.data).design(&self.palette).style(hyozu::chart::filled);
 
-        center(column![controls, chart].spacing(20))
-            .padding(20)
-            .into()
+        center(column![controls, chart].spacing(20)).padding(20).into()
     }
 }
 
-fn btn<'a>(
-    label: &'a str,
-    selected: bool,
-    msg: Message,
-) -> Element<'a, Message> {
+fn btn<'a>(label: &'a str, selected: bool, msg: Message) -> Element<'a, Message> {
     button(text(label).size(12))
         .padding([6, 12])
         .style(move |theme: &theme::Theme, status| {
@@ -169,12 +161,7 @@ mod palette {
                 background: color!(0xF2FAFF),
                 text: color!(0x1A334D),
                 divider: color!(0x1A334D, 0.15),
-                data: vec![
-                    color!(0x0078BF),
-                    color!(0x00A6D9),
-                    color!(0x33CCCC),
-                    color!(0x66E6B3),
-                ],
+                data: vec![color!(0x0078BF), color!(0x00A6D9), color!(0x33CCCC), color!(0x66E6B3)],
             }
         }
 
@@ -184,12 +171,7 @@ mod palette {
                 background: color!(0xFFFAF2),
                 text: color!(0x4D261A),
                 divider: color!(0x4D261A, 0.15),
-                data: vec![
-                    color!(0xE64D33),
-                    color!(0xF28033),
-                    color!(0xF2B34D),
-                    color!(0xD96680),
-                ],
+                data: vec![color!(0xE64D33), color!(0xF28033), color!(0xF2B34D), color!(0xD96680)],
             }
         }
 
@@ -199,12 +181,7 @@ mod palette {
                 background: color!(0xF5FAF2),
                 text: color!(0x264026),
                 divider: color!(0x264026, 0.15),
-                data: vec![
-                    color!(0x33804D),
-                    color!(0x66A64D),
-                    color!(0x99BF66),
-                    color!(0x4D9980),
-                ],
+                data: vec![color!(0x33804D), color!(0x66A64D), color!(0x99BF66), color!(0x4D9980)],
             }
         }
 
@@ -214,22 +191,12 @@ mod palette {
                 background: color!(0x1F242E),
                 text: color!(0xE6E6EB),
                 divider: color!(0xE6E6EB, 0.15),
-                data: vec![
-                    color!(0x6699FF),
-                    color!(0xB380FF),
-                    color!(0xFF80B3),
-                    color!(0x80E6E6),
-                ],
+                data: vec![color!(0x6699FF), color!(0xB380FF), color!(0xFF80B3), color!(0x80E6E6)],
             }
         }
 
         pub fn all() -> Vec<Self> {
-            vec![
-                Self::ocean(),
-                Self::sunset(),
-                Self::forest(),
-                Self::midnight(),
-            ]
+            vec![Self::ocean(), Self::sunset(), Self::forest(), Self::midnight()]
         }
     }
 
@@ -244,11 +211,7 @@ mod palette {
         }
 
         fn text_pair(&self) -> hyozu::Pair {
-            let inverted = Color::from_rgb(
-                1.0 - self.text.r,
-                1.0 - self.text.g,
-                1.0 - self.text.b,
-            );
+            let inverted = Color::from_rgb(1.0 - self.text.r, 1.0 - self.text.g, 1.0 - self.text.b);
             hyozu::Pair::new(self.text, inverted)
         }
 
