@@ -1,11 +1,10 @@
+use iced::widget::{center, column, container, pick_list, radio, row, scrollable, slider, text};
+use iced::{keyboard, Center, Fill, Function, Subscription, Task, Theme};
+
 use hyozu::axis::Placement;
 use hyozu::data::Action;
 use hyozu::target::Target;
-use hyozu::{Data, Map, Palette, bar, bars, chart, item, pie, props};
-use iced::widget::{
-    center, column, container, pick_list, radio, row, slider, text,
-};
-use iced::{Center, Fill, Function, Subscription, Task, Theme, keyboard};
+use hyozu::{bar, bars, chart, item, pie, props, Data, Map, Palette};
 
 pub fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
@@ -58,13 +57,7 @@ enum Message {
 
 const SERIES_NAMES: [&str; 4] = ["North", "South", "East", "West"];
 
-const SLICE_NAMES: [&str; 5] = [
-    "Product A",
-    "Product B",
-    "Product C",
-    "Product D",
-    "Product E",
-];
+const SLICE_NAMES: [&str; 5] = ["Product A", "Product B", "Product C", "Product D", "Product E"];
 
 const PRESET_COLORS: [(&str, Option<iced::Color>); 7] = [
     ("Auto", None),
@@ -173,27 +166,16 @@ impl App {
                             // 1) Nothing/different-series selected -> select series
                             // 2) Same series selected -> select specific entry
                             // 3) Same entry selected -> deselect
-                            if let Target::Entry {
-                                mark,
-                                series,
-                                index,
-                            } = target
-                            {
+                            if let Target::Entry { mark, series, index } = target {
                                 match data.selection() {
                                     Some(Target::Entry {
                                         mark: m,
                                         series: s,
                                         index: i,
-                                    }) if m == mark
-                                        && s == series
-                                        && i == index =>
-                                    {
+                                    }) if m == mark && s == series && i == index => {
                                         data.deselect();
                                     }
-                                    Some(Target::Series {
-                                        mark: m,
-                                        series: s,
-                                    }) if m == mark && s == series => {
+                                    Some(Target::Series { mark: m, series: s }) if m == mark && s == series => {
                                         data.select(target.clone());
                                     }
                                     _ => {
@@ -270,11 +252,8 @@ impl App {
                 return None;
             };
             match key {
-                Key::Named(Named::ArrowRight)
-                | Key::Named(Named::ArrowDown) => Some(Message::NextTheme),
-                Key::Named(Named::ArrowLeft) | Key::Named(Named::ArrowUp) => {
-                    Some(Message::PreviousTheme)
-                }
+                Key::Named(Named::ArrowRight) | Key::Named(Named::ArrowDown) => Some(Message::NextTheme),
+                Key::Named(Named::ArrowLeft) | Key::Named(Named::ArrowUp) => Some(Message::PreviousTheme),
                 Key::Named(Named::Home) => Some(Message::FirstTheme),
                 Key::Named(Named::End) => Some(Message::LastTheme),
                 _ => None,
@@ -311,24 +290,12 @@ impl App {
 
         let chart_type_section = column![
             text("Chart Type").size(14),
-            radio(
-                "Bar",
-                ChartType::Bar,
-                Some(self.chart_type),
-                Message::ChartTypeChanged,
-            ),
-            radio(
-                "Pie",
-                ChartType::Pie,
-                Some(self.chart_type),
-                Message::ChartTypeChanged,
-            ),
+            radio("Bar", ChartType::Bar, Some(self.chart_type), Message::ChartTypeChanged,),
+            radio("Pie", ChartType::Pie, Some(self.chart_type), Message::ChartTypeChanged,),
         ]
         .spacing(4);
 
-        let selection_section =
-            column![text("Selection").size(14), text(selection_text).size(12),]
-                .spacing(4);
+        let selection_section = column![text("Selection").size(14), text(selection_text).size(12),].spacing(4);
 
         // --- Color section ---
 
@@ -339,38 +306,20 @@ impl App {
 
         // --- Bar-specific controls ---
 
-        let bar_controls: iced::Element<'_, Message> = if self.chart_type
-            == ChartType::Bar
-        {
+        let bar_controls: iced::Element<'_, Message> = if self.chart_type == ChartType::Bar {
             let size = self.bar_data.bars(0).map(|b| b.size()).unwrap_or(0.75);
-            let spacing =
-                self.bar_data.bars(0).map(|b| b.spacing()).unwrap_or(0.0);
+            let spacing = self.bar_data.bars(0).map(|b| b.spacing()).unwrap_or(0.0);
             let layout = self
                 .bar_data
                 .bars(0)
                 .map(|b| b.layout())
                 .unwrap_or(bar::Layout::Grouped);
-            let x_placement = (|| self.bar_data.x_axis_ref()?.placement())()
-                .unwrap_or(Placement::OnTicks);
+            let x_placement = (|| self.bar_data.x_axis_ref()?.placement())().unwrap_or(Placement::OnTicks);
 
-            let on_size = |v| {
-                props::bar::Size(v)
-                    .map(item::Bars.with(0))
-                    .map(Message::Set)
-            };
-            let on_spacing = |v| {
-                props::bar::Spacing(v)
-                    .map(item::Bars.with(0))
-                    .map(Message::Set)
-            };
-            let on_layout = |l| {
-                props::bar::Layout(l)
-                    .map(item::Bars.with(0))
-                    .map(Message::Set)
-            };
-            let on_x_placement = |p| {
-                props::axis::Placement(p).map(item::XAxis).map(Message::Set)
-            };
+            let on_size = |v| props::bar::Size(v).map(item::Bars.with(0)).map(Message::Set);
+            let on_spacing = |v| props::bar::Spacing(v).map(item::Bars.with(0)).map(Message::Set);
+            let on_layout = |l| props::bar::Layout(l).map(item::Bars.with(0)).map(Message::Set);
+            let on_x_placement = |p| props::axis::Placement(p).map(item::XAxis).map(Message::Set);
 
             column![
                 column![
@@ -386,9 +335,7 @@ impl App {
                 column![
                     text("Bar Spacing").size(14),
                     row![
-                        slider(0.0..=1.0, spacing, on_spacing)
-                            .step(0.05)
-                            .width(Fill),
+                        slider(0.0..=1.0, spacing, on_spacing).step(0.05).width(Fill),
                         text(format!("{spacing:.2}")),
                     ]
                     .spacing(10)
@@ -397,34 +344,14 @@ impl App {
                 .spacing(4),
                 column![
                     text("Layout").size(14),
-                    radio(
-                        "Grouped",
-                        bar::Layout::Grouped,
-                        Some(layout),
-                        on_layout
-                    ),
-                    radio(
-                        "Stacked",
-                        bar::Layout::Stacked,
-                        Some(layout),
-                        on_layout
-                    ),
-                    radio(
-                        "Overlaid",
-                        bar::Layout::Overlaid,
-                        Some(layout),
-                        on_layout
-                    ),
+                    radio("Grouped", bar::Layout::Grouped, Some(layout), on_layout),
+                    radio("Stacked", bar::Layout::Stacked, Some(layout), on_layout),
+                    radio("Overlaid", bar::Layout::Overlaid, Some(layout), on_layout),
                 ]
                 .spacing(4),
                 column![
                     text("X-Axis Labels").size(14),
-                    radio(
-                        "On Ticks",
-                        Placement::OnTicks,
-                        Some(x_placement),
-                        on_x_placement,
-                    ),
+                    radio("On Ticks", Placement::OnTicks, Some(x_placement), on_x_placement,),
                     radio(
                         "Between Ticks",
                         Placement::BetweenTicks,
@@ -438,25 +365,20 @@ impl App {
             .into()
         } else {
             // Pie-specific controls
-            let hole =
-                self.pie_data.pie(0).map(|p| p.hole_value()).unwrap_or(0.0);
+            let hole = self.pie_data.pie(0).map(|p| p.hole_value()).unwrap_or(0.0);
 
-            let on_hole = |v| {
-                props::pie::Hole(v).map(item::Pie.with(0)).map(Message::Set)
-            };
+            let on_hole = |v| props::pie::Hole(v).map(item::Pie.with(0)).map(Message::Set);
 
-            column![
-                column![
-                    text("Hole Size").size(14),
-                    row![
-                        slider(0.0..=0.9, hole, on_hole).step(0.05).width(Fill),
-                        text(format!("{hole:.2}")),
-                    ]
-                    .spacing(10)
-                    .align_y(Center),
+            column![column![
+                text("Hole Size").size(14),
+                row![
+                    slider(0.0..=0.9, hole, on_hole).step(0.05).width(Fill),
+                    text(format!("{hole:.2}")),
                 ]
-                .spacing(4),
+                .spacing(10)
+                .align_y(Center),
             ]
+            .spacing(4),]
             .spacing(12)
             .into()
         };
@@ -483,11 +405,7 @@ impl App {
             text("Palette").size(14),
             pick_list(
                 Some(current_palette.to_string()),
-                vec![
-                    "Auto".to_string(),
-                    "Categorical".to_string(),
-                    "Sequential".to_string(),
-                ],
+                vec!["Auto".to_string(), "Categorical".to_string(), "Sequential".to_string(),],
                 |s: &String| s.clone(),
             )
             .on_select(on_palette)
@@ -497,43 +415,41 @@ impl App {
 
         let theme_section = column![
             text("Theme").size(14),
-            pick_list(
-                Some(self.theme.clone()),
-                self.all_themes.clone(),
-                |t: &Theme| t.to_string(),
-            )
+            pick_list(Some(self.theme.clone()), self.all_themes.clone(), |t: &Theme| t
+                .to_string(),)
             .on_select(Message::ThemeChanged)
             .width(Fill),
         ]
         .spacing(4);
 
-        let sidebar = container(
-            column![
-                chart_type_section,
-                selection_section,
-                color_section,
-                bar_controls,
-                palette_section,
-                theme_section,
-            ]
-            .spacing(12)
-            .width(200),
+        let sidebar = scrollable(
+            container(
+                column![
+                    chart_type_section,
+                    selection_section,
+                    color_section,
+                    bar_controls,
+                    palette_section,
+                    theme_section,
+                ]
+                .spacing(12)
+                .width(200),
+            )
+            .padding(15),
         )
-        .padding(15);
+        .direction(scrollable::Direction::Vertical(
+                scrollable::Scrollbar::new()
+                    .width(0)
+                    .margin(0)
+                    .scroller_width(1),
+            ))
+        .spacing(0);
 
-        let chart_area = chart(data)
-            .design(&self.theme)
-            .on_action(Message::Action)
-            .padding(20);
+        let chart_area = chart(data).design(&self.theme).on_action(Message::Action).padding(20);
 
-        center(
-            row![sidebar, chart_area]
-                .spacing(0)
-                .height(Fill)
-                .width(Fill),
-        )
-        .padding(10)
-        .into()
+        center(row![sidebar, chart_area].spacing(0).height(Fill).width(Fill))
+            .padding(10)
+            .into()
     }
 
     fn bar_color_section(&self) -> iced::Element<'_, Message> {
@@ -545,9 +461,7 @@ impl App {
         };
 
         let selected_entry = match self.bar_data.selection() {
-            Some(Target::Entry { series, index, .. }) => {
-                Some((*series, *index))
-            }
+            Some(Target::Entry { series, index, .. }) => Some((*series, *index)),
             _ => None,
         };
 
@@ -573,31 +487,21 @@ impl App {
                 .map(|(name, _)| *name)
                 .unwrap_or("Custom");
 
-            let color_radios = PRESET_COLORS.iter().fold(
-                column![].spacing(3),
-                |col, (name, _)| {
-                    col.push(radio(
-                        *name,
-                        *name,
-                        Some(current_label),
-                        move |selected_name: &str| {
-                            let color_opt = PRESET_COLORS
-                                .iter()
-                                .find(|(n, _)| *n == selected_name)
-                                .and_then(|(_, c)| *c)
-                                .map(hyozu::Color::Fixed);
-                            props::bar::series::PointColor(point_idx, color_opt)
-                                .map(props::bar::Series(series_idx))
-                                .map(item::Bars.with(0))
-                                .map(Message::Set)
-                        },
-                    ))
-                },
-            );
+            let color_radios = PRESET_COLORS.iter().fold(column![].spacing(3), |col, (name, _)| {
+                col.push(radio(*name, *name, Some(current_label), move |selected_name: &str| {
+                    let color_opt = PRESET_COLORS
+                        .iter()
+                        .find(|(n, _)| *n == selected_name)
+                        .and_then(|(_, c)| *c)
+                        .map(hyozu::Color::Fixed);
+                    props::bar::series::PointColor(point_idx, color_opt)
+                        .map(props::bar::Series(series_idx))
+                        .map(item::Bars.with(0))
+                        .map(Message::Set)
+                }))
+            });
 
-            column![text("Bar Color").size(14), color_radios,]
-                .spacing(4)
-                .into()
+            column![text("Bar Color").size(14), color_radios,].spacing(4).into()
         } else {
             // Series selected — show series color picker
             let current_color = self
@@ -616,31 +520,21 @@ impl App {
                 .map(|(name, _)| *name)
                 .unwrap_or("Custom");
 
-            let color_radios = PRESET_COLORS.iter().fold(
-                column![].spacing(3),
-                |col, (name, _)| {
-                    col.push(radio(
-                        *name,
-                        *name,
-                        Some(current_label),
-                        move |selected_name: &str| {
-                            let color_opt = PRESET_COLORS
-                                .iter()
-                                .find(|(n, _)| *n == selected_name)
-                                .and_then(|(_, c)| *c)
-                                .map(hyozu::Color::Fixed);
-                            props::bar::series::Color(color_opt)
-                                .map(props::bar::Series(si))
-                                .map(item::Bars.with(0))
-                                .map(Message::Set)
-                        },
-                    ))
-                },
-            );
+            let color_radios = PRESET_COLORS.iter().fold(column![].spacing(3), |col, (name, _)| {
+                col.push(radio(*name, *name, Some(current_label), move |selected_name: &str| {
+                    let color_opt = PRESET_COLORS
+                        .iter()
+                        .find(|(n, _)| *n == selected_name)
+                        .and_then(|(_, c)| *c)
+                        .map(hyozu::Color::Fixed);
+                    props::bar::series::Color(color_opt)
+                        .map(props::bar::Series(si))
+                        .map(item::Bars.with(0))
+                        .map(Message::Set)
+                }))
+            });
 
-            column![text("Series Color").size(14), color_radios,]
-                .spacing(4)
-                .into()
+            column![text("Series Color").size(14), color_radios,].spacing(4).into()
         }
     }
 
@@ -670,30 +564,20 @@ impl App {
             .map(|(name, _)| *name)
             .unwrap_or("Custom");
 
-        let color_radios = PRESET_COLORS.iter().fold(
-            column![].spacing(3),
-            |col, (name, _)| {
-                col.push(radio(
-                    *name,
-                    *name,
-                    Some(current_label),
-                    move |selected_name: &str| {
-                        let color_opt = PRESET_COLORS
-                            .iter()
-                            .find(|(n, _)| *n == selected_name)
-                            .and_then(|(_, c)| *c)
-                            .map(hyozu::Color::Fixed);
-                        props::pie::SliceColor(slice_idx, color_opt)
-                            .map(item::Pie.with(0))
-                            .map(Message::Set)
-                    },
-                ))
-            },
-        );
+        let color_radios = PRESET_COLORS.iter().fold(column![].spacing(3), |col, (name, _)| {
+            col.push(radio(*name, *name, Some(current_label), move |selected_name: &str| {
+                let color_opt = PRESET_COLORS
+                    .iter()
+                    .find(|(n, _)| *n == selected_name)
+                    .and_then(|(_, c)| *c)
+                    .map(hyozu::Color::Fixed);
+                props::pie::SliceColor(slice_idx, color_opt)
+                    .map(item::Pie.with(0))
+                    .map(Message::Set)
+            }))
+        });
 
-        column![text("Slice Color").size(14), color_radios,]
-            .spacing(4)
-            .into()
+        column![text("Slice Color").size(14), color_radios,].spacing(4).into()
     }
 
     fn theme(&self) -> Theme {
