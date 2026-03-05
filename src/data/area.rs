@@ -137,6 +137,7 @@ impl Area {
     /// Computes the bounds of all marks in this area.
     pub fn bounds(&self) -> Bounds {
         use crate::bar::Layout;
+        use crate::mark::bar::Direction;
         use std::collections::HashMap;
 
         let mut x_min = f64::INFINITY;
@@ -146,7 +147,36 @@ impl Area {
 
         for mark in &self.marks {
             match mark {
+                Mark::Bars(bars) if bars.direction == Direction::Horizontal => {
+                    // For horizontal: x-values are categories (y-axis),
+                    // y-values are magnitudes (x-axis)
+                    if bars.layout == Layout::Stacked {
+                        let mut sums: HashMap<i64, f64> = HashMap::new();
+                        for series in &bars.series {
+                            for point in &series.points {
+                                let y_key = (point.x * 1000.0).round() as i64;
+                                *sums.entry(y_key).or_insert(0.0) += point.y;
+                                y_min = y_min.min(point.x);
+                                y_max = y_max.max(point.x);
+                            }
+                        }
+                        for sum in sums.values() {
+                            x_min = x_min.min(*sum);
+                            x_max = x_max.max(*sum);
+                        }
+                    } else {
+                        for series in &bars.series {
+                            for point in &series.points {
+                                y_min = y_min.min(point.x);
+                                y_max = y_max.max(point.x);
+                                x_min = x_min.min(point.y);
+                                x_max = x_max.max(point.y);
+                            }
+                        }
+                    }
+                }
                 Mark::Bars(bars) => {
+                    // Vertical bars (default)
                     // For stacked layout, compute cumulative sums
                     if bars.layout == Layout::Stacked {
                         let mut sums: HashMap<i64, f64> = HashMap::new();
@@ -235,11 +265,21 @@ impl Area {
             y_max = 1.0;
         }
 
-        // For bar/waterfall charts, extend y to include zero
+        // For bar/waterfall charts, extend the value axis to include zero
         for mark in &self.marks {
-            if matches!(mark, Mark::Bars(_) | Mark::Waterfall(_)) {
-                y_min = y_min.min(0.0);
-                break;
+            match mark {
+                Mark::Bars(bars)
+                    if bars.direction
+                        == crate::mark::bar::Direction::Horizontal =>
+                {
+                    x_min = x_min.min(0.0);
+                    break;
+                }
+                Mark::Bars(_) | Mark::Waterfall(_) => {
+                    y_min = y_min.min(0.0);
+                    break;
+                }
+                _ => {}
             }
         }
 

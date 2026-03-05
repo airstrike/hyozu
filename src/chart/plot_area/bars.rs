@@ -61,7 +61,7 @@ where
         _limits: &Limits,
         plane: &Plane,
     ) -> Node {
-        use crate::mark::bar::Layout;
+        use crate::mark::bar::Direction;
 
         let state = tree.state.downcast_mut::<State>();
 
@@ -70,7 +70,7 @@ where
             return Node::new(Size::ZERO);
         }
 
-        // Determine number of bins (x-positions) - use max points across all series
+        // Determine number of bins (positions) - use max points across all series
         let num_bins = self
             .data
             .series
@@ -88,10 +88,48 @@ where
         let spacing_prop = self.data.spacing.get();
         let num_series = self.data.series.len();
 
+        match self.data.direction {
+            Direction::Horizontal => {
+                self.layout_horizontal(
+                    state,
+                    plane,
+                    num_bins,
+                    num_series,
+                    bar_length,
+                    spacing_prop,
+                );
+            }
+            Direction::Vertical => {
+                self.layout_vertical(
+                    state,
+                    plane,
+                    num_bins,
+                    num_series,
+                    bar_length,
+                    spacing_prop,
+                );
+            }
+        }
+
+        // Bars take no space - they're rendered within the plane
+        Node::new(Size::ZERO)
+    }
+
+    /// Layout bars vertically (default) - bars grow upward from baseline.
+    fn layout_vertical(
+        &self,
+        state: &mut State,
+        plane: &Plane,
+        num_bins: usize,
+        num_series: usize,
+        bar_length: f32,
+        spacing_prop: f32,
+    ) {
+        use crate::mark::bar::Layout;
+
         // Calculate zero line position
         let zero_y = plane.to_pixel(Datum::ORIGIN).y;
 
-        // Layout based on strategy
         match self.data.layout {
             Layout::Grouped => {
                 // Total width for all bins (categories)
@@ -226,9 +264,156 @@ where
                     .collect();
             }
         }
+    }
 
-        // Bars take no space - they're rendered within the plane
-        Node::new(Size::ZERO)
+    /// Layout bars horizontally - bars grow rightward from baseline.
+    fn layout_horizontal(
+        &self,
+        state: &mut State,
+        plane: &Plane,
+        num_bins: usize,
+        num_series: usize,
+        bar_length: f32,
+        spacing_prop: f32,
+    ) {
+        use crate::mark::bar::Layout;
+
+        // Calculate zero line position (x where value = 0)
+        let zero_x = plane.to_pixel(Datum::ORIGIN).x;
+
+        match self.data.layout {
+            Layout::Grouped => {
+                let total_height = plane.bounds.height;
+                let bin_height = total_height / num_bins as f32;
+
+                let total_bar_units = num_series as f32
+                    + spacing_prop * (num_series as f32 - 1.0);
+                let bar_height = if total_bar_units > 0.0 {
+                    (bin_height * bar_length) / total_bar_units
+                } else {
+                    bin_height * bar_length
+                };
+                let spacing_px = bar_height * spacing_prop;
+
+                state.series_rects = self
+                    .data
+                    .series
+                    .iter()
+                    .enumerate()
+                    .map(|(series_idx, series)| {
+                        series
+                            .points
+                            .iter()
+                            .enumerate()
+                            .map(|(bin_idx, point)| {
+                                // point.x = category index, point.y = value
+                                let value_x =
+                                    plane.to_pixel(Datum::new(point.y, 0.0)).x;
+                                let bar_width = (value_x - zero_x).abs();
+                                let x = value_x.min(zero_x);
+
+                                // Position category along y-axis
+                                let bar_center_y = plane
+                                    .to_pixel(Datum::new(0.0, bin_idx as f64))
+                                    .y;
+                                let total_group_height =
+                                    bin_height * bar_length;
+                                let group_start =
+                                    bar_center_y - total_group_height / 2.0;
+                                let y = group_start
+                                    + series_idx as f32
+                                        * (bar_height + spacing_px);
+
+                                Rectangle {
+                                    x,
+                                    y,
+                                    width: bar_width,
+                                    height: bar_height,
+                                }
+                            })
+                            .collect()
+                    })
+                    .collect();
+            }
+            Layout::Stacked => {
+                let total_height = plane.bounds.height;
+                let bin_height = total_height / num_bins as f32;
+                let bar_height = bin_height * bar_length;
+
+                // Accumulate along x instead of y
+                let (series_rects, _) = self.data.series.iter().fold(
+                    (Vec::new(), vec![zero_x; num_bins]),
+                    |(mut all_rects, mut cumulative_rights), series| {
+                        let rects = series
+                            .points
+                            .iter()
+                            .enumerate()
+                            .map(|(bin_idx, point)| {
+                                let value_x =
+                                    plane.to_pixel(Datum::new(point.y, 0.0)).x;
+                                let bar_width = (value_x - zero_x).abs();
+
+                                let x = cumulative_rights[bin_idx];
+                                cumulative_rights[bin_idx] = x + bar_width;
+
+                                let bar_center_y = plane
+                                    .to_pixel(Datum::new(0.0, bin_idx as f64))
+                                    .y;
+                                let y = bar_center_y - bar_height / 2.0;
+
+                                Rectangle {
+                                    x,
+                                    y,
+                                    width: bar_width,
+                                    height: bar_height,
+                                }
+                            })
+                            .collect();
+
+                        all_rects.push(rects);
+                        (all_rects, cumulative_rights)
+                    },
+                );
+
+                state.series_rects = series_rects;
+            }
+            Layout::Overlaid => {
+                let total_height = plane.bounds.height;
+                let bin_height = total_height / num_bins as f32;
+                let bar_height = bin_height * bar_length;
+
+                state.series_rects = self
+                    .data
+                    .series
+                    .iter()
+                    .map(|series| {
+                        series
+                            .points
+                            .iter()
+                            .enumerate()
+                            .map(|(bin_idx, point)| {
+                                let value_x =
+                                    plane.to_pixel(Datum::new(point.y, 0.0)).x;
+                                let bar_width = (value_x - zero_x).abs();
+                                let x = value_x.min(zero_x);
+
+                                let bar_center_y = plane
+                                    .to_pixel(Datum::new(0.0, bin_idx as f64))
+                                    .y;
+                                let y = bar_center_y - bar_height / 2.0;
+
+                                Rectangle {
+                                    x,
+                                    y,
+                                    width: bar_width,
+                                    height: bar_height,
+                                }
+                            })
+                            .collect()
+                    })
+                    .collect();
+            }
+        }
     }
 
     /// Draws the bars using pre-calculated rectangles
@@ -323,6 +508,8 @@ where
             // Draw labels for this series if configured
             if let Some(label_config) = &series.label {
                 let label_size = label_config.size.map(|p| p.0).unwrap_or(12.0);
+                let is_horizontal = self.data.direction
+                    == crate::mark::bar::Direction::Horizontal;
 
                 for (bar_idx, (rect, point)) in
                     rects.iter().zip(series.points.iter()).enumerate()
@@ -331,7 +518,42 @@ where
                     let label_text = (label_config.format)(point.y);
 
                     // Calculate label position in local coordinates
-                    let (label_x, label_y, align_x, align_y) =
+                    let (label_x, label_y, align_x, align_y) = if is_horizontal
+                    {
+                        // Horizontal bars: reinterpret positions
+                        match label_config.position {
+                            Position::Above => (
+                                // Right of bar end
+                                rect.x + rect.width + 4.0,
+                                rect.y + rect.height / 2.0,
+                                crate::core::alignment::Horizontal::Left.into(),
+                                crate::core::alignment::Vertical::Center,
+                            ),
+                            Position::End => (
+                                // Inside from value end (right side)
+                                rect.x + rect.width - 4.0,
+                                rect.y + rect.height / 2.0,
+                                crate::core::alignment::Horizontal::Right
+                                    .into(),
+                                crate::core::alignment::Vertical::Center,
+                            ),
+                            Position::Center => (
+                                rect.x + rect.width / 2.0,
+                                rect.y + rect.height / 2.0,
+                                crate::core::alignment::Horizontal::Center
+                                    .into(),
+                                crate::core::alignment::Vertical::Center,
+                            ),
+                            Position::Base => (
+                                // Left at bar origin (zero line)
+                                rect.x + 4.0,
+                                rect.y + rect.height / 2.0,
+                                crate::core::alignment::Horizontal::Left.into(),
+                                crate::core::alignment::Vertical::Center,
+                            ),
+                        }
+                    } else {
+                        // Vertical bars (default)
                         match label_config.position {
                             Position::Above => (
                                 rect.x + rect.width / 2.0,
@@ -361,7 +583,8 @@ where
                                     .into(),
                                 crate::core::alignment::Vertical::Bottom,
                             ),
-                        };
+                        }
+                    };
 
                     // Resolve label color based on position
                     // Default to CONTRAST (adaptive color) if not specified
