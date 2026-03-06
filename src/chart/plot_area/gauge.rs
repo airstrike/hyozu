@@ -11,9 +11,6 @@ use crate::widget::renderer::geometry;
 /// Number of line segments per full circle for arc approximation.
 const ARC_SEGMENTS_PER_TAU: usize = 64;
 
-/// Number of mini-segments for gradient arc rendering.
-const GRADIENT_SEGMENTS: usize = 64;
-
 /// State for Gauge — stores computed arc parameters
 pub struct State {
     /// Value angle in radians (relative to arc start)
@@ -105,7 +102,19 @@ where
 
         let cx = layout_bounds.width / 2.0;
         let cy = layout_bounds.height / 2.0;
-        let radius = layout_bounds.width.min(layout_bounds.height) / 2.0 * 0.85;
+
+        // Reserve space for tick labels outside the arc
+        let half = layout_bounds.width.min(layout_bounds.height) / 2.0;
+        let tick_margin = if self.data.ticks.is_some() && self.data.show_tick_labels {
+            // Estimate: mark_length + scaled label size
+            let mark_len = self.data.ticks.as_ref().map_or(6.0, |t| t.mark_length);
+            mark_len + half * 0.09
+        } else if self.data.ticks.is_some() {
+            self.data.ticks.as_ref().map_or(6.0, |t| t.mark_length)
+        } else {
+            0.0
+        };
+        let radius = (half - tick_margin).max(half * 0.5);
         let thickness = radius * self.data.thickness;
         let inner_radius = radius - thickness;
 
@@ -113,6 +122,9 @@ where
         // For a 270° gauge, gap is at the bottom
         let gap_rad = std::f32::consts::TAU - state.sweep_rad;
         let start_angle = std::f32::consts::FRAC_PI_2 + gap_rad / 2.0;
+
+        // Tick label font size scales with radius
+        let tick_font_size = radius * 0.1;
 
         let range = self.data.max - self.data.min;
         let has_zones = !self.data.zones.is_empty() && range > 0.0;
@@ -147,6 +159,7 @@ where
                 start_angle,
                 state.sweep_rad,
                 &stops,
+                self.data.color_stops,
             );
             // Dimming overlay on unfilled portion
             draw_dimming_overlay(
@@ -159,6 +172,7 @@ where
                 state.value_angle,
                 state.sweep_rad,
                 background,
+                self.data.dim_opacity,
             );
         } else if has_zones {
             // Zone mode: draw all zones at full opacity, then dim unfilled portion
@@ -192,6 +206,7 @@ where
                 state.value_angle,
                 state.sweep_rad,
                 background,
+                self.data.dim_opacity,
             );
         } else if self.data.gradient {
             // Gradient mode without zones: interpolate from palette color to desaturated
@@ -212,6 +227,7 @@ where
                 start_angle,
                 state.sweep_rad,
                 &stops,
+                self.data.color_stops,
             );
             draw_dimming_overlay(
                 &mut frame,
@@ -223,6 +239,7 @@ where
                 state.value_angle,
                 state.sweep_rad,
                 background,
+                self.data.dim_opacity,
             );
         } else {
             // Simple value arc (original behavior)
@@ -256,10 +273,17 @@ where
                 range,
                 text_pair,
                 theme,
+                tick_font_size,
             );
         }
 
         // --- Center value text ---
+        // Center text in the arc bowl: midpoint between top of inner arc and
+        // bottom of inner arc (the gap endpoints), not geometric center.
+        let arc_top = cy - inner_radius;
+        let arc_bottom = cy + inner_radius * (gap_rad / 2.0).cos();
+        let text_cy = (arc_top + arc_bottom) / 2.0;
+
         if self.data.show_value {
             let value_text = if let Some(fmt) = &self.data.format {
                 (fmt)(self.data.value)
@@ -271,7 +295,7 @@ where
 
             frame.fill_text(CanvasText {
                 content: value_text,
-                position: crate::core::Point::new(cx, cy),
+                position: crate::core::Point::new(cx, text_cy),
                 color: text_color,
                 size: font_size.into(),
                 font: theme.font(),
@@ -287,7 +311,7 @@ where
                 let unit_size = font_size * 0.5;
                 frame.fill_text(CanvasText {
                     content: unit.clone(),
-                    position: crate::core::Point::new(cx, cy + font_size * 0.5 + self.data.label_spacing),
+                    position: crate::core::Point::new(cx, text_cy + font_size * 0.5 + self.data.label_spacing),
                     color: crate::core::Color { a: 0.6, ..text_color },
                     size: unit_size.into(),
                     font: theme.font(),
@@ -324,12 +348,16 @@ fn draw_dimming_overlay<R: geometry::Renderer>(
     value_angle: f32,
     sweep_rad: f32,
     background: crate::core::Color,
+    dim_opacity: f32,
 ) {
     let unfilled = sweep_rad - value_angle;
     if unfilled < 0.001 {
         return;
     }
-    let dim_color = crate::core::Color { a: 0.55, ..background };
+    let dim_color = crate::core::Color {
+        a: dim_opacity,
+        ..background
+    };
     draw_arc_segment(
         frame,
         cx,
@@ -350,6 +378,10 @@ fn draw_dimming_overlay<R: geometry::Renderer>(
 type ColorStops = Vec<(f32, crate::core::Color)>;
 
 /// Build color stops from zone definitions.
+///
+/// Places one stop per zone at its midpoint so each zone's color dominates
+/// at the center and transitions happen naturally between zones.
+/// Extends to 0.0 and 1.0 using the first/last zone colors.
 fn build_zone_stops(
     data: &crate::mark::gauge::Gauge,
     range: f64,
@@ -360,17 +392,28 @@ fn build_zone_stops(
     for zone in &data.zones {
         let start_prop = ((zone.from - data.min) / range).clamp(0.0, 1.0) as f32;
         let end_prop = ((zone.to - data.min) / range).clamp(0.0, 1.0) as f32;
+        let mid = (start_prop + end_prop) / 2.0;
         let color = zone.color.resolve(background, text_pair, None);
-        if stops.is_empty() || (stops.last().unwrap().0 - start_prop).abs() > 0.001 {
-            stops.push((start_prop, color));
-        }
-        stops.push((end_prop, color));
+        stops.push((mid, color));
+    }
+    // Extend to arc edges using first/last zone colors
+    if let Some(&(_, first_color)) = stops.first()
+        && stops[0].0 > 0.001
+    {
+        stops.insert(0, (0.0, first_color));
+    }
+    if let Some(&(_, last_color)) = stops.last()
+        && stops.last().unwrap().0 < 0.999
+    {
+        stops.push((1.0, last_color));
     }
     stops
 }
 
-/// Interpolate a color at the given proportion from sorted color stops.
+/// Interpolate a color at the given proportion from sorted color stops (OKLCh).
 fn interpolate_color(stops: &ColorStops, t: f32) -> crate::core::Color {
+    use crate::palette::{Oklch, from_oklch, to_oklch};
+
     if stops.is_empty() {
         return crate::core::Color::WHITE;
     }
@@ -389,12 +432,23 @@ fn interpolate_color(stops: &ColorStops, t: f32) -> crate::core::Color {
             } else {
                 (t - t0) / (t1 - t0)
             };
-            return crate::core::Color {
-                r: c0.r + (c1.r - c0.r) * local,
-                g: c0.g + (c1.g - c0.g) * local,
-                b: c0.b + (c1.b - c0.b) * local,
-                a: c0.a + (c1.a - c0.a) * local,
-            };
+            let a = to_oklch(c0);
+            let b = to_oklch(c1);
+
+            // Shortest-path hue interpolation
+            let mut dh = b.h - a.h;
+            if dh > std::f32::consts::PI {
+                dh -= std::f32::consts::TAU;
+            } else if dh < -std::f32::consts::PI {
+                dh += std::f32::consts::TAU;
+            }
+
+            return from_oklch(Oklch {
+                l: a.l + (b.l - a.l) * local,
+                c: a.c + (b.c - a.c) * local,
+                h: a.h + dh * local,
+                a: a.a + (b.a - a.a) * local,
+            });
         }
     }
     stops[stops.len() - 1].1
@@ -411,10 +465,11 @@ fn draw_gradient_arc<R: geometry::Renderer>(
     start_angle: f32,
     sweep_rad: f32,
     stops: &ColorStops,
+    segments: usize,
 ) {
-    for i in 0..GRADIENT_SEGMENTS {
-        let t0 = i as f32 / GRADIENT_SEGMENTS as f32;
-        let t1 = (i + 1) as f32 / GRADIENT_SEGMENTS as f32;
+    for i in 0..segments {
+        let t0 = i as f32 / segments as f32;
+        let t1 = (i + 1) as f32 / segments as f32;
         let mid_t = (t0 + t1) / 2.0;
         let color = interpolate_color(stops, mid_t);
 
@@ -495,6 +550,7 @@ fn draw_ticks<R, Theme>(
     range: f64,
     text_pair: crate::color::Pair,
     theme: &Theme,
+    tick_font_size: f32,
 ) where
     R: geometry::Renderer,
     Theme: crate::design::Design + ?Sized,
@@ -536,8 +592,8 @@ fn draw_ticks<R, Theme>(
         // Tick label
         if data.show_tick_labels {
             let label_r = match ticks.style {
-                tick::Style::Outset | tick::Style::Cross => outer_radius + mark_len + theme.font_size() * 0.6,
-                tick::Style::Inset => inner_radius - mark_len - theme.font_size() * 0.6,
+                tick::Style::Outset | tick::Style::Cross => outer_radius + mark_len + tick_font_size * 0.6,
+                tick::Style::Inset => inner_radius - mark_len - tick_font_size * 0.6,
                 tick::Style::None => continue,
             };
             let label_pos = crate::core::Point::new(cx + label_r * angle.cos(), cy + label_r * angle.sin());
@@ -549,7 +605,7 @@ fn draw_ticks<R, Theme>(
                     a: 0.5,
                     ..text_pair.on_light
                 },
-                size: (theme.font_size() * 0.85).into(),
+                size: tick_font_size.into(),
                 font: theme.font(),
                 align_x: crate::core::alignment::Horizontal::Center.into(),
                 align_y: crate::core::alignment::Vertical::Center,

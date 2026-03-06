@@ -1,7 +1,8 @@
 use hyozu::axis::Ticks;
-use hyozu::{data, gauge};
+use hyozu::{Action, Design, Function, Map, data, gauge, item, props};
 use iced::widget::{center, column, pick_list, row};
-use iced::{Center, Fill, Subscription, Task, Theme, keyboard};
+use iced::{Center, Fill, Subscription, Task, Theme, keyboard, window};
+use std::time::Instant;
 
 pub fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
@@ -14,12 +15,16 @@ pub fn main() -> iced::Result {
 
 struct App {
     data: hyozu::Data,
+    value: f64,
+    direction: f64,
+    last_frame: Instant,
     theme: Theme,
     all_themes: Vec<Theme>,
 }
 
 #[derive(Debug, Clone)]
 enum Message {
+    Tick(Instant),
     ThemeChanged(Theme),
     NextTheme,
     PreviousTheme,
@@ -27,38 +32,72 @@ enum Message {
     LastTheme,
 }
 
-impl App {
-    fn new() -> (Self, Task<Message>) {
-        let g = gauge(72.0)
+fn build_gauge(theme: &Theme) -> hyozu::Data {
+    let seed = theme.palette_seed();
+    data(
+        gauge(0.0)
             .range(0.0, 100.0)
-            .zone(0.0, 40.0, 0x4CAF50)
-            .zone(40.0, 70.0, 0xFFC107)
-            .zone(70.0, 100.0, 0xF44336)
+            .zone(0.0, 30.0, seed.danger)
+            .zone(30.0, 70.0, seed.warning)
+            .zone(70.0, 100.0, seed.success)
             .format(|v| format!("{:.0}%", v))
             .unit("efficiency")
             .ticks(Ticks::default())
-            .gradient(true);
+            .gradient(true),
+    )
+    .title("System Performance")
+}
 
+impl App {
+    fn new() -> (Self, Task<Message>) {
+        let theme = hyozu::theme::paper();
         (
             Self {
-                data: data(g).title("System Performance"),
-                theme: hyozu::theme::paper(),
+                data: build_gauge(&theme),
+                value: 0.0,
+                direction: 1.0,
+                last_frame: Instant::now(),
+                theme,
                 all_themes: hyozu::theme::all_themes().collect(),
             },
             Task::none(),
         )
     }
 
+    fn set_theme(&mut self, theme: Theme) {
+        self.theme = theme;
+        self.data = build_gauge(&self.theme);
+        // Re-apply current animated value
+        let item = props::gauge::Value(self.value).map(item::Gauge.with(0));
+        self.data.perform(Action::Set(item));
+    }
+
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::ThemeChanged(theme) => {
-                self.theme = theme;
+            Message::Tick(now) => {
+                let dt = (now - self.last_frame).as_secs_f64();
+                self.last_frame = now;
+
+                self.value += self.direction * 30.0 * dt;
+                if self.value >= 100.0 {
+                    self.value = 100.0;
+                    self.direction = -1.0;
+                } else if self.value <= 0.0 {
+                    self.value = 0.0;
+                    self.direction = 1.0;
+                }
+
+                let item = props::gauge::Value(self.value).map(item::Gauge.with(0));
+                self.data.perform(Action::Set(item));
             }
+            Message::ThemeChanged(theme) => self.set_theme(theme),
             Message::FirstTheme => {
-                self.theme = self.all_themes.first().unwrap().clone();
+                let t = self.all_themes.first().unwrap().clone();
+                self.set_theme(t);
             }
             Message::LastTheme => {
-                self.theme = self.all_themes.last().unwrap().clone();
+                let t = self.all_themes.last().unwrap().clone();
+                self.set_theme(t);
             }
             Message::NextTheme => {
                 if let Some(next) = self
@@ -68,7 +107,8 @@ impl App {
                     .skip_while(|theme| *theme != &self.theme)
                     .nth(1)
                 {
-                    self.theme = next.clone();
+                    let t = next.clone();
+                    self.set_theme(t);
                 }
             }
             Message::PreviousTheme => {
@@ -80,7 +120,8 @@ impl App {
                     .skip_while(|theme| *theme != &self.theme)
                     .nth(1)
                 {
-                    self.theme = prev.clone();
+                    let t = prev.clone();
+                    self.set_theme(t);
                 }
             }
         }
@@ -90,22 +131,25 @@ impl App {
     fn subscription(&self) -> Subscription<Message> {
         use keyboard::key::{Key, Named};
 
-        keyboard::listen().filter_map(|event| {
-            let keyboard::Event::KeyPressed { key, .. } = event else {
-                return None;
-            };
-            match key {
-                Key::Named(Named::PageDown) | Key::Named(Named::ArrowRight) | Key::Named(Named::ArrowDown) => {
-                    Some(Message::NextTheme)
+        Subscription::batch([
+            window::frames().map(Message::Tick),
+            keyboard::listen().filter_map(|event| {
+                let keyboard::Event::KeyPressed { key, .. } = event else {
+                    return None;
+                };
+                match key {
+                    Key::Named(Named::PageDown) | Key::Named(Named::ArrowRight) | Key::Named(Named::ArrowDown) => {
+                        Some(Message::NextTheme)
+                    }
+                    Key::Named(Named::PageUp) | Key::Named(Named::ArrowLeft) | Key::Named(Named::ArrowUp) => {
+                        Some(Message::PreviousTheme)
+                    }
+                    Key::Named(Named::Home) => Some(Message::FirstTheme),
+                    Key::Named(Named::End) => Some(Message::LastTheme),
+                    _ => None,
                 }
-                Key::Named(Named::PageUp) | Key::Named(Named::ArrowLeft) | Key::Named(Named::ArrowUp) => {
-                    Some(Message::PreviousTheme)
-                }
-                Key::Named(Named::Home) => Some(Message::FirstTheme),
-                Key::Named(Named::End) => Some(Message::LastTheme),
-                _ => None,
-            }
-        })
+            }),
+        ])
     }
 
     fn view(&self) -> iced::Element<'_, Message> {

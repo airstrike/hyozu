@@ -134,14 +134,14 @@ pub fn count_color_slots(marks: &[Mark]) -> usize {
 // === OKLch color space utilities ===
 
 #[derive(Debug, Clone, Copy)]
-struct Oklch {
-    l: f32,
-    c: f32,
-    h: f32,
-    a: f32,
+pub(crate) struct Oklch {
+    pub(crate) l: f32,
+    pub(crate) c: f32,
+    pub(crate) h: f32,
+    pub(crate) a: f32,
 }
 
-fn to_oklch(color: crate::core::Color) -> Oklch {
+pub(crate) fn to_oklch(color: crate::core::Color) -> Oklch {
     let [r, g, b, alpha] = color.into_linear();
 
     // linear RGB -> LMS
@@ -166,7 +166,7 @@ fn to_oklch(color: crate::core::Color) -> Oklch {
     Oklch { l, c, h, a: alpha }
 }
 
-fn from_oklch(oklch: Oklch) -> crate::core::Color {
+pub(crate) fn from_oklch(oklch: Oklch) -> crate::core::Color {
     let Oklch { l, c, h, a: alpha } = oklch;
 
     let a = c * h.cos();

@@ -50,6 +50,10 @@ pub struct Gauge {
     pub(crate) show_tick_labels: bool,
     /// Whether to use gradient arc mode
     pub(crate) gradient: bool,
+    /// Number of segments for gradient arc rendering (default 100)
+    pub(crate) color_stops: usize,
+    /// Opacity of the dimming overlay on unfilled portion (default 0.55)
+    pub(crate) dim_opacity: f32,
 }
 
 impl std::fmt::Debug for Gauge {
@@ -68,6 +72,8 @@ impl std::fmt::Debug for Gauge {
             .field("ticks", &self.ticks)
             .field("show_tick_labels", &self.show_tick_labels)
             .field("gradient", &self.gradient)
+            .field("color_stops", &self.color_stops)
+            .field("dim_opacity", &self.dim_opacity)
             .finish()
     }
 }
@@ -100,6 +106,8 @@ pub fn gauge(value: impl Into<f64>) -> Gauge {
         ticks: None,
         show_tick_labels: true,
         gradient: false,
+        color_stops: 100,
+        dim_opacity: 0.55,
     }
 }
 
@@ -172,6 +180,18 @@ impl Gauge {
     /// Whether to use gradient arc mode (default false).
     pub fn gradient(mut self, gradient: bool) -> Self {
         self.gradient = gradient;
+        self
+    }
+
+    /// Sets the number of segments for gradient arc rendering (default 100).
+    pub fn color_stops(mut self, stops: usize) -> Self {
+        self.color_stops = stops.max(2);
+        self
+    }
+
+    /// Sets the dimming opacity for the unfilled arc portion (default 0.55).
+    pub fn dim_by(mut self, opacity: f32) -> Self {
+        self.dim_opacity = opacity.clamp(0.0, 1.0);
         self
     }
 
