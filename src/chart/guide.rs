@@ -960,6 +960,8 @@ where
                 wrapping: text::Wrapping::None,
                 ellipsis: text::Ellipsis::default(),
                 hint_factor: renderer.scale_factor(),
+                font_features: Vec::new(),
+                letter_spacing: Default::default(),
             });
 
             let label_width = paragraph.min_bounds().width;
@@ -1042,6 +1044,8 @@ where
                 wrapping: text::Wrapping::None,
                 ellipsis: text::Ellipsis::default(),
                 hint_factor: renderer.scale_factor(),
+                font_features: Vec::new(),
+                letter_spacing: Default::default(),
             });
 
             let label_width = paragraph.min_bounds().width;

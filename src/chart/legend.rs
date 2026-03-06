@@ -94,6 +94,8 @@ where
                 wrapping: text::Wrapping::None,
                 ellipsis: text::Ellipsis::default(),
                 hint_factor: renderer.scale_factor(),
+                font_features: Vec::new(),
+                letter_spacing: Default::default(),
             });
             state.widths.push(state.paragraph.min_width());
         }
@@ -197,6 +199,8 @@ where
                     wrapping: crate::core::text::Wrapping::None,
                     ellipsis: crate::core::text::Ellipsis::default(),
                     hint_factor: renderer.scale_factor(),
+                    font_features: Vec::new(),
+                    letter_spacing: Default::default(),
                 },
                 crate::core::Point::new(x + swatch_size + SWATCH_TEXT_GAP, y_top),
                 text_color,
