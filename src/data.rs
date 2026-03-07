@@ -63,6 +63,7 @@ fn axes_for_mark(mark: &Mark) -> (Option<Axis>, Option<Axis>) {
         Mark::Xy(_) => (Some(Xy::x_axis()), Some(Xy::y_axis())),
         Mark::Violin(v) => (Some(v.x_axis()), Some(v.y_axis())),
         Mark::Rule(_) => (Rule::x_axis(), Rule::y_axis()),
+        Mark::Tick(_) => (mark::tick::Tick::x_axis(), mark::tick::Tick::y_axis()),
         Mark::Heatmap(hm) => (Some(hm.x_axis()), Some(hm.y_axis())),
     }
 }
@@ -88,7 +89,7 @@ impl From<Vec<Mark>> for Area {
         // Configure axes based on first non-Rule mark (rules inherit axes)
         let (x_axis, y_axis) = marks
             .iter()
-            .find(|m| !matches!(m, Mark::Rule(_)))
+            .find(|m| !matches!(m, Mark::Rule(_) | Mark::Tick(_)))
             .or(marks.first())
             .map(axes_for_mark)
             .unwrap_or((None, None));

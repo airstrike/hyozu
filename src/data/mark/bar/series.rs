@@ -85,11 +85,18 @@ impl Series {
     }
 
     /// Sets a per-point color override. Grows the vec with `None` if needed.
-    pub fn set_point_color(&mut self, index: usize, color: Option<Color>) {
+    pub fn set_point_color(&mut self, index: usize, color: impl Into<Color>) {
         if index >= self.point_colors.len() {
             self.point_colors.resize(index + 1, None);
         }
-        self.point_colors[index] = color;
+        self.point_colors[index] = Some(color.into());
+    }
+
+    /// Clears the per-point color override at the given index.
+    pub fn clear_point_color(&mut self, index: usize) {
+        if index < self.point_colors.len() {
+            self.point_colors[index] = None;
+        }
     }
 
     /// Returns true if any per-point color overrides are set.

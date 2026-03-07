@@ -272,6 +272,24 @@ impl Area {
                         x_max = x_max.max(rule.value);
                     }
                 },
+                Mark::Tick(tick) => {
+                    for point in &tick.points {
+                        match tick.orientation {
+                            crate::mark::tick::Orientation::Vertical => {
+                                x_min = x_min.min(point.y);
+                                x_max = x_max.max(point.y);
+                                y_min = y_min.min(point.x);
+                                y_max = y_max.max(point.x);
+                            }
+                            crate::mark::tick::Orientation::Horizontal => {
+                                x_min = x_min.min(point.x);
+                                x_max = x_max.max(point.x);
+                                y_min = y_min.min(point.y);
+                                y_max = y_max.max(point.y);
+                            }
+                        }
+                    }
+                }
                 Mark::Heatmap(hm) => {
                     x_min = x_min.min(0.0);
                     x_max = x_max.max((hm.cols() as f64 - 1.0).max(0.0));

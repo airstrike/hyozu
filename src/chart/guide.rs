@@ -459,7 +459,7 @@ where
                             values.insert(OrderedFloat(i as f64));
                         }
                     }
-                    crate::Mark::Rule(_) | crate::Mark::Pie(_) | crate::Mark::Gauge(_) => {}
+                    crate::Mark::Rule(_) | crate::Mark::Tick(_) | crate::Mark::Pie(_) | crate::Mark::Gauge(_) => {}
                 }
             }
 
@@ -693,6 +693,30 @@ where
                     }
                     _ => {}
                 },
+                crate::Mark::Tick(tick) => {
+                    for point in &tick.points {
+                        match tick.orientation {
+                            crate::mark::tick::Orientation::Vertical => {
+                                if is_x_axis {
+                                    min = min.min(point.y);
+                                    max = max.max(point.y);
+                                } else {
+                                    min = min.min(point.x);
+                                    max = max.max(point.x);
+                                }
+                            }
+                            crate::mark::tick::Orientation::Horizontal => {
+                                if is_x_axis {
+                                    min = min.min(point.x);
+                                    max = max.max(point.x);
+                                } else {
+                                    min = min.min(point.y);
+                                    max = max.max(point.y);
+                                }
+                            }
+                        }
+                    }
+                }
                 crate::Mark::Heatmap(hm) => {
                     if is_x_axis {
                         min = min.min(0.0);

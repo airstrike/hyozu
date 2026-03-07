@@ -101,6 +101,7 @@ impl Palette {
                         Palette::Sequential
                     }
                 }
+                Mark::Tick(_) => Palette::Sequential,
                 Mark::Rule(_) => Palette::Sequential,
             };
         }
@@ -125,6 +126,7 @@ pub fn count_color_slots(marks: &[Mark]) -> usize {
             Mark::Waterfall(_) => 3,
             Mark::Heatmap(_) => 0, // heatmap uses its own color_stops
             Mark::Violin(v) => v.entries.len(),
+            Mark::Tick(_) => 0,
             Mark::Rule(_) => 0,
         })
         .sum::<usize>()

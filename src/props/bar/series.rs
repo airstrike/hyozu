@@ -29,7 +29,11 @@ impl Property {
                 series.point_colors.clear();
             }
             Property::PointColor { index, color } => {
-                series.set_point_color(*index, *color);
+                if let Some(c) = color {
+                    series.set_point_color(*index, *c);
+                } else {
+                    series.clear_point_color(*index);
+                }
             }
             Property::Label(l) => series.label = l.clone(),
             Property::LabelPosition(p) => series.set_label_position(*p),
