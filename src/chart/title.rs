@@ -69,8 +69,6 @@ where
             align_y: crate::core::alignment::Vertical::Top,
             shaping: text::Shaping::Basic,
             wrapping: text::Wrapping::None,
-            ellipsis: text::Ellipsis::default(),
-            hint_factor: renderer.scale_factor(),
         });
 
         let text_size = state.paragraph.min_bounds();
@@ -118,8 +116,6 @@ where
                 line_height: crate::core::text::LineHeight::default(),
                 shaping: crate::core::text::Shaping::Basic,
                 wrapping: crate::core::text::Wrapping::None,
-                ellipsis: crate::core::text::Ellipsis::default(),
-                hint_factor: renderer.scale_factor(),
             },
             position,
             text_color,

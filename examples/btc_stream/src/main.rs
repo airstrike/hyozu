@@ -325,9 +325,7 @@ fn segment_button(theme: &Theme, status: button::Status, selected: bool) -> butt
     let fill = palette.background.weak.color.scale_alpha(0.5);
 
     button::Style {
-        background: if selected {
-            Some(fill.into())
-        } else if matches!(status, button::Status::Hovered) {
+        background: if selected || matches!(status, button::Status::Hovered) {
             Some(fill.into())
         } else {
             None
@@ -467,10 +465,10 @@ async fn fetch_historical_prices(pair: TradingPair) -> Result<Vec<PricePoint>, S
     // OHLC response format: {"error":[],"result":{"XXBTZUSD":[[time,open,high,low,close,vwap,volume,count],...]}}
     let json: serde_json::Value = serde_json::from_slice(&body).map_err(|e| format!("JSON parse error: {}", e))?;
 
-    if let Some(errors) = json.get("error").and_then(|e| e.as_array()) {
-        if !errors.is_empty() {
-            return Err(format!("Kraken error: {:?}", errors));
-        }
+    if let Some(errors) = json.get("error").and_then(|e| e.as_array())
+        && !errors.is_empty()
+    {
+        return Err(format!("Kraken error: {:?}", errors));
     }
 
     let candles = json
@@ -486,7 +484,7 @@ async fn fetch_historical_prices(pair: TradingPair) -> Result<Vec<PricePoint>, S
         .take(WINDOW_SIZE)
         .filter_map(|candle| {
             let arr = candle.as_array()?;
-            let timestamp = arr.get(0)?.as_i64()?;
+            let timestamp = arr.first()?.as_i64()?;
             let price = arr.get(4)?.as_str()?.parse::<f32>().ok()?;
             Some(PricePoint { timestamp, price })
         })
@@ -499,7 +497,7 @@ async fn fetch_historical_prices(pair: TradingPair) -> Result<Vec<PricePoint>, S
 }
 
 // Helper function to format numbers with thousands separator
-fn currency(value: f32) -> String {
+fn currency(value: f64) -> String {
     let whole = value as i32;
     let s = whole.to_string();
     let mut result = String::new();

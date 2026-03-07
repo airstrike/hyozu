@@ -155,11 +155,9 @@ impl App {
     fn view(&self) -> iced::Element<'_, Message> {
         let theme_picker = row![
             "Theme:",
-            pick_list(Some(self.theme.clone()), self.all_themes.clone(), |t: &Theme| t
-                .to_string(),)
-            .on_select(Message::ThemeChanged)
-            .width(Fill)
-            .placeholder("Paper (default)"),
+            pick_list(self.all_themes.clone(), Some(self.theme.clone()), Message::ThemeChanged)
+                .width(Fill)
+                .placeholder("Paper (default)"),
         ]
         .align_y(Center)
         .spacing(10);

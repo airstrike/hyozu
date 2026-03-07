@@ -452,8 +452,6 @@ where
                         line_height: crate::core::text::LineHeight::default(),
                         shaping: crate::core::text::Shaping::Basic,
                         wrapping: crate::core::text::Wrapping::None,
-                        ellipsis: crate::core::text::Ellipsis::default(),
-                        hint_factor: renderer.scale_factor(),
                     },
                     crate::core::Point::new(anchor_x, anchor_y),
                     label_color,

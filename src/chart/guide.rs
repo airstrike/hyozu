@@ -958,8 +958,6 @@ where
                 align_y: alignment::Vertical::Top,
                 shaping: text::Shaping::Basic,
                 wrapping: text::Wrapping::None,
-                ellipsis: text::Ellipsis::default(),
-                hint_factor: renderer.scale_factor(),
             });
 
             let label_width = paragraph.min_bounds().width;
@@ -1040,8 +1038,6 @@ where
                 align_y: alignment::Vertical::Top,
                 shaping: text::Shaping::Basic,
                 wrapping: text::Wrapping::None,
-                ellipsis: text::Ellipsis::default(),
-                hint_factor: renderer.scale_factor(),
             });
 
             let label_width = paragraph.min_bounds().width;

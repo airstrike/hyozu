@@ -7,7 +7,7 @@ publish = false
 [dependencies]
 chrono = "0.4"
 hyozu = { path = "../.." }
-iced = { git = "https://github.com/iced-rs/iced.git", branch = "master", features = [
+iced = { version = "0.14", features = [
     "tokio",
     "sipper",
 ] }

@@ -92,8 +92,6 @@ where
                 align_y: crate::core::alignment::Vertical::Top,
                 shaping: text::Shaping::Basic,
                 wrapping: text::Wrapping::None,
-                ellipsis: text::Ellipsis::default(),
-                hint_factor: renderer.scale_factor(),
             });
             state.widths.push(state.paragraph.min_width());
         }
@@ -195,8 +193,6 @@ where
                     line_height: crate::core::text::LineHeight::default(),
                     shaping: crate::core::text::Shaping::Basic,
                     wrapping: crate::core::text::Wrapping::None,
-                    ellipsis: crate::core::text::Ellipsis::default(),
-                    hint_factor: renderer.scale_factor(),
                 },
                 crate::core::Point::new(x + swatch_size + SWATCH_TEXT_GAP, y_top),
                 text_color,

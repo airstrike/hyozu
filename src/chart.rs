@@ -182,6 +182,7 @@ where
         layout: Layout<'_>,
         cursor: mouse::Cursor,
         _renderer: &Renderer,
+        _clipboard: &mut dyn crate::core::Clipboard,
         shell: &mut crate::core::Shell<'_, Message>,
         _viewport: &Rectangle,
     ) {

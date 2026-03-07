@@ -406,21 +406,17 @@ impl App {
         let palette_section = column![
             text("Palette").size(14),
             pick_list(
-                Some(current_palette.to_string()),
                 vec!["Auto".to_string(), "Categorical".to_string(), "Sequential".to_string(),],
-                |s: &String| s.clone(),
+                Some(current_palette.to_string()),
+                on_palette,
             )
-            .on_select(on_palette)
             .width(Fill),
         ]
         .spacing(4);
 
         let theme_section = column![
             text("Theme").size(14),
-            pick_list(Some(self.theme.clone()), self.all_themes.clone(), |t: &Theme| t
-                .to_string(),)
-            .on_select(Message::ThemeChanged)
-            .width(Fill),
+            pick_list(self.all_themes.clone(), Some(self.theme.clone()), Message::ThemeChanged).width(Fill),
         ]
         .spacing(4);
 
