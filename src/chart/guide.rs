@@ -1089,7 +1089,45 @@ where
         Node::with_children(Size::new(max_size.width, height), children)
     }
 
-    /// Draws the guide by rendering ticks and labels at their laid-out positions.
+    /// Draws the axis line only using canvas geometry so it composites
+    /// in the same pipeline as marks. Call after the plot area to ensure
+    /// axis lines render on top of marks (bars, areas, etc.).
+    pub fn draw_axis_line<D>(&self, renderer: &mut Renderer, design: &D, layout: crate::core::Layout<'_>)
+    where
+        D: crate::design::Design + ?Sized,
+        Renderer: crate::widget::renderer::geometry::Renderer,
+    {
+        use crate::widget::canvas::{Frame, Path, Stroke};
+
+        let bounds = layout.bounds();
+
+        let background = design.background_color();
+        let text_pair = design.text_pair();
+        let axis_color = self
+            .axis
+            .axis_color()
+            .unwrap_or(design.axis_color())
+            .resolve(background, text_pair, None);
+
+        let mut frame = Frame::new(renderer, bounds.size());
+        let path = match self.axis.orientation() {
+            Orientation::Bottom => Path::line(Point::new(0.0, 0.0), Point::new(bounds.width, 0.0)),
+            Orientation::Left => {
+                let x = bounds.width;
+                Path::line(Point::new(x, 0.0), Point::new(x, bounds.height))
+            }
+            _ => return, // TODO: Top and Right orientations
+        };
+
+        frame.stroke(&path, Stroke::default().with_width(1.0).with_color(axis_color));
+        let geometry = frame.into_geometry();
+        renderer.with_translation(crate::core::Vector::new(bounds.x, bounds.y), |renderer| {
+            renderer.draw_geometry(geometry);
+        });
+    }
+
+    /// Draws tick marks and labels at their laid-out positions.
+    /// Call before the plot area so labels appear behind marks.
     #[allow(clippy::too_many_arguments)]
     pub fn draw<D>(
         &self,
@@ -1102,16 +1140,16 @@ where
         viewport: &crate::core::Rectangle,
     ) where
         D: crate::design::Design + ?Sized,
+        Renderer: crate::widget::renderer::geometry::Renderer,
     {
+        use crate::widget::canvas::{Frame, Path, Stroke};
+
         let state = tree.state.downcast_ref::<State<Renderer::Paragraph>>();
-        // Use cached label info and tick positions from state (computed in diff())
         let label_data = &state.label_info;
         let tick_positions = &state.tick_positions;
 
-        // Draw axis line
         let bounds = layout.bounds();
 
-        // Get colors from the design system or axis overrides
         let background = design.background_color();
         let text_pair = design.text_pair();
 
@@ -1126,98 +1164,42 @@ where
             .unwrap_or(design.text_color())
             .resolve(background, text_pair, None);
 
-        match self.axis.orientation() {
-            Orientation::Bottom => {
-                // Horizontal line at top of bounds
-                renderer.fill_quad(
-                    crate::core::renderer::Quad {
-                        bounds: crate::core::Rectangle {
-                            x: bounds.x,
-                            y: bounds.y,
-                            width: bounds.width,
-                            height: 1.0,
-                        },
-                        ..Default::default()
-                    },
-                    axis_color,
-                );
-            }
-            Orientation::Left => {
-                // Vertical line at right edge of bounds (aligns with plot area left edge)
-                renderer.fill_quad(
-                    crate::core::renderer::Quad {
-                        bounds: crate::core::Rectangle {
-                            x: bounds.x + bounds.width,
-                            y: bounds.y,
-                            width: 1.0,
-                            height: bounds.height,
-                        },
-                        ..Default::default()
-                    },
-                    axis_color,
-                );
-            }
-            _ => {} // TODO: Top and Right orientations
-        }
-
         // Get bounds for coordinate mapping
         let (min_value, max_value) = (state.bounds.min(), state.bounds.max());
         let value_range = max_value - min_value;
 
-        // First, draw all tick marks at their positions
+        // Draw all tick marks using canvas geometry (same pipeline as marks)
         let tick_length = 5.0;
-        for &tick_pos in tick_positions {
-            match self.axis.orientation() {
-                Orientation::Bottom => {
-                    // Map tick position to pixel coordinate
+        if !tick_positions.is_empty() {
+            let mut frame = Frame::new(renderer, bounds.size());
+            let path = Path::new(|builder| {
+                for &tick_pos in tick_positions {
                     let normalized = if value_range > 0.0 {
                         ((tick_pos - min_value) / value_range) as f32
                     } else {
                         0.5
                     };
 
-                    // Simple linear mapping that matches the bars
-                    let pixel_x = bounds.x + normalized * bounds.width;
-
-                    // Vertical tick mark
-                    renderer.fill_quad(
-                        crate::core::renderer::Quad {
-                            bounds: crate::core::Rectangle {
-                                x: pixel_x,
-                                y: bounds.y,
-                                width: 1.0,
-                                height: tick_length,
-                            },
-                            ..Default::default()
-                        },
-                        axis_color,
-                    );
+                    match self.axis.orientation() {
+                        Orientation::Bottom => {
+                            let x = normalized * bounds.width;
+                            builder.move_to(Point::new(x, 0.0));
+                            builder.line_to(Point::new(x, tick_length));
+                        }
+                        Orientation::Left => {
+                            let y = bounds.height - normalized * bounds.height;
+                            builder.move_to(Point::new(bounds.width - tick_length, y));
+                            builder.line_to(Point::new(bounds.width, y));
+                        }
+                        _ => {}
+                    }
                 }
-                Orientation::Left => {
-                    // Map tick position to pixel coordinate
-                    let normalized = if value_range > 0.0 {
-                        ((tick_pos - min_value) / value_range) as f32
-                    } else {
-                        0.5
-                    };
-                    let pixel_y = bounds.y + bounds.height - normalized * bounds.height;
-
-                    // Horizontal tick mark
-                    renderer.fill_quad(
-                        crate::core::renderer::Quad {
-                            bounds: crate::core::Rectangle {
-                                x: bounds.x + bounds.width - tick_length,
-                                y: pixel_y,
-                                width: tick_length,
-                                height: 1.0,
-                            },
-                            ..Default::default()
-                        },
-                        axis_color,
-                    );
-                }
-                _ => {}
-            }
+            });
+            frame.stroke(&path, Stroke::default().with_width(1.0).with_color(axis_color));
+            let geometry = frame.into_geometry();
+            renderer.with_translation(crate::core::Vector::new(bounds.x, bounds.y), |renderer| {
+                renderer.draw_geometry(geometry);
+            });
         }
 
         // Then, draw labels at their positions from layout
