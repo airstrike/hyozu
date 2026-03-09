@@ -961,6 +961,7 @@ where
                 ellipsis: text::Ellipsis::default(),
                 hint_factor: renderer.scale_factor(),
                 font_features: Vec::new(),
+                font_variations: Vec::new(),
                 letter_spacing: Default::default(),
             });
 
@@ -1045,6 +1046,7 @@ where
                 ellipsis: text::Ellipsis::default(),
                 hint_factor: renderer.scale_factor(),
                 font_features: Vec::new(),
+                font_variations: Vec::new(),
                 letter_spacing: Default::default(),
             });
 

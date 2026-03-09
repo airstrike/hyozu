@@ -499,7 +499,7 @@ async fn fetch_historical_prices(pair: TradingPair) -> Result<Vec<PricePoint>, S
 }
 
 // Helper function to format numbers with thousands separator
-fn currency(value: f32) -> String {
+fn currency(value: f64) -> String {
     let whole = value as i32;
     let s = whole.to_string();
     let mut result = String::new();
