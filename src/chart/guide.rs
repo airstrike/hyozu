@@ -971,7 +971,6 @@ where
             // Calculate Y position for this tick within our height
             let tick_value = *pos;
             let label_height = paragraph.min_bounds().height;
-            let half_height = label_height / 2.0;
 
             // Skip if not enough room for the label
             if max_size.height < label_height {
@@ -984,8 +983,9 @@ where
                 max_size.height / 2.0
             };
 
-            // Clamp y so vertically-centered labels stay within bounds
-            let y = y.clamp(half_height, max_size.height - half_height);
+            // Don't clamp: edge labels extend beyond the axis bounds (the title
+            // above and the bottom axis below provide natural overflow space).
+            // This keeps every label centered on its tick mark.
 
             // Create a node for this tick positioned at the calculated y
             children.push(

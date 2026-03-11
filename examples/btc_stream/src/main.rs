@@ -15,7 +15,9 @@ use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
 use serde::Deserialize;
 
+use hyozu::line::label::{Position, Show};
 use hyozu::{Data, chart, line};
+
 use iced::task::{self, sipper};
 use iced::widget::{Space, button, column, container, row, text};
 use iced::{Border, Element, Fill, Font, Shrink, Task, Theme};
@@ -246,10 +248,9 @@ impl App {
         // Create (timestamp, price) points for proper time-based x-axis
         let points: Vec<(f32, f32)> = self.points.iter().map(|p| (p.timestamp as f32, p.price)).collect();
 
-        self.data =
-            Data::from(line(points).data_labels(line::label::Show::LastOnly + line::label::Position::Right + currency))
-                .x_axis(|_| line::Line::time_axis())
-                .y_axis_labels(currency);
+        self.data = Data::from(line(points).data_labels(Show::LastOnly + Position::Right + currency))
+            .x_axis(|_| line::Line::time_axis())
+            .y_axis_labels(currency);
     }
 
     fn view(&self) -> Element<'_, Message> {

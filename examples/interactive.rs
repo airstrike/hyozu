@@ -9,6 +9,7 @@ use hyozu::{Data, Map, Palette, bar, bars, chart, item, pie, props};
 pub fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
         .window_size([1050.0, 700.0])
+        .antialiasing(true)
         .settings(iced::Settings {
             default_text_size: 13.into(),
             default_font: iced::Font::with_name("GT Pressura Mono"),
