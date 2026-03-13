@@ -10,6 +10,8 @@ use crate::widget::renderer::geometry;
 pub struct State {
     /// Pixel rectangles for each series, outer vec is series, inner vec is bars
     pub series_rects: Vec<Vec<Rectangle>>,
+    /// Pixel rectangles for each label, outer vec is series, inner vec is bars
+    pub label_rects: Vec<Vec<Option<Rectangle>>>,
 }
 
 /// A Bars series that renders vertical bar charts.
@@ -43,6 +45,7 @@ where
             tag: tree::Tag::of::<State>(),
             state: tree::State::new(State {
                 series_rects: Vec::new(),
+                label_rects: Vec::new(),
             }),
             children: Vec::new(),
         }
@@ -84,6 +87,9 @@ where
                 self.layout_vertical(state, plane, num_bins, num_series, bar_length, spacing_prop);
             }
         }
+
+        // Compute label rects for hit-testing
+        state.label_rects = self.compute_label_rects(state);
 
         // Bars take no space - they're rendered within the plane
         Node::new(Size::ZERO)
@@ -369,6 +375,69 @@ where
         }
     }
 
+    /// Computes label bounding rectangles for hit-testing.
+    fn compute_label_rects(&self, state: &State) -> Vec<Vec<Option<Rectangle>>> {
+        let is_horizontal = self.data.direction == crate::mark::bar::Direction::Horizontal;
+
+        self.data
+            .series
+            .iter()
+            .zip(state.series_rects.iter())
+            .map(|(series, rects)| {
+                let Some(label_config) = &series.label else {
+                    return rects.iter().map(|_| None).collect();
+                };
+
+                let label_size = label_config.size.map(|p| p.0).unwrap_or(12.0);
+
+                rects
+                    .iter()
+                    .zip(series.points.iter())
+                    .enumerate()
+                    .map(|(bar_idx, (rect, point))| {
+                        let text = (label_config.format)(point.y);
+                        if text.is_empty() {
+                            return None;
+                        }
+
+                        // Resolve per-point size override
+                        let size = series
+                            .point_label(bar_idx)
+                            .and_then(|l| l.size())
+                            .map(|p| p.0)
+                            .unwrap_or(label_size);
+
+                        let (lx, ly, align_x, align_y) = label_position(rect, label_config.position, is_horizontal);
+
+                        // Estimate text bounds
+                        let char_width = size * 0.6;
+                        let text_width = text.len() as f32 * char_width + 6.0; // 3px padding each side
+                        let text_height = size * 1.2 + 4.0; // 2px padding top/bottom
+
+                        // Convert alignment + position to top-left origin rect
+                        let x = match align_x {
+                            crate::core::alignment::Horizontal::Left => lx,
+                            crate::core::alignment::Horizontal::Center => lx - text_width / 2.0,
+                            crate::core::alignment::Horizontal::Right => lx - text_width,
+                        };
+                        let y = match align_y {
+                            crate::core::alignment::Vertical::Top => ly,
+                            crate::core::alignment::Vertical::Center => ly - text_height / 2.0,
+                            crate::core::alignment::Vertical::Bottom => ly - text_height,
+                        };
+
+                        Some(Rectangle {
+                            x,
+                            y,
+                            width: text_width,
+                            height: text_height,
+                        })
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
     /// Draws the bars using pre-calculated rectangles
     #[allow(clippy::too_many_arguments)]
     pub fn draw<Theme>(
@@ -461,81 +530,44 @@ where
                     // Format the label text
                     let label_text = (label_config.format)(point.y);
 
-                    // Calculate label position in local coordinates
-                    let (label_x, label_y, align_x, align_y) = if is_horizontal {
-                        // Horizontal bars: reinterpret positions
-                        match label_config.position {
-                            Position::Above => (
-                                // Right of bar end
-                                rect.x + rect.width + 4.0,
-                                rect.y + rect.height / 2.0,
-                                crate::core::alignment::Horizontal::Left.into(),
-                                crate::core::alignment::Vertical::Center,
-                            ),
-                            Position::End => (
-                                // Inside from value end (right side)
-                                rect.x + rect.width - 4.0,
-                                rect.y + rect.height / 2.0,
-                                crate::core::alignment::Horizontal::Right.into(),
-                                crate::core::alignment::Vertical::Center,
-                            ),
-                            Position::Center => (
-                                rect.x + rect.width / 2.0,
-                                rect.y + rect.height / 2.0,
-                                crate::core::alignment::Horizontal::Center.into(),
-                                crate::core::alignment::Vertical::Center,
-                            ),
-                            Position::Base => (
-                                // Left at bar origin (zero line)
-                                rect.x + 4.0,
-                                rect.y + rect.height / 2.0,
-                                crate::core::alignment::Horizontal::Left.into(),
-                                crate::core::alignment::Vertical::Center,
-                            ),
-                        }
-                    } else {
-                        // Vertical bars (default)
-                        match label_config.position {
-                            Position::Above => (
-                                rect.x + rect.width / 2.0,
-                                rect.y - 4.0,
-                                crate::core::alignment::Horizontal::Center.into(),
-                                crate::core::alignment::Vertical::Bottom,
-                            ),
-                            Position::End => (
-                                rect.x + rect.width / 2.0,
-                                rect.y + 4.0,
-                                crate::core::alignment::Horizontal::Center.into(),
-                                crate::core::alignment::Vertical::Top,
-                            ),
-                            Position::Center => (
-                                rect.x + rect.width / 2.0,
-                                rect.y + rect.height / 2.0,
-                                crate::core::alignment::Horizontal::Center.into(),
-                                crate::core::alignment::Vertical::Center,
-                            ),
-                            Position::Base => (
-                                rect.x + rect.width / 2.0,
-                                rect.y + rect.height - 4.0,
-                                crate::core::alignment::Horizontal::Center.into(),
-                                crate::core::alignment::Vertical::Bottom,
-                            ),
-                        }
-                    };
+                    // Calculate label position using shared helper
+                    let (label_x, label_y, align_x, align_y) =
+                        label_position(rect, label_config.position, is_horizontal);
+
+                    // Merge per-point label overrides
+                    let point_label = series.point_label(bar_idx);
+                    let effective_size = point_label.and_then(|l| l.size()).map(|p| p.0).unwrap_or(label_size);
+                    let effective_weight = point_label.and_then(|l| l.weight()).or(label_config.weight);
+                    let effective_style = point_label.and_then(|l| l.style()).or(label_config.style);
+                    let effective_fill = point_label.and_then(|l| l.fill().copied()).or(label_config.fill);
+
+                    // Draw fill background if specified
+                    if let Some(fill_color_spec) = effective_fill
+                        && let Some(Some(lr)) = state.label_rects.get(series_idx).and_then(|rects| rects.get(bar_idx))
+                    {
+                        let fill_resolved = fill_color_spec.resolve(background, text_pair, None);
+                        let fill_path = Path::new(|b| {
+                            b.rectangle(
+                                crate::core::Point::new(lr.x, lr.y),
+                                crate::core::Size::new(lr.width, lr.height),
+                            );
+                        });
+                        label_frame.fill(&fill_path, fill_resolved);
+                    }
 
                     // Resolve label color based on position
-                    // Default to CONTRAST (adaptive color) if not specified
-                    let label_color_spec = label_config.color.unwrap_or(crate::color::Color::CONTRAST);
+                    let label_color_spec = point_label
+                        .and_then(|l| l.color().copied())
+                        .or(label_config.color)
+                        .unwrap_or(crate::color::Color::CONTRAST);
 
                     // Use per-bar resolved color for contrast
                     let this_bar_color = all_bar_colors[series_idx][bar_idx];
 
                     let label_color = match label_config.position {
                         Position::Above => {
-                            // Check if label position is inside any other bar's rectangle (local coords)
                             let label_point = crate::core::Point::new(label_x, label_y);
 
-                            // Find which bar (if any) contains this label position
                             let containing_bar = all_bar_colors.iter().zip(state.series_rects.iter()).find_map(
                                 |(colors, other_rects)| {
                                     other_rects
@@ -549,23 +581,28 @@ where
                             if let Some(other_color) = containing_bar {
                                 label_color_spec.resolve(other_color, text_pair, Some(background))
                             } else {
-                                // Label is outside all bars - resolve against chart background
                                 label_color_spec.resolve(background, text_pair, None)
                             }
                         }
-                        _ => {
-                            // Inside label (End, Center, Base): resolve against bar's visual color
-                            label_color_spec.resolve(this_bar_color, text_pair, Some(background))
-                        }
+                        _ => label_color_spec.resolve(this_bar_color, text_pair, Some(background)),
                     };
+
+                    // Build font with weight/style overrides
+                    let mut font = theme.font();
+                    if let Some(w) = effective_weight {
+                        font.weight = w;
+                    }
+                    if let Some(s) = effective_style {
+                        font.style = s;
+                    }
 
                     label_frame.fill_text(CanvasText {
                         content: label_text,
                         position: crate::core::Point::new(label_x, label_y),
                         color: label_color,
-                        size: label_size.into(),
-                        font: theme.font(),
-                        align_x,
+                        size: effective_size.into(),
+                        font,
+                        align_x: align_x.into(),
                         align_y,
                         line_height: crate::core::text::LineHeight::default(),
                         shaping: crate::core::text::Shaping::Basic,
@@ -590,6 +627,16 @@ where
                     Target::Mark(m) => *m == mark_index,
                     Target::Series { mark, series } => *mark == mark_index && *series == series_idx,
                     Target::Entry { mark, series, index } => {
+                        *mark == mark_index && *series == series_idx && *index == bar_idx
+                    }
+                    _ => false,
+                }
+            };
+
+            let should_highlight_label = |series_idx: usize, bar_idx: usize| -> bool {
+                match target {
+                    Target::SeriesLabel { mark, series } => *mark == mark_index && *series == series_idx,
+                    Target::EntryLabel { mark, series, index } => {
                         *mark == mark_index && *series == series_idx && *index == bar_idx
                     }
                     _ => false,
@@ -623,6 +670,33 @@ where
                         });
                         selection_frame.stroke(&inner_path, Stroke::default().with_color(inner_color).with_width(1.0));
                     }
+
+                    // Label selection highlight
+                    if should_highlight_label(series_idx, bar_idx)
+                        && let Some(Some(lr)) = state.label_rects.get(series_idx).and_then(|rects| rects.get(bar_idx))
+                    {
+                        let outer_rect = Rectangle {
+                            x: lr.x - 1.0,
+                            y: lr.y - 1.0,
+                            width: lr.width + 2.0,
+                            height: lr.height + 2.0,
+                        };
+                        let outer_path = Path::new(|b| {
+                            b.rectangle(
+                                crate::core::Point::new(outer_rect.x, outer_rect.y),
+                                crate::core::Size::new(outer_rect.width, outer_rect.height),
+                            );
+                        });
+                        selection_frame.stroke(&outer_path, Stroke::default().with_color(outer_color).with_width(1.0));
+
+                        let inner_path = Path::new(|b| {
+                            b.rectangle(
+                                crate::core::Point::new(lr.x, lr.y),
+                                crate::core::Size::new(lr.width, lr.height),
+                            );
+                        });
+                        selection_frame.stroke(&inner_path, Stroke::default().with_color(inner_color).with_width(1.0));
+                    }
                 }
             }
         }
@@ -644,5 +718,75 @@ where
         renderer.with_translation(translation, |renderer| {
             renderer.draw_geometry(selection_geometry);
         });
+    }
+}
+
+/// Computes label position and alignment for a bar rectangle.
+fn label_position(
+    rect: &Rectangle,
+    position: Position,
+    is_horizontal: bool,
+) -> (
+    f32,
+    f32,
+    crate::core::alignment::Horizontal,
+    crate::core::alignment::Vertical,
+) {
+    use crate::core::alignment::{Horizontal, Vertical};
+
+    if is_horizontal {
+        match position {
+            Position::Above => (
+                rect.x + rect.width + 4.0,
+                rect.y + rect.height / 2.0,
+                Horizontal::Left,
+                Vertical::Center,
+            ),
+            Position::End => (
+                rect.x + rect.width - 4.0,
+                rect.y + rect.height / 2.0,
+                Horizontal::Right,
+                Vertical::Center,
+            ),
+            Position::Center => (
+                rect.x + rect.width / 2.0,
+                rect.y + rect.height / 2.0,
+                Horizontal::Center,
+                Vertical::Center,
+            ),
+            Position::Base => (
+                rect.x + 4.0,
+                rect.y + rect.height / 2.0,
+                Horizontal::Left,
+                Vertical::Center,
+            ),
+        }
+    } else {
+        match position {
+            Position::Above => (
+                rect.x + rect.width / 2.0,
+                rect.y - 4.0,
+                Horizontal::Center,
+                Vertical::Bottom,
+            ),
+            Position::End => (
+                rect.x + rect.width / 2.0,
+                rect.y + 4.0,
+                Horizontal::Center,
+                Vertical::Top,
+            ),
+            Position::Center => (
+                rect.x + rect.width / 2.0,
+                rect.y + rect.height / 2.0,
+                Horizontal::Center,
+                Vertical::Center,
+            ),
+            Position::Base => (
+                rect.x + rect.width / 2.0,
+                rect.y + rect.height - 4.0,
+                Horizontal::Center,
+                Vertical::Bottom,
+            ),
+        }
     }
 }

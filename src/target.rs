@@ -13,6 +13,10 @@ pub enum Target {
     Series { mark: usize, series: usize },
     /// A specific data entry within a series.
     Entry { mark: usize, series: usize, index: usize },
+    /// The label area of a series within a mark.
+    SeriesLabel { mark: usize, series: usize },
+    /// The label of a specific data entry within a series.
+    EntryLabel { mark: usize, series: usize, index: usize },
     /// The X axis.
     XAxis,
     /// The Y axis.

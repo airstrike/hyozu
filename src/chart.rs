@@ -238,6 +238,44 @@ where
                     let bars_tag = tree::Tag::of::<plot_area::bars::State>();
                     let pie_tag = tree::Tag::of::<plot_area::pie::State>();
 
+                    // First pass: hit-test labels (labels win when overlapping shapes)
+                    for (mark_idx, mark_tree) in plot_area_tree.children.iter().enumerate() {
+                        if mark_tree.tag == bars_tag {
+                            let bars_state = mark_tree.state.downcast_ref::<plot_area::bars::State>();
+
+                            for (series_idx, label_rects) in bars_state.label_rects.iter().enumerate() {
+                                for (label_idx, maybe_rect) in label_rects.iter().enumerate() {
+                                    if let Some(rect) = maybe_rect
+                                        && rect.contains(local)
+                                    {
+                                        shell.publish(on_action(Action::Clicked(crate::target::Target::EntryLabel {
+                                            mark: mark_idx,
+                                            series: series_idx,
+                                            index: label_idx,
+                                        })));
+                                        return;
+                                    }
+                                }
+                            }
+                        } else if mark_tree.tag == pie_tag {
+                            let pie_state = mark_tree.state.downcast_ref::<plot_area::pie::State>();
+
+                            for (label_idx, maybe_rect) in pie_state.label_rects.iter().enumerate() {
+                                if let Some(rect) = maybe_rect
+                                    && rect.contains(local)
+                                {
+                                    shell.publish(on_action(Action::Clicked(crate::target::Target::EntryLabel {
+                                        mark: mark_idx,
+                                        series: 0,
+                                        index: label_idx,
+                                    })));
+                                    return;
+                                }
+                            }
+                        }
+                    }
+
+                    // Second pass: hit-test shapes
                     for (mark_idx, mark_tree) in plot_area_tree.children.iter().enumerate() {
                         if mark_tree.tag == bars_tag {
                             let bars_state = mark_tree.state.downcast_ref::<plot_area::bars::State>();
@@ -263,11 +301,7 @@ where
                             let dist = (dx * dx + dy * dy).sqrt();
 
                             if dist >= pie_state.inner_radius && dist <= pie_state.outer_radius {
-                                // Compute angle (atan2 gives -PI..PI, matching our -PI/2 start)
                                 let mut angle = dy.atan2(dx);
-                                // Normalize: our slices start at -PI/2 and go to ~3PI/2
-                                // atan2 returns -PI..PI, so angles in top-left quadrant
-                                // may need adjustment
                                 let first_start = pie_state.slice_angles.first().map(|(s, _)| *s).unwrap_or(0.0);
                                 if angle < first_start {
                                     angle += std::f32::consts::TAU;

@@ -1,5 +1,5 @@
 use iced::widget::{center, column, container, pick_list, radio, row, scrollable, slider, text};
-use iced::{Center, Fill, Function, Subscription, Task, Theme, keyboard};
+use iced::{Center, Fill, Function, Pixels, Subscription, Task, Theme, keyboard};
 
 use hyozu::axis::Placement;
 use hyozu::data::Action;
@@ -163,7 +163,7 @@ impl App {
 
                     match ct {
                         ChartType::Bar => {
-                            // Two-level selection:
+                            // Two-level selection for bars:
                             // 1) Nothing/different-series selected -> select series
                             // 2) Same series selected -> select specific entry
                             // 3) Same entry selected -> deselect
@@ -186,6 +186,34 @@ impl App {
                                         });
                                     }
                                 }
+                            } else if let Target::EntryLabel { mark, series, index } = target {
+                                // Two-level selection for bar labels:
+                                // 1) Nothing/different-series -> SeriesLabel
+                                // 2) SeriesLabel same series -> EntryLabel
+                                // 3) EntryLabel same -> deselect
+                                // 4) EntryLabel different label, same series -> new EntryLabel
+                                // 5) Different series -> SeriesLabel of new series
+                                match data.selection() {
+                                    Some(Target::EntryLabel {
+                                        mark: m,
+                                        series: s,
+                                        index: i,
+                                    }) if m == mark && s == series && i == index => {
+                                        data.deselect();
+                                    }
+                                    Some(Target::EntryLabel { mark: m, series: s, .. })
+                                    | Some(Target::SeriesLabel { mark: m, series: s })
+                                        if m == mark && s == series =>
+                                    {
+                                        data.select(target.clone());
+                                    }
+                                    _ => {
+                                        data.select(Target::SeriesLabel {
+                                            mark: *mark,
+                                            series: *series,
+                                        });
+                                    }
+                                }
                             } else if data.selection() == Some(target) {
                                 data.deselect();
                             } else {
@@ -193,7 +221,7 @@ impl App {
                             }
                         }
                         ChartType::Pie => {
-                            // Pie: direct entry selection (no series level)
+                            // Pie: direct entry/label selection (no series level)
                             if data.selection() == Some(target) {
                                 data.deselect();
                             } else {
@@ -280,9 +308,22 @@ impl App {
                 let quarter = index + 1;
                 format!("{name} Q{quarter}")
             }
+            (ChartType::Bar, Some(Target::SeriesLabel { series, .. })) => {
+                let name = SERIES_NAMES.get(*series).unwrap_or(&"?");
+                format!("{name} labels")
+            }
+            (ChartType::Bar, Some(Target::EntryLabel { series, index, .. })) => {
+                let name = SERIES_NAMES.get(*series).unwrap_or(&"?");
+                let quarter = index + 1;
+                format!("{name} Q{quarter} label")
+            }
             (ChartType::Pie, Some(Target::Entry { index, .. })) => {
                 let name = SLICE_NAMES.get(*index).unwrap_or(&"?");
                 format!("{name} (slice)")
+            }
+            (ChartType::Pie, Some(Target::EntryLabel { index, .. })) => {
+                let name = SLICE_NAMES.get(*index).unwrap_or(&"?");
+                format!("{name} label")
             }
             (_, Some(other)) => format!("{other:?}"),
         };
@@ -425,12 +466,20 @@ impl App {
         ]
         .spacing(4);
 
+        // --- Label controls ---
+
+        let label_section: iced::Element<'_, Message> = match self.chart_type {
+            ChartType::Bar => self.bar_label_controls_section(),
+            ChartType::Pie => self.pie_label_controls_section(),
+        };
+
         let sidebar = scrollable(
             container(
                 column![
                     chart_type_section,
                     selection_section,
                     color_section,
+                    label_section,
                     bar_controls,
                     palette_section,
                     theme_section,
@@ -578,6 +627,307 @@ impl App {
         });
 
         column![text("Slice Color").size(14), color_radios,].spacing(4).into()
+    }
+
+    fn bar_label_controls_section(&self) -> iced::Element<'_, Message> {
+        use iced::font::{Style, Weight};
+
+        // Get the label-selected series/entry
+        let (series_idx, entry_idx) = match self.bar_data.selection() {
+            Some(Target::SeriesLabel { series, .. }) => (*series, None),
+            Some(Target::EntryLabel { series, index, .. }) => (*series, Some(*index)),
+            _ => return column![].into(),
+        };
+
+        // Read current label state from the series
+        let series = match self.bar_data.bars(0).and_then(|b| b.series(series_idx)) {
+            Some(s) => s,
+            None => return column![].into(),
+        };
+
+        // Resolve current values: point override -> series label
+        let series_label = series.label();
+        let point_label = entry_idx.and_then(|i| series.point_label(i));
+
+        let current_size = point_label
+            .and_then(|l| l.size())
+            .or_else(|| series_label.and_then(|l| l.size()))
+            .map(|p| p.0)
+            .unwrap_or(12.0);
+        let current_weight = point_label
+            .and_then(|l| l.weight())
+            .or_else(|| series_label.and_then(|l| l.weight()))
+            .unwrap_or(Weight::Normal);
+        let current_style = point_label
+            .and_then(|l| l.style())
+            .or_else(|| series_label.and_then(|l| l.style()))
+            .unwrap_or(Style::Normal);
+
+        let current_label_color = point_label
+            .and_then(|l| l.color().copied())
+            .or_else(|| series_label.and_then(|l| l.color().copied()));
+        let current_fill = point_label
+            .and_then(|l| l.fill().copied())
+            .or_else(|| series_label.and_then(|l| l.fill().copied()));
+
+        // Build controls - route through appropriate props based on selection level
+        let on_size = move |v: f32| {
+            let size = Some(Pixels(v));
+            if let Some(idx) = entry_idx {
+                props::bar::series::PointLabel(idx, props::bar::series::PointLabelProperty::Size(size))
+                    .map(props::bar::Series(series_idx))
+                    .map(item::Bars.with(0))
+                    .map(Message::Set)
+            } else {
+                props::bar::series::Property::LabelSize(size)
+                    .map(props::bar::Series(series_idx))
+                    .map(item::Bars.with(0))
+                    .map(Message::Set)
+            }
+        };
+
+        let on_weight = move |w: Weight| {
+            let weight = Some(w);
+            if let Some(idx) = entry_idx {
+                props::bar::series::PointLabel(idx, props::bar::series::PointLabelProperty::Weight(weight))
+                    .map(props::bar::Series(series_idx))
+                    .map(item::Bars.with(0))
+                    .map(Message::Set)
+            } else {
+                props::bar::series::Property::LabelWeight(weight)
+                    .map(props::bar::Series(series_idx))
+                    .map(item::Bars.with(0))
+                    .map(Message::Set)
+            }
+        };
+
+        let on_style = move |s: Style| {
+            let style = Some(s);
+            if let Some(idx) = entry_idx {
+                props::bar::series::PointLabel(idx, props::bar::series::PointLabelProperty::Style(style))
+                    .map(props::bar::Series(series_idx))
+                    .map(item::Bars.with(0))
+                    .map(Message::Set)
+            } else {
+                props::bar::series::Property::LabelStyle(style)
+                    .map(props::bar::Series(series_idx))
+                    .map(item::Bars.with(0))
+                    .map(Message::Set)
+            }
+        };
+
+        // Label color radios
+        let current_color_iced = current_label_color.and_then(|c| match c {
+            hyozu::Color::Fixed(fc) => Some(fc),
+            _ => None,
+        });
+        let color_label = PRESET_COLORS
+            .iter()
+            .find(|(_, c)| *c == current_color_iced)
+            .map(|(name, _)| *name)
+            .unwrap_or("Custom");
+        let color_radios = PRESET_COLORS.iter().fold(column![].spacing(3), |col, (name, _)| {
+            col.push(radio(*name, *name, Some(color_label), move |selected_name: &str| {
+                let color_opt = PRESET_COLORS
+                    .iter()
+                    .find(|(n, _)| *n == selected_name)
+                    .and_then(|(_, c)| *c)
+                    .map(hyozu::Color::Fixed);
+                if let Some(idx) = entry_idx {
+                    props::bar::series::PointLabel(idx, props::bar::series::PointLabelProperty::Color(color_opt))
+                        .map(props::bar::Series(series_idx))
+                        .map(item::Bars.with(0))
+                        .map(Message::Set)
+                } else {
+                    props::bar::series::Property::LabelColor(color_opt)
+                        .map(props::bar::Series(series_idx))
+                        .map(item::Bars.with(0))
+                        .map(Message::Set)
+                }
+            }))
+        });
+
+        // Fill color radios
+        let current_fill_iced = current_fill.and_then(|c| match c {
+            hyozu::Color::Fixed(fc) => Some(fc),
+            _ => None,
+        });
+        let fill_label = PRESET_COLORS
+            .iter()
+            .find(|(_, c)| *c == current_fill_iced)
+            .map(|(name, _)| *name)
+            .unwrap_or("Custom");
+        let fill_radios = PRESET_COLORS.iter().fold(column![].spacing(3), |col, (name, _)| {
+            col.push(radio(*name, *name, Some(fill_label), move |selected_name: &str| {
+                let color_opt = PRESET_COLORS
+                    .iter()
+                    .find(|(n, _)| *n == selected_name)
+                    .and_then(|(_, c)| *c)
+                    .map(hyozu::Color::Fixed);
+                if let Some(idx) = entry_idx {
+                    props::bar::series::PointLabel(idx, props::bar::series::PointLabelProperty::Fill(color_opt))
+                        .map(props::bar::Series(series_idx))
+                        .map(item::Bars.with(0))
+                        .map(Message::Set)
+                } else {
+                    props::bar::series::Property::LabelFill(color_opt)
+                        .map(props::bar::Series(series_idx))
+                        .map(item::Bars.with(0))
+                        .map(Message::Set)
+                }
+            }))
+        });
+
+        column![
+            column![
+                text("Font Size").size(14),
+                row![
+                    slider(8.0..=24.0, current_size, on_size).step(1.0).width(Fill),
+                    text(format!("{current_size:.0}")),
+                ]
+                .spacing(10)
+                .align_y(Center),
+            ]
+            .spacing(4),
+            column![
+                text("Bold").size(14),
+                radio("Normal", Weight::Normal, Some(current_weight), on_weight),
+                radio("Bold", Weight::Bold, Some(current_weight), on_weight),
+            ]
+            .spacing(4),
+            column![
+                text("Italic").size(14),
+                radio("Normal", Style::Normal, Some(current_style), on_style),
+                radio("Italic", Style::Italic, Some(current_style), on_style),
+            ]
+            .spacing(4),
+            column![text("Label Color").size(14), color_radios,].spacing(4),
+            column![text("Fill").size(14), fill_radios,].spacing(4),
+        ]
+        .spacing(12)
+        .into()
+    }
+
+    fn pie_label_controls_section(&self) -> iced::Element<'_, Message> {
+        use iced::font::{Style, Weight};
+
+        let slice_idx = match self.pie_data.selection() {
+            Some(Target::EntryLabel { index, .. }) => *index,
+            _ => return column![].into(),
+        };
+
+        // Read current label state from the slice
+        let label = self
+            .pie_data
+            .pie(0)
+            .and_then(|p| p.slices().get(slice_idx))
+            .and_then(|s| s.get_label());
+
+        let Some(label) = label else {
+            return column![].into();
+        };
+
+        let current_size = label.size().map(|p| p.0).unwrap_or(12.0);
+        let current_weight = label.weight().unwrap_or(Weight::Normal);
+        let current_style = label.style().unwrap_or(Style::Normal);
+
+        let on_size = move |v: f32| {
+            props::pie::SliceLabel(slice_idx, props::pie::label::Property::Size(Some(Pixels(v))))
+                .map(item::Pie.with(0))
+                .map(Message::Set)
+        };
+
+        let on_weight = move |w: Weight| {
+            props::pie::SliceLabel(slice_idx, props::pie::label::Property::Weight(Some(w)))
+                .map(item::Pie.with(0))
+                .map(Message::Set)
+        };
+
+        let on_style = move |s: Style| {
+            props::pie::SliceLabel(slice_idx, props::pie::label::Property::Style(Some(s)))
+                .map(item::Pie.with(0))
+                .map(Message::Set)
+        };
+
+        // Label color radios
+        let current_color_iced = label.color().copied().and_then(|c| match c {
+            hyozu::Color::Fixed(fc) => Some(fc),
+            _ => None,
+        });
+        let color_label_str = PRESET_COLORS
+            .iter()
+            .find(|(_, c)| *c == current_color_iced)
+            .map(|(name, _)| *name)
+            .unwrap_or("Custom");
+        let color_radios = PRESET_COLORS.iter().fold(column![].spacing(3), |col, (name, _)| {
+            col.push(radio(
+                *name,
+                *name,
+                Some(color_label_str),
+                move |selected_name: &str| {
+                    let color_opt = PRESET_COLORS
+                        .iter()
+                        .find(|(n, _)| *n == selected_name)
+                        .and_then(|(_, c)| *c)
+                        .map(hyozu::Color::Fixed);
+                    props::pie::SliceLabel(slice_idx, props::pie::label::Property::Color(color_opt))
+                        .map(item::Pie.with(0))
+                        .map(Message::Set)
+                },
+            ))
+        });
+
+        // Fill color radios
+        let current_fill_iced = label.fill().copied().and_then(|c| match c {
+            hyozu::Color::Fixed(fc) => Some(fc),
+            _ => None,
+        });
+        let fill_label_str = PRESET_COLORS
+            .iter()
+            .find(|(_, c)| *c == current_fill_iced)
+            .map(|(name, _)| *name)
+            .unwrap_or("Custom");
+        let fill_radios = PRESET_COLORS.iter().fold(column![].spacing(3), |col, (name, _)| {
+            col.push(radio(*name, *name, Some(fill_label_str), move |selected_name: &str| {
+                let color_opt = PRESET_COLORS
+                    .iter()
+                    .find(|(n, _)| *n == selected_name)
+                    .and_then(|(_, c)| *c)
+                    .map(hyozu::Color::Fixed);
+                props::pie::SliceLabel(slice_idx, props::pie::label::Property::Fill(color_opt))
+                    .map(item::Pie.with(0))
+                    .map(Message::Set)
+            }))
+        });
+
+        column![
+            column![
+                text("Font Size").size(14),
+                row![
+                    slider(8.0..=24.0, current_size, on_size).step(1.0).width(Fill),
+                    text(format!("{current_size:.0}")),
+                ]
+                .spacing(10)
+                .align_y(Center),
+            ]
+            .spacing(4),
+            column![
+                text("Bold").size(14),
+                radio("Normal", Weight::Normal, Some(current_weight), on_weight),
+                radio("Bold", Weight::Bold, Some(current_weight), on_weight),
+            ]
+            .spacing(4),
+            column![
+                text("Italic").size(14),
+                radio("Normal", Style::Normal, Some(current_style), on_style),
+                radio("Italic", Style::Italic, Some(current_style), on_style),
+            ]
+            .spacing(4),
+            column![text("Label Color").size(14), color_radios,].spacing(4),
+            column![text("Fill").size(14), fill_radios,].spacing(4),
+        ]
+        .spacing(12)
+        .into()
     }
 
     fn theme(&self) -> Theme {

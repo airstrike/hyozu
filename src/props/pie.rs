@@ -1,5 +1,7 @@
 //! Property descriptors for pie/donut charts.
 
+pub mod label;
+
 use crate::color::Color;
 use crate::map::Map;
 
@@ -12,6 +14,10 @@ pub enum Property {
     Gap(f32),
     /// Per-slice color override
     SliceColor { index: usize, color: Option<Color> },
+    /// Label property applied to all slices
+    Label(label::Property),
+    /// Per-slice label property override
+    SliceLabel { index: usize, property: label::Property },
 }
 
 impl Map for Property {}
@@ -27,7 +33,27 @@ impl Property {
                     slice.color = *color;
                 }
             }
+            Property::Label(p) => {
+                for slice in pie.slices_mut() {
+                    apply_label_property(p, slice);
+                }
+            }
+            Property::SliceLabel { index, property } => {
+                if let Some(slice) = pie.slices_mut().get_mut(*index) {
+                    apply_label_property(property, slice);
+                }
+            }
         }
+    }
+}
+
+fn apply_label_property(p: &label::Property, slice: &mut crate::data::mark::pie::Slice) {
+    match p {
+        label::Property::Color(c) => slice.set_label_color(*c),
+        label::Property::Size(s) => slice.set_label_size(*s),
+        label::Property::Weight(w) => slice.set_label_weight(*w),
+        label::Property::Style(s) => slice.set_label_style(*s),
+        label::Property::Fill(f) => slice.set_label_fill(*f),
     }
 }
 
@@ -37,4 +63,10 @@ pub use Property::{Gap, Hole};
 #[allow(non_snake_case)]
 pub fn SliceColor(index: usize, color: Option<Color>) -> Property {
     Property::SliceColor { index, color }
+}
+
+/// Wraps a per-slice label property into a pie property.
+#[allow(non_snake_case)]
+pub fn SliceLabel(index: usize, property: label::Property) -> Property {
+    Property::SliceLabel { index, property }
 }
