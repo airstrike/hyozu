@@ -12,7 +12,7 @@ pub fn main() -> iced::Result {
         .antialiasing(true)
         .settings(iced::Settings {
             default_text_size: 13.into(),
-            default_font: iced::Font::with_name("GT Pressura Mono"),
+            default_font: iced::Font::with_family("GT Pressura Mono"),
             ..Default::default()
         })
         .title("Hyozu - Interactive Chart")

@@ -160,7 +160,7 @@ impl App {
             .width(180)
             .height(Fill)
             .style(|theme: &Theme| {
-                let palette = theme.extended_palette();
+                let palette = theme.palette();
                 container::Style {
                     background: Some(palette.background.weak.color.into()),
                     ..Default::default()
@@ -230,7 +230,7 @@ fn sidebar_button(label: &str, active: bool, msg: Message) -> Element<'_, Messag
 }
 
 fn sidebar_button_style(theme: &Theme, status: button::Status, active: bool) -> button::Style {
-    let palette = theme.extended_palette();
+    let palette = theme.palette();
     let muted = palette.background.base.text.scale_alpha(0.6);
     let bright = palette.background.base.text;
     let fill = palette.background.strong.color.scale_alpha(0.4);
@@ -250,7 +250,7 @@ fn sidebar_button_style(theme: &Theme, status: button::Status, active: bool) -> 
 }
 
 fn card_button_style(theme: &Theme, status: button::Status) -> button::Style {
-    let palette = theme.extended_palette();
+    let palette = theme.palette();
     let bg = palette.background.weak.color.scale_alpha(0.3);
 
     button::Style {

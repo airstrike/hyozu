@@ -10,7 +10,7 @@ pub fn main() -> iced::Result {
         .window_size([800.0, 600.0])
         .settings(iced::Settings {
             default_text_size: 13.into(),
-            default_font: iced::Font::with_name("GT Pressura Mono"),
+            default_font: iced::Font::with_family("GT Pressura Mono"),
             ..Default::default()
         })
         .title("Hyozu - Bar Chart with Labels")

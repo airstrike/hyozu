@@ -31,7 +31,7 @@ pub fn sun<'a>() -> Text<'a> {
 /// }
 /// ```
 pub fn render(codepoint: &str) -> Text<'_> {
-    text(codepoint).font(Font::with_name("lucide"))
+    text(codepoint).font(Font::with_family("lucide"))
 }
 
 fn icon(codepoint: &str) -> Text<'_> {

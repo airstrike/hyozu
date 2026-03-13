@@ -267,7 +267,7 @@ impl App {
             });
             container(row(buttons))
                 .style(|theme: &Theme| {
-                    let palette = theme.extended_palette();
+                    let palette = theme.palette();
                     container::Style {
                         background: Some(palette.background.weak.color.scale_alpha(0.3).into()),
                         ..Default::default()
@@ -320,7 +320,7 @@ impl App {
 
 /// Custom button style for segment picker
 fn segment_button(theme: &Theme, status: button::Status, selected: bool) -> button::Style {
-    let palette = theme.extended_palette();
+    let palette = theme.palette();
     let muted = palette.background.base.text.scale_alpha(0.5);
     let less_muted = palette.background.base.text.scale_alpha(0.8);
     let fill = palette.background.weak.color.scale_alpha(0.5);

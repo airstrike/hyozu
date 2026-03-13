@@ -156,24 +156,24 @@ impl Design for theme::Theme {
     }
 
     fn data_colors(&self) -> Vec<Color> {
-        let extended = self.extended_palette();
+        let palette = self.palette();
         vec![
-            extended.primary.strong.color.into(),
-            extended.primary.base.color.into(),
-            extended.success.base.color.into(),
-            extended.warning.base.color.into(),
-            extended.danger.base.color.into(),
+            palette.primary.strong.color.into(),
+            palette.primary.base.color.into(),
+            palette.success.base.color.into(),
+            palette.warning.base.color.into(),
+            palette.danger.base.color.into(),
         ]
     }
 
     fn palette_seed(&self) -> PaletteSeed {
-        let extended = self.extended_palette();
+        let palette = self.palette();
         PaletteSeed {
-            primary: extended.primary.base.color,
-            secondary: extended.secondary.base.color,
-            success: extended.success.base.color,
-            warning: extended.warning.base.color,
-            danger: extended.danger.base.color,
+            primary: palette.primary.base.color,
+            secondary: palette.secondary.base.color,
+            success: palette.success.base.color,
+            warning: palette.warning.base.color,
+            danger: palette.danger.base.color,
             background: self.background_color(),
         }
     }
