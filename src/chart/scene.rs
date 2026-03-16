@@ -404,8 +404,13 @@ where
         }
 
         // Left axis at (0, title_height + legend_height + top_height)
+        // Widen by 1px so the axis line (at right edge) isn't clipped and
+        // overlaps with the bottom axis origin for a clean corner join.
         if let Some(node) = left_axis_node {
-            layout_children.push(node.move_to(Point::new(0.0, title_height + legend_height + top_height)));
+            let size = node.size();
+            let children: Vec<_> = node.children().to_vec();
+            let wider = Node::with_children(Size::new(size.width + 1.0, size.height), children);
+            layout_children.push(wider.move_to(Point::new(0.0, title_height + legend_height + top_height)));
         }
 
         // Plot area at (left_width, title_height + legend_height + top_height)
@@ -507,7 +512,7 @@ where
             self.selection,
         );
 
-        // Bottom axis
+        // Bottom axis (labels and ticks)
         if let Some(guide) = &self.bottom_axis {
             let bottom_layout = children_layouts.next().expect("bottom axis layout must exist");
             guide.draw(
@@ -519,6 +524,34 @@ where
                 cursor,
                 viewport,
             );
+        }
+
+        // Axis lines drawn last so they render on top of marks
+        // Re-iterate layout children to find axis layouts for axis line drawing
+        let mut line_layouts = layout.children();
+
+        // Skip title
+        if self.title.is_some() {
+            line_layouts.next();
+        }
+        // Skip legend
+        if self.legend.is_some() {
+            line_layouts.next();
+        }
+
+        // Left axis line
+        if let Some(guide) = &self.left_axis {
+            let left_layout = line_layouts.next().expect("left axis layout must exist");
+            guide.draw_axis_line(renderer, design, left_layout);
+        }
+
+        // Skip plot area
+        line_layouts.next();
+
+        // Bottom axis line
+        if let Some(guide) = &self.bottom_axis {
+            let bottom_layout = line_layouts.next().expect("bottom axis layout must exist");
+            guide.draw_axis_line(renderer, design, bottom_layout);
         }
     }
 }

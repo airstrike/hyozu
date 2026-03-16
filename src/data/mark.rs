@@ -1,3 +1,4 @@
+pub mod annotation;
 pub mod area;
 pub mod bar;
 pub mod boxplot;
@@ -6,6 +7,7 @@ pub mod heatmap;
 pub mod line;
 pub mod pie;
 pub mod rule;
+pub mod tick;
 pub mod violin;
 pub mod waterfall;
 pub mod xy;
@@ -18,6 +20,7 @@ pub use heatmap::{Heatmap, heatmap};
 pub use line::{IntoLines, Line, line};
 pub use pie::{Pie, pie};
 pub use rule::{Rule, rule};
+pub use tick::{Tick, tick};
 pub use violin::{Violin, violin, violin_entry, violin_from_data};
 pub use waterfall::{Waterfall, waterfall};
 pub use xy::{Xy, xy};
@@ -43,6 +46,7 @@ pub enum Mark {
     Waterfall(Waterfall),
     Xy(Xy),
     Rule(Rule),
+    Tick(Tick),
     Heatmap(Heatmap),
     Violin(Violin),
 }
@@ -124,8 +128,8 @@ impl Mark {
                     })
                 })
                 .collect(),
-            // Rule, Gauge, Heatmap don't contribute to legend
-            Mark::Rule(_) | Mark::Gauge(_) | Mark::Waterfall(_) | Mark::Heatmap(_) => Vec::new(),
+            // Rule, Tick, Gauge, Heatmap don't contribute to legend
+            Mark::Rule(_) | Mark::Tick(_) | Mark::Gauge(_) | Mark::Waterfall(_) | Mark::Heatmap(_) => Vec::new(),
         }
     }
 }
@@ -181,6 +185,12 @@ impl From<Xy> for Mark {
 impl From<Rule> for Mark {
     fn from(rule: Rule) -> Self {
         Mark::Rule(rule)
+    }
+}
+
+impl From<Tick> for Mark {
+    fn from(tick: Tick) -> Self {
+        Mark::Tick(tick)
     }
 }
 

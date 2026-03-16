@@ -14,6 +14,7 @@ pub mod heatmap;
 pub mod line;
 pub mod pie;
 pub mod rule;
+pub mod tick;
 pub mod violin;
 pub mod waterfall;
 pub mod xy;
@@ -25,6 +26,7 @@ pub use heatmap::Heatmap;
 pub use line::Line;
 pub use pie::Pie;
 pub use rule::Rule;
+pub use tick::Tick;
 pub use violin::Violin;
 pub use waterfall::Waterfall;
 pub use xy::Xy;
@@ -86,6 +88,7 @@ where
     Waterfall(Waterfall<'a, Message, Renderer>),
     Xy(Xy<'a, Message, Renderer>),
     Rule(Rule<'a, Message, Renderer>),
+    Tick(Tick<'a, Message, Renderer>),
     Heatmap(Heatmap<'a, Message, Renderer>),
     Violin(Violin<'a, Message, Renderer>),
 }
@@ -129,6 +132,7 @@ where
                 crate::Mark::Waterfall(wf) => Series::Waterfall(Waterfall::new(wf)),
                 crate::Mark::Xy(xy) => Series::Xy(Xy::new(xy)),
                 crate::Mark::Rule(rule) => Series::Rule(Rule::new(rule)),
+                crate::Mark::Tick(tick) => Series::Tick(Tick::new(tick)),
                 crate::Mark::Heatmap(hm) => Series::Heatmap(Heatmap::new(hm)),
                 crate::Mark::Violin(v) => Series::Violin(Violin::new(v)),
             })
@@ -153,6 +157,7 @@ where
                 Series::Waterfall(wf) => wf.state(),
                 Series::Xy(xy) => xy.state(),
                 Series::Rule(rule) => rule.state(),
+                Series::Tick(tick) => tick.state(),
                 Series::Heatmap(hm) => hm.state(),
                 Series::Violin(v) => v.state(),
             })
@@ -184,6 +189,7 @@ where
                     Series::Waterfall(_) => tree::Tag::of::<waterfall::State>(),
                     Series::Xy(_) => tree::Tag::of::<xy::State>(),
                     Series::Rule(_) => tree::Tag::of::<rule::State>(),
+                    Series::Tick(_) => tree::Tag::of::<tick::State>(),
                     Series::Heatmap(_) => tree::Tag::of::<heatmap::State>(),
                     Series::Violin(_) => tree::Tag::of::<violin::State>(),
                 };
@@ -199,6 +205,7 @@ where
                         Series::Waterfall(wf) => wf.state(),
                         Series::Xy(xy) => xy.state(),
                         Series::Rule(rule) => rule.state(),
+                        Series::Tick(tick) => tick.state(),
                         Series::Heatmap(hm) => hm.state(),
                         Series::Violin(v) => v.state(),
                     };
@@ -213,6 +220,7 @@ where
                         Series::Waterfall(wf) => wf.diff(tree),
                         Series::Xy(xy) => xy.diff(tree),
                         Series::Rule(rule) => rule.diff(tree),
+                        Series::Tick(tick) => tick.diff(tree),
                         Series::Heatmap(hm) => hm.diff(tree),
                         Series::Violin(v) => v.diff(tree),
                     }
@@ -228,6 +236,7 @@ where
                 Series::Waterfall(wf) => wf.state(),
                 Series::Xy(xy) => xy.state(),
                 Series::Rule(rule) => rule.state(),
+                Series::Tick(tick) => tick.state(),
                 Series::Heatmap(hm) => hm.state(),
                 Series::Violin(v) => v.state(),
             },
@@ -402,6 +411,26 @@ where
                         x_max = x_max.max(rule.data.value());
                     }
                 },
+                Series::Tick(tick) => {
+                    for point in &tick.data.points {
+                        match tick.data.orientation {
+                            crate::mark::tick::Orientation::Vertical => {
+                                // Horizontal bars: value on x-axis, category on y-axis
+                                x_min = x_min.min(point.y);
+                                x_max = x_max.max(point.y);
+                                y_min = y_min.min(point.x);
+                                y_max = y_max.max(point.x);
+                            }
+                            crate::mark::tick::Orientation::Horizontal => {
+                                // Vertical bars: category on x-axis, value on y-axis
+                                x_min = x_min.min(point.x);
+                                x_max = x_max.max(point.x);
+                                y_min = y_min.min(point.y);
+                                y_max = y_max.max(point.y);
+                            }
+                        }
+                    }
+                }
                 Series::Heatmap(hm) => {
                     x_min = x_min.min(0.0);
                     x_max = x_max.max((hm.data.cols() as f64 - 1.0).max(0.0));
@@ -567,6 +596,9 @@ where
                 Series::Rule(rule) => {
                     rule.layout(series_tree, renderer, limits, &plane);
                 }
+                Series::Tick(tick) => {
+                    tick.layout(series_tree, renderer, limits, &plane);
+                }
                 Series::Heatmap(hm) => {
                     hm.layout(series_tree, renderer, limits, &plane);
                 }
@@ -714,6 +746,10 @@ where
                 Series::Rule(rule) => {
                     rule.draw(series_tree, renderer, design, style, layout, cursor, viewport);
                     // Rules don't consume color slots
+                }
+                Series::Tick(tick) => {
+                    tick.draw(series_tree, renderer, design, style, layout, cursor, viewport);
+                    // Ticks don't consume color slots
                 }
                 Series::Heatmap(hm) => {
                     hm.draw(
