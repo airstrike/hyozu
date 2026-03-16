@@ -1,5 +1,13 @@
 use std::sync::Arc;
 
+/// Horizontal text alignment for axis labels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextAlign {
+    Left,
+    Center,
+    Right,
+}
+
 /// Placement of labels relative to tick marks.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Placement {
@@ -21,6 +29,9 @@ pub struct Labels {
 
     /// Format function for numeric labels
     pub format: Option<Arc<dyn Fn(f64) -> String + Send + Sync>>,
+
+    /// Text alignment override (defaults: Center for x-axis, Right for y-axis)
+    pub align: Option<TextAlign>,
 }
 
 impl std::fmt::Debug for Labels {
@@ -29,6 +40,7 @@ impl std::fmt::Debug for Labels {
             .field("placement", &self.placement)
             .field("values", &self.values)
             .field("format", &self.format.as_ref().map(|_| "<function>"))
+            .field("align", &self.align)
             .finish()
     }
 }
@@ -57,6 +69,12 @@ impl Labels {
         F: Fn(f64) -> String + Send + Sync + 'static,
     {
         self.format = Some(Arc::new(format));
+        self
+    }
+
+    /// Set text alignment
+    pub fn with_align(mut self, align: TextAlign) -> Self {
+        self.align = Some(align);
         self
     }
 

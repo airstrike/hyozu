@@ -4,7 +4,7 @@ use crate::core::{Font, Pixels};
 pub mod label;
 pub mod tick;
 
-pub use label::{Labels, Placement};
+pub use label::{Labels, Placement, TextAlign};
 pub use tick::{Alignment, Ticks};
 
 /// Orientation of an axis relative to the data area.
@@ -285,6 +285,9 @@ impl Axis {
         }
         if new_labels.format.is_some() {
             self.labels.format = new_labels.format;
+        }
+        if new_labels.align.is_some() {
+            self.labels.align = new_labels.align;
         }
         self
     }

@@ -1,4 +1,4 @@
-use crate::axis::{Alignment, Axis, Bounds, Kind, Orientation};
+use crate::axis::{Alignment, Axis, Bounds, Kind, Orientation, TextAlign};
 use crate::core::layout::{Limits, Node};
 use crate::core::text::{self, paragraph};
 use crate::core::widget::{Tree, tree};
@@ -1220,35 +1220,51 @@ where
                 let tick_length = 5.0;
                 let label_offset = 8.0;
 
-                // Calculate anchor position based on axis orientation
-                // The paragraph is measured with Left/Top alignment, so we
-                // offset the anchor to achieve the desired visual alignment
-                let anchor = match self.axis.orientation() {
+                let orientation = self.axis.orientation();
+                let text_align = self.axis.labels.align.unwrap_or(match orientation {
+                    Orientation::Bottom | Orientation::Top => TextAlign::Center,
+                    Orientation::Left => TextAlign::Right,
+                    Orientation::Right => TextAlign::Left,
+                });
+
+                let w = paragraph_bounds.width;
+
+                let anchor = match orientation {
                     Orientation::Bottom => {
-                        // Center horizontally on tick, position below tick mark
-                        Point::new(
-                            child_bounds.x - paragraph_bounds.width / 2.0,
-                            bounds.y + tick_length + label_offset,
-                        )
+                        let x = match text_align {
+                            TextAlign::Left => child_bounds.x,
+                            TextAlign::Center => child_bounds.x - w / 2.0,
+                            TextAlign::Right => child_bounds.x - w,
+                        };
+                        Point::new(x, bounds.y + tick_length + label_offset)
                     }
                     Orientation::Left => {
-                        // Right align, vertically center on tick
-                        Point::new(
-                            bounds.x + bounds.width - tick_length - label_offset - paragraph_bounds.width,
-                            child_bounds.y - paragraph_bounds.height / 2.0,
-                        )
+                        let col_w = bounds.width - tick_length - label_offset;
+                        let x = match text_align {
+                            TextAlign::Left => bounds.x,
+                            TextAlign::Center => bounds.x + (col_w - w) / 2.0,
+                            TextAlign::Right => bounds.x + col_w - w,
+                        };
+                        Point::new(x, child_bounds.y - paragraph_bounds.height / 2.0)
                     }
                     Orientation::Right => {
-                        // Left align, vertically center on tick
-                        Point::new(
-                            bounds.x + tick_length + label_offset,
-                            child_bounds.y - paragraph_bounds.height / 2.0,
-                        )
+                        let col_start = bounds.x + tick_length + label_offset;
+                        let col_w = bounds.width - tick_length - label_offset;
+                        let x = match text_align {
+                            TextAlign::Left => col_start,
+                            TextAlign::Center => col_start + (col_w - w) / 2.0,
+                            TextAlign::Right => col_start + col_w - w,
+                        };
+                        Point::new(x, child_bounds.y - paragraph_bounds.height / 2.0)
                     }
                     Orientation::Top => {
-                        // Center horizontally on tick, position above tick mark
+                        let x = match text_align {
+                            TextAlign::Left => child_bounds.x,
+                            TextAlign::Center => child_bounds.x - w / 2.0,
+                            TextAlign::Right => child_bounds.x - w,
+                        };
                         Point::new(
-                            child_bounds.x - paragraph_bounds.width / 2.0,
+                            x,
                             bounds.y + bounds.height - tick_length - label_offset - paragraph_bounds.height,
                         )
                     }
