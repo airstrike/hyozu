@@ -8,6 +8,7 @@ pub mod item;
 pub mod map;
 pub mod palette;
 pub mod props;
+pub mod sparkline;
 pub mod target;
 pub mod theme;
 
@@ -35,3 +36,4 @@ pub use data::mark::{
 };
 
 pub use map::Map;
+pub use sparkline::sparkline;
