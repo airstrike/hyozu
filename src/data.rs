@@ -1,6 +1,7 @@
 pub mod area;
 pub mod axis;
 pub mod datum;
+pub mod legend;
 pub mod mark;
 
 pub use area::Area;
@@ -45,6 +46,9 @@ pub struct Data {
 
     /// Currently selected chart element
     pub(crate) selection: Option<crate::target::Target>,
+
+    /// Optional legend configuration
+    pub(crate) legend: Option<legend::Legend>,
 }
 
 /// Returns the default axis pair for a given mark type.
@@ -106,6 +110,7 @@ impl IntoData for Mark {
             title: None,
             palette: None,
             selection: None,
+            legend: None,
         }
     }
 }
@@ -178,6 +183,7 @@ impl IntoData for Vec<Mark> {
             title: None,
             palette: None,
             selection: None,
+            legend: None,
         }
     }
 }
@@ -303,6 +309,21 @@ impl Data {
     /// Sets the palette strategy for this chart.
     pub fn palette(mut self, palette: crate::palette::Palette) -> Self {
         self.palette = Some(palette);
+        self
+    }
+
+    /// Configures the chart legend.
+    ///
+    /// ```
+    /// # use hyozu::{data, line, LegendPosition, LegendConfig};
+    /// // Short form — just position
+    /// data(line("Revenue", [(0, 10)])).legend(LegendPosition::Below);
+    ///
+    /// // Detailed form — builder
+    /// data(line("Revenue", [(0, 10)])).legend(LegendConfig::below().font_size(10.0));
+    /// ```
+    pub fn legend(mut self, legend: impl Into<legend::Legend>) -> Self {
+        self.legend = Some(legend.into());
         self
     }
 
