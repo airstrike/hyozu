@@ -987,6 +987,7 @@ where
                 font_features: Vec::new(),
                 font_variations: Vec::new(),
                 letter_spacing: Default::default(),
+                weight: None,
             });
 
             let label_width = paragraph.min_bounds().width;
@@ -1072,6 +1073,7 @@ where
                 font_features: Vec::new(),
                 font_variations: Vec::new(),
                 letter_spacing: Default::default(),
+                weight: None,
             });
 
             let label_width = paragraph.min_bounds().width;

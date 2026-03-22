@@ -19,6 +19,10 @@ pub enum Property {
     ShowTickLabels(bool),
     /// Whether to use gradient arc mode
     Gradient(bool),
+    /// Whether to show a needle indicator
+    ShowNeedle(bool),
+    /// Needle line width in pixels
+    NeedleWidth(f32),
 }
 
 impl Map for Property {}
@@ -34,8 +38,10 @@ impl Property {
             Property::Spacing(v) => gauge.label_spacing = *v,
             Property::ShowTickLabels(v) => gauge.show_tick_labels = *v,
             Property::Gradient(v) => gauge.gradient = *v,
+            Property::ShowNeedle(v) => gauge.show_needle = *v,
+            Property::NeedleWidth(v) => gauge.needle_width = v.max(0.5),
         }
     }
 }
 
-pub use Property::{Gradient, ShowTickLabels, ShowValue, Spacing, Sweep, Thickness, Value};
+pub use Property::{Gradient, NeedleWidth, ShowNeedle, ShowTickLabels, ShowValue, Spacing, Sweep, Thickness, Value};

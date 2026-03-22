@@ -74,6 +74,7 @@ where
             font_features: Vec::new(),
             font_variations: Vec::new(),
             letter_spacing: Default::default(),
+            weight: None,
         });
 
         let text_size = state.paragraph.min_bounds();
@@ -126,6 +127,7 @@ where
                 font_features: Vec::new(),
                 font_variations: Vec::new(),
                 letter_spacing: Default::default(),
+                weight: None,
             },
             position,
             text_color,

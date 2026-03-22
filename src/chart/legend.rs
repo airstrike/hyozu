@@ -97,6 +97,7 @@ where
                 font_features: Vec::new(),
                 font_variations: Vec::new(),
                 letter_spacing: Default::default(),
+                weight: None,
             });
             state.widths.push(state.paragraph.min_width());
         }
@@ -203,6 +204,7 @@ where
                     font_features: Vec::new(),
                     font_variations: Vec::new(),
                     letter_spacing: Default::default(),
+                    weight: None,
                 },
                 crate::core::Point::new(x + swatch_size + SWATCH_TEXT_GAP, y_top),
                 text_color,

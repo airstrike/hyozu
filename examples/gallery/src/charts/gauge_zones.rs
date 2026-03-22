@@ -8,9 +8,9 @@ pub fn data() -> hyozu::Data {
     hyozu::data(
         gauge(65.0)
             .range(0.0, 100.0)
-            .zone(0.0, 30.0, red)
-            .zone(30.0, 70.0, yellow)
-            .zone(70.0, 100.0, green)
+            .zone(30.0, red)
+            .zone(70.0, yellow)
+            .zone(100.0, green)
             .format(|v| format!("{v:.0}%"))
             .unit("performance")
             .ticks(hyozu::axis::tick::Ticks::default())

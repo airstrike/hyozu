@@ -457,6 +457,7 @@ where
                         font_features: Vec::new(),
                         font_variations: Vec::new(),
                         letter_spacing: Default::default(),
+                        weight: None,
                     },
                     crate::core::Point::new(anchor_x, anchor_y),
                     label_color,

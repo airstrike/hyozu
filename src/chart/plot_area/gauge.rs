@@ -277,12 +277,36 @@ where
             );
         }
 
+        // --- Needle ---
+        if self.data.show_needle {
+            draw_needle(
+                &mut frame,
+                self.data,
+                cx,
+                cy,
+                inner_radius,
+                radius,
+                start_angle,
+                state.value_angle,
+                text_pair,
+                background,
+            );
+        }
+
         // --- Center value text ---
-        // Center text in the arc bowl: midpoint between top of inner arc and
-        // bottom of inner arc (the gap endpoints), not geometric center.
         let arc_top = cy - inner_radius;
         let arc_bottom = cy + inner_radius * (gap_rad / 2.0).cos();
-        let text_cy = (arc_top + arc_bottom) / 2.0;
+        let text_cy = if self.data.show_needle {
+            // When needle is present, position text well below the pivot
+            cy + inner_radius * 0.35
+        } else {
+            // Center text in the arc bowl
+            (arc_top + arc_bottom) / 2.0
+        };
+
+        let text_color = text_pair.on_light;
+        let font_size = radius * 0.35;
+        let mut label_bottom = text_cy;
 
         if self.data.show_value {
             let value_text = if let Some(fmt) = &self.data.format {
@@ -290,8 +314,6 @@ where
             } else {
                 format!("{}", self.data.value)
             };
-            let text_color = text_pair.on_light;
-            let font_size = radius * 0.35;
 
             frame.fill_text(CanvasText {
                 content: value_text,
@@ -306,12 +328,14 @@ where
                 ..CanvasText::default()
             });
 
+            label_bottom = text_cy + font_size * 0.5 + self.data.label_spacing;
+
             // Draw unit label below value
             if let Some(unit) = &self.data.unit {
                 let unit_size = font_size * 0.5;
                 frame.fill_text(CanvasText {
                     content: unit.clone(),
-                    position: crate::core::Point::new(cx, text_cy + font_size * 0.5 + self.data.label_spacing),
+                    position: crate::core::Point::new(cx, label_bottom),
                     color: crate::core::Color { a: 0.6, ..text_color },
                     size: unit_size.into(),
                     font: theme.font(),
@@ -321,13 +345,94 @@ where
                     shaping: crate::core::text::Shaping::Basic,
                     ..CanvasText::default()
                 });
+
+                label_bottom += unit_size * 0.5 + self.data.label_spacing;
             }
+        }
+
+        // --- Subtitle ---
+        if let Some(subtitle) = &self.data.subtitle {
+            let sub_size = font_size * 0.3;
+            frame.fill_text(CanvasText {
+                content: subtitle.clone(),
+                position: crate::core::Point::new(cx, label_bottom),
+                color: crate::core::Color { a: 0.5, ..text_color },
+                size: sub_size.into(),
+                font: theme.font(),
+                align_x: crate::core::alignment::Horizontal::Center.into(),
+                align_y: crate::core::alignment::Vertical::Center,
+                line_height: crate::core::text::LineHeight::default(),
+                shaping: crate::core::text::Shaping::Basic,
+                ..CanvasText::default()
+            });
         }
 
         let geometry = frame.into_geometry();
         renderer.with_translation(crate::core::Vector::new(layout_bounds.x, layout_bounds.y), |renderer| {
             renderer.draw_geometry(geometry);
         });
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helper: needle
+// ---------------------------------------------------------------------------
+
+/// Draws a needle indicator: a line from the center to the inner arc edge,
+/// and a hollow pivot circle at the center.
+#[allow(clippy::too_many_arguments)]
+fn draw_needle<R: geometry::Renderer>(
+    frame: &mut Frame<R>,
+    data: &crate::mark::gauge::Gauge,
+    cx: f32,
+    cy: f32,
+    inner_radius: f32,
+    radius: f32,
+    start_angle: f32,
+    value_angle: f32,
+    text_pair: crate::color::Pair,
+    background: crate::core::Color,
+) {
+    let angle = start_angle + value_angle;
+    let needle_len = inner_radius * data.needle_length;
+
+    let color = if let Some(ref c) = data.needle_color {
+        c.resolve(background, text_pair, None)
+    } else {
+        text_pair.on_light
+    };
+
+    // Needle line with rounded cap
+    let tip = crate::core::Point::new(cx + needle_len * angle.cos(), cy + needle_len * angle.sin());
+    let path = Path::new(|builder| {
+        builder.move_to(crate::core::Point::new(cx, cy));
+        builder.line_to(tip);
+    });
+    frame.stroke(&path, crate::widget::canvas::Stroke {
+        width: data.needle_width,
+        style: crate::widget::canvas::Style::Solid(color),
+        line_cap: crate::widget::canvas::LineCap::Round,
+        ..Default::default()
+    });
+
+    // Hollow pivot circle
+    let pivot_r = radius * data.pivot_radius;
+    if pivot_r > 0.5 {
+        let center = crate::core::Point::new(cx, cy);
+        let pivot = Path::circle(center, pivot_r);
+        frame.fill(&pivot, background);
+        frame.stroke(&pivot, crate::widget::canvas::Stroke {
+            width: 1.5,
+            style: crate::widget::canvas::Style::Solid(color),
+            ..Default::default()
+        });
+    }
+
+    // Optional filled tip dot
+    if data.show_needle_tip {
+        let tip_r = data.needle_width * 1.5;
+        let tip_circle = Path::circle(tip, tip_r);
+        frame.fill(&tip_circle, color);
     }
 }
 
