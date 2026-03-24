@@ -10,15 +10,6 @@ pub struct Zone {
     pub(crate) color: Color,
 }
 
-/// Creates a gauge zone.
-pub fn zone(from: f64, to: f64, color: impl Into<Color>) -> Zone {
-    Zone {
-        from,
-        to,
-        color: color.into(),
-    }
-}
-
 /// Gauge chart specification.
 ///
 /// Displays a value on a partial arc, optionally with colored zones.
@@ -168,6 +159,38 @@ impl Gauge {
             to,
             color: color.into(),
         });
+        self
+    }
+
+    /// Adds multiple colored zones to the gauge.
+    ///
+    /// Zones are sequential: the first starts at `min`, each subsequent zone
+    /// starts where the previous one ended.
+    ///
+    /// ```
+    /// # use hyozu::gauge;
+    /// gauge(75.0)
+    ///     .range(0.0, 130.0)
+    ///     .zones([
+    ///         (50.0, 0x4CAF50),  // 0 to 50: green
+    ///         (90.0, 0xFFC107),  // 50 to 90: yellow
+    ///         (100.0, 0xFF9800), // 90 to 100: amber
+    ///         (130.0, 0xF44336), // 100 to 130: red
+    ///     ]);
+    /// ```
+    pub fn zones<C, I>(mut self, zones: I) -> Self
+    where
+        C: Into<Color>,
+        I: IntoIterator<Item = (f64, C)>,
+    {
+        for (to, color) in zones {
+            let from = self.zones.last().map_or(self.min, |z| z.to);
+            self.zones.push(Zone {
+                from,
+                to,
+                color: color.into(),
+            });
+        }
         self
     }
 

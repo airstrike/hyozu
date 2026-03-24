@@ -1,19 +1,17 @@
 use hyozu::gauge;
 
 pub fn data() -> hyozu::Data {
-    let red = iced::Color::from_rgb(0.8, 0.2, 0.2);
-    let yellow = iced::Color::from_rgb(0.9, 0.7, 0.1);
-    let green = iced::Color::from_rgb(0.2, 0.7, 0.3);
-
     hyozu::data(
         gauge(65.0)
             .range(0.0, 100.0)
-            .zone(30.0, red)
-            .zone(70.0, yellow)
-            .zone(100.0, green)
+            .zones([
+                (30.0, 0xCC3333),  // red
+                (70.0, 0xE6B20A),  // yellow
+                (100.0, 0x33B24D), // green
+            ])
             .format(|v| format!("{v:.0}%"))
             .unit("performance")
-            .ticks(hyozu::axis::tick::Ticks::default())
+            .ticks(hyozu::axis::Ticks::default())
             .gradient(true),
     )
     .title("Performance Monitor")

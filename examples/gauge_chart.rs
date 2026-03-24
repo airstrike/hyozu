@@ -1,4 +1,3 @@
-use hyozu::axis::tick::{Frequency, Ticks};
 use hyozu::{Action, Function, Map, data, gauge, item, props};
 use iced::widget::{center, column, pick_list, row};
 use iced::{Center, Fill, Subscription, Task, Theme, keyboard, window};
@@ -36,17 +35,16 @@ fn build_gauge(_theme: &Theme) -> hyozu::Data {
     data(
         gauge(0.0)
             .range(0.0, 130.0)
-            .zone(50.0, 0x4CAF50) // green
-            .zone(90.0, 0xFFC107) // yellow
-            .zone(100.0, 0xFF9800) // amber
-            .zone(130.0, 0xF44336) // red
+            .zones([
+                (50.0, 0x4CAF50),  // green
+                (90.0, 0xFFC107),  // yellow
+                (100.0, 0xFF9800), // amber
+                (130.0, 0xF44336), // red
+            ])
             .format(|v| format!("{:.0}%", (v / 130.0 * 100.0)))
             .subtitle("Budget: 97% · Prior Year: 96%")
             .sweep(180.0)
-            .ticks(Ticks {
-                frequency: Frequency::Custom(vec![0.0, 50.0, 90.0, 100.0, 130.0]),
-                ..Ticks::default()
-            })
+            .ticks([0.0, 50.0, 90.0, 100.0, 130.0])
             .dim_by(0.0)
             .needle(true),
     )
