@@ -168,16 +168,11 @@ where
         let entries: Vec<crate::data::mark::LegendEntry> =
             data.primary.marks().iter().flat_map(|m| m.legend_entries()).collect();
 
-        let legend = if entries.is_empty() {
-            None
-        } else {
-            let config = data.legend.as_ref();
-            Some(Legend::new(
-                entries,
-                config.map(|c| c.position).unwrap_or_default(),
-                config.and_then(|c| c.font_size),
-                config.map(|c| c.wrap).unwrap_or(true),
-            ))
+        let legend = match data.legend.as_ref() {
+            Some(config) if !entries.is_empty() => {
+                Some(Legend::new(entries, config.position, config.font_size, config.wrap))
+            }
+            _ => None,
         };
 
         let marks = data.primary.marks();
