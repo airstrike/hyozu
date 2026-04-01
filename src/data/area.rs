@@ -344,8 +344,8 @@ impl Area {
                         }
                     }
                 },
-                // Pie and Gauge don't use Cartesian bounds
-                Mark::Pie(_) | Mark::Gauge(_) => {}
+                // Pie, Gauge, and Treemap don't use Cartesian bounds
+                Mark::Pie(_) | Mark::Gauge(_) | Mark::Treemap(_) => {}
             }
         }
 

@@ -459,7 +459,11 @@ where
                             values.insert(OrderedFloat(i as f64));
                         }
                     }
-                    crate::Mark::Rule(_) | crate::Mark::Tick(_) | crate::Mark::Pie(_) | crate::Mark::Gauge(_) => {}
+                    crate::Mark::Rule(_)
+                    | crate::Mark::Tick(_)
+                    | crate::Mark::Pie(_)
+                    | crate::Mark::Gauge(_)
+                    | crate::Mark::Treemap(_) => {}
                 }
             }
 
@@ -794,7 +798,7 @@ where
                         }
                     }
                 },
-                crate::Mark::Pie(_) | crate::Mark::Gauge(_) => {}
+                crate::Mark::Pie(_) | crate::Mark::Gauge(_) | crate::Mark::Treemap(_) => {}
             }
         }
 

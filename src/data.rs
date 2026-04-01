@@ -8,9 +8,9 @@ pub use area::Area;
 pub use axis::{Axis, Orientation};
 pub use datum::{Datum, IntoDatums};
 pub use mark::{
-    Bars, BoxPlot, Gauge, Heatmap, LegendEntry, Line, Mark, Pie, Rule, Violin, Waterfall, Xy, areas, bar, bars,
-    boxplot, entry, entry_from_data, gauge, heatmap, line, pie, rule, violin, violin_entry, violin_from_data,
-    waterfall, xy,
+    Bars, BoxPlot, Gauge, Heatmap, LegendEntry, Line, Mark, Pie, Rule, Treemap, Violin, Waterfall, Xy, areas, bar,
+    bars, boxplot, entry, entry_from_data, gauge, heatmap, line, pie, rule, treemap, violin, violin_entry,
+    violin_from_data, waterfall, xy,
 };
 
 /// Trait for types that can be converted into chart Data.
@@ -63,6 +63,7 @@ fn axes_for_mark(mark: &Mark) -> (Option<Axis>, Option<Axis>) {
         Mark::Line(_) => (Some(Line::x_axis()), Some(Line::y_axis())),
         Mark::Pie(_) => (Pie::x_axis(), Pie::y_axis()),
         Mark::Gauge(_) => (Gauge::x_axis(), Gauge::y_axis()),
+        Mark::Treemap(_) => (Treemap::x_axis(), Treemap::y_axis()),
         Mark::Waterfall(_) => (Some(Waterfall::x_axis()), Some(Waterfall::y_axis())),
         Mark::Xy(_) => (Some(Xy::x_axis()), Some(Xy::y_axis())),
         Mark::Violin(v) => (Some(v.x_axis()), Some(v.y_axis())),
@@ -164,6 +165,12 @@ impl IntoData for Xy {
 }
 
 impl IntoData for Heatmap {
+    fn into_data(self) -> Data {
+        Mark::from(self).into_data()
+    }
+}
+
+impl IntoData for Treemap {
     fn into_data(self) -> Data {
         Mark::from(self).into_data()
     }

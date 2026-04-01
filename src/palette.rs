@@ -92,6 +92,7 @@ impl Palette {
                         Palette::Sequential
                     }
                 }
+                Mark::Treemap(_) => Palette::Categorical,
                 Mark::Line(_) | Mark::Xy(_) => Palette::Sequential,
                 Mark::Heatmap(_) => Palette::Sequential,
                 Mark::Violin(v) => {
@@ -123,6 +124,7 @@ pub fn count_color_slots(marks: &[Mark]) -> usize {
             Mark::Xy(_) => 1,
             Mark::Pie(pie) => pie.slices.len(),
             Mark::Gauge(_) => 1,
+            Mark::Treemap(tm) => tm.items.len(),
             Mark::Waterfall(_) => 3,
             Mark::Heatmap(_) => 0, // heatmap uses its own color_stops
             Mark::Violin(v) => v.entries.len(),

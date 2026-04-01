@@ -8,6 +8,7 @@ pub mod line;
 pub mod pie;
 pub mod rule;
 pub mod tick;
+pub mod treemap;
 pub mod violin;
 pub mod waterfall;
 pub mod xy;
@@ -21,6 +22,7 @@ pub use line::{IntoLines, Line, line};
 pub use pie::{Pie, pie};
 pub use rule::{Rule, rule};
 pub use tick::{Tick, tick};
+pub use treemap::{Treemap, treemap};
 pub use violin::{Violin, violin, violin_entry, violin_from_data};
 pub use waterfall::{Waterfall, waterfall};
 pub use xy::{Xy, xy};
@@ -43,6 +45,7 @@ pub enum Mark {
     Line(Line),
     Pie(Pie),
     Gauge(Gauge),
+    Treemap(Treemap),
     Waterfall(Waterfall),
     Xy(Xy),
     Rule(Rule),
@@ -128,6 +131,14 @@ impl Mark {
                     })
                 })
                 .collect(),
+            Mark::Treemap(tm) => tm
+                .items
+                .iter()
+                .map(|item| LegendEntry {
+                    name: item.label.clone(),
+                    color: item.color,
+                })
+                .collect(),
             // Rule, Tick, Gauge, Heatmap don't contribute to legend
             Mark::Rule(_) | Mark::Tick(_) | Mark::Gauge(_) | Mark::Waterfall(_) | Mark::Heatmap(_) => Vec::new(),
         }
@@ -197,6 +208,12 @@ impl From<Tick> for Mark {
 impl From<Heatmap> for Mark {
     fn from(heatmap: Heatmap) -> Self {
         Mark::Heatmap(heatmap)
+    }
+}
+
+impl From<Treemap> for Mark {
+    fn from(treemap: Treemap) -> Self {
+        Mark::Treemap(treemap)
     }
 }
 

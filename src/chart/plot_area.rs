@@ -15,6 +15,7 @@ pub mod line;
 pub mod pie;
 pub mod rule;
 pub mod tick;
+pub mod treemap;
 pub mod violin;
 pub mod waterfall;
 pub mod xy;
@@ -27,6 +28,7 @@ pub use line::Line;
 pub use pie::Pie;
 pub use rule::Rule;
 pub use tick::Tick;
+pub use treemap::Treemap;
 pub use violin::Violin;
 pub use waterfall::Waterfall;
 pub use xy::Xy;
@@ -90,6 +92,7 @@ where
     Rule(Rule<'a, Message, Renderer>),
     Tick(Tick<'a, Message, Renderer>),
     Heatmap(Heatmap<'a, Message, Renderer>),
+    Treemap(Treemap<'a, Message, Renderer>),
     Violin(Violin<'a, Message, Renderer>),
 }
 
@@ -134,6 +137,7 @@ where
                 crate::Mark::Rule(rule) => Series::Rule(Rule::new(rule)),
                 crate::Mark::Tick(tick) => Series::Tick(Tick::new(tick)),
                 crate::Mark::Heatmap(hm) => Series::Heatmap(Heatmap::new(hm)),
+                crate::Mark::Treemap(tm) => Series::Treemap(Treemap::new(tm)),
                 crate::Mark::Violin(v) => Series::Violin(Violin::new(v)),
             })
             .collect();
@@ -159,6 +163,7 @@ where
                 Series::Rule(rule) => rule.state(),
                 Series::Tick(tick) => tick.state(),
                 Series::Heatmap(hm) => hm.state(),
+                Series::Treemap(tm) => tm.state(),
                 Series::Violin(v) => v.state(),
             })
             .collect();
@@ -191,6 +196,7 @@ where
                     Series::Rule(_) => tree::Tag::of::<rule::State>(),
                     Series::Tick(_) => tree::Tag::of::<tick::State>(),
                     Series::Heatmap(_) => tree::Tag::of::<heatmap::State>(),
+                    Series::Treemap(_) => tree::Tag::of::<treemap::State>(),
                     Series::Violin(_) => tree::Tag::of::<violin::State>(),
                 };
 
@@ -207,6 +213,7 @@ where
                         Series::Rule(rule) => rule.state(),
                         Series::Tick(tick) => tick.state(),
                         Series::Heatmap(hm) => hm.state(),
+                        Series::Treemap(tm) => tm.state(),
                         Series::Violin(v) => v.state(),
                     };
                 } else {
@@ -222,6 +229,7 @@ where
                         Series::Rule(rule) => rule.diff(tree),
                         Series::Tick(tick) => tick.diff(tree),
                         Series::Heatmap(hm) => hm.diff(tree),
+                        Series::Treemap(tm) => tm.diff(tree),
                         Series::Violin(v) => v.diff(tree),
                     }
                 }
@@ -238,6 +246,7 @@ where
                 Series::Rule(rule) => rule.state(),
                 Series::Tick(tick) => tick.state(),
                 Series::Heatmap(hm) => hm.state(),
+                Series::Treemap(tm) => tm.state(),
                 Series::Violin(v) => v.state(),
             },
         );
@@ -459,8 +468,8 @@ where
                         }
                     }
                 },
-                // Pie and Gauge don't use Cartesian bounds
-                Series::Pie(_) | Series::Gauge(_) => {}
+                // Pie, Gauge, and Treemap don't use Cartesian bounds
+                Series::Pie(_) | Series::Gauge(_) | Series::Treemap(_) => {}
             }
         }
 
@@ -601,6 +610,9 @@ where
                 }
                 Series::Heatmap(hm) => {
                     hm.layout(series_tree, renderer, limits, &plane);
+                }
+                Series::Treemap(tm) => {
+                    tm.layout(series_tree, renderer, limits, &plane);
                 }
                 Series::Violin(v) => {
                     v.layout(series_tree, renderer, limits, &plane);
@@ -764,6 +776,20 @@ where
                         palette,
                     );
                     // Heatmap uses gradient sampling, not discrete slots
+                }
+                Series::Treemap(tm) => {
+                    tm.draw(
+                        series_tree,
+                        renderer,
+                        design,
+                        style,
+                        layout,
+                        cursor,
+                        viewport,
+                        color_offset,
+                        palette,
+                    );
+                    color_offset += tm.data.items.len();
                 }
                 Series::Violin(v) => {
                     v.draw(

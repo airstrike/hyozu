@@ -18,6 +18,7 @@ members = ["examples/*"]
 iced = { git = "https://github.com/airstrike/iced.git", branch = "dev" }
 iced_core = { git = "https://github.com/airstrike/iced.git", branch = "dev" }
 iced_graphics = { git = "https://github.com/airstrike/iced.git", branch = "dev" }
+iced_runtime = { git = "https://github.com/airstrike/iced.git", branch = "dev" }
 iced_widget = { git = "https://github.com/airstrike/iced.git", branch = "dev" }
 cosmic-text = { git = "https://github.com/airstrike/cosmic-text", branch = "dev" }
 # iced = { path = "../iced" }
