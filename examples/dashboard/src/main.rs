@@ -5,7 +5,7 @@ use iced::{Center, Color, Element, Fill, Font, Theme, color, font};
 use sweeten::widget::tile_grid::{self, CellHeight, grid_content};
 
 use hyozu::mark::treemap::item;
-use hyozu::{LegendPosition, bar, bars, chart, data, treemap};
+use hyozu::{LegendPosition, Target, bar, bars, chart, data, treemap};
 
 // ── Fonts ────────────────────────────────────────────────────────────
 
@@ -535,8 +535,17 @@ enum Panel {
     Revenues,
 }
 
+enum View {
+    Index,
+    Detail {
+        title: String,
+        accounts: Vec<model::Account>,
+    },
+}
+
 struct Screen {
     model: model::Dashboard,
+    view: View,
     grid: tile_grid::State<Panel>,
     turnover_band: hyozu::Data,
     turnover_segment: hyozu::Data,
@@ -545,7 +554,13 @@ struct Screen {
 }
 
 #[derive(Debug, Clone)]
-enum Message {}
+enum Message {
+    BandClicked(hyozu::Action),
+    SegmentClicked(hyozu::Action),
+    OwnerClicked(hyozu::Action),
+    TreemapClicked(hyozu::Action),
+    Back,
+}
 
 impl Screen {
     fn new() -> Self {
@@ -568,6 +583,7 @@ impl Screen {
 
         Self {
             model,
+            view: View::Index,
             grid,
             turnover_band,
             turnover_segment,
@@ -576,16 +592,87 @@ impl Screen {
         }
     }
 
-    fn update(&mut self, _message: Message) {}
+    fn update(&mut self, message: Message) {
+        match message {
+            Message::BandClicked(hyozu::Action::Clicked(Target::Entry { index, .. }))
+            | Message::BandClicked(hyozu::Action::Clicked(Target::EntryLabel { index, .. })) => {
+                if let Some(band) = self.model.turnover_bands.get(index) {
+                    self.view = View::Detail {
+                        title: format!("Turnover Band: {}", band.label),
+                        accounts: self.model.top_accounts.clone(),
+                    };
+                }
+            }
+            Message::SegmentClicked(hyozu::Action::Clicked(Target::Entry { index, .. }))
+            | Message::SegmentClicked(hyozu::Action::Clicked(Target::EntryLabel { index, .. })) => {
+                if let Some(seg) = self.model.segment_counts.get(index) {
+                    self.view = View::Detail {
+                        title: format!("Segment: {}", seg.label),
+                        accounts: self
+                            .model
+                            .top_accounts
+                            .iter()
+                            .filter(|a| a.segment == seg.label)
+                            .cloned()
+                            .collect(),
+                    };
+                }
+            }
+            Message::OwnerClicked(hyozu::Action::Clicked(Target::Entry { index, .. }))
+            | Message::OwnerClicked(hyozu::Action::Clicked(Target::EntryLabel { index, .. })) => {
+                if let Some(owner) = self.model.owners.get(index) {
+                    self.view = View::Detail {
+                        title: format!("Owner: {}", owner.name),
+                        accounts: self.model.top_accounts.clone(),
+                    };
+                }
+            }
+            Message::TreemapClicked(hyozu::Action::Clicked(Target::Entry { index, .. })) => {
+                if let Some(ind) = self.model.industries.get(index) {
+                    self.view = View::Detail {
+                        title: format!("Industry: {}", ind.name),
+                        accounts: self
+                            .model
+                            .top_accounts
+                            .iter()
+                            .filter(|a| a.industry == ind.name)
+                            .cloned()
+                            .collect(),
+                    };
+                }
+            }
+            Message::Back => {
+                self.view = View::Index;
+            }
+            _ => {}
+        }
+    }
 
     fn view(&self) -> Element<'_, Message> {
+        match &self.view {
+            View::Index => self.view_index(),
+            View::Detail { title, accounts } => self.view_detail(title, accounts),
+        }
+    }
+
+    fn view_index(&self) -> Element<'_, Message> {
         let grid = sweeten::tile_grid(&self.grid, |_id, panel| {
             let content: Element<'_, Message> = match panel {
                 Panel::FilterBar => self.view_filter_bar(),
                 Panel::Overview => self.view_overview(),
-                Panel::TurnoverBand => self.view_chart("Account By Turnover Band", &self.turnover_band),
-                Panel::TurnoverSegment => self.view_chart("Account By Turnover Segment", &self.turnover_segment),
-                Panel::OwnerSegment => self.view_chart("Account By Owner & Segment", &self.owner_segment),
+                Panel::TurnoverBand => {
+                    self.view_chart_interactive("Account By Turnover Band", &self.turnover_band, Message::BandClicked)
+                }
+                Panel::TurnoverSegment => self.view_chart_interactive(
+                    "Account By Turnover Segment",
+                    &self.turnover_segment,
+                    Message::SegmentClicked,
+                ),
+                Panel::OwnerSegment => self.view_chart_interactive(
+                    "Account By Owner & Segment",
+                    &self.owner_segment,
+                    Message::OwnerClicked,
+                ),
                 Panel::Details => self.view_details(),
                 Panel::Revenues => self.view_revenues(),
             };
@@ -606,6 +693,52 @@ impl Screen {
             .height(Fill)
             .style(|_| container::Style {
                 background: Some(PAGE_BG.into()),
+                ..Default::default()
+            })
+            .into()
+    }
+
+    fn view_detail<'a>(&'a self, title: &str, accounts: &'a [model::Account]) -> Element<'a, Message> {
+        let back = button(text("\u{2190} Back").size(13))
+            .on_press(Message::Back)
+            .style(button::text)
+            .padding([6, 12]);
+
+        let header = row![back, text(title.to_string()).size(18).color(TITLE_COLOR).font(BOLD),]
+            .spacing(16)
+            .align_y(Center);
+
+        let count = text!("{} accounts", accounts.len()).size(13).color(MUTED_COLOR);
+
+        let body: Element<'_, Message> = if accounts.is_empty() {
+            container(
+                text("No matching accounts in the top 16")
+                    .size(14)
+                    .color(MUTED_COLOR)
+                    .center(),
+            )
+            .center(Fill)
+            .into()
+        } else {
+            let tbl = table(account_columns(), accounts)
+                .padding_x(8.0)
+                .padding_y(5.0)
+                .separator_x(0.0)
+                .separator_y(1.0);
+
+            scrollable(Element::from(tbl)).height(Fill).into()
+        };
+
+        container(column![header, count, rule::horizontal(1), body].spacing(8).padding(16))
+            .width(Fill)
+            .height(Fill)
+            .style(|_| container::Style {
+                background: Some(CARD_BG.into()),
+                border: iced::Border {
+                    width: 1.0,
+                    color: DIVIDER,
+                    radius: 4.0.into(),
+                },
                 ..Default::default()
             })
             .into()
@@ -729,47 +862,24 @@ impl Screen {
         )
     }
 
-    fn view_chart<'a>(&'a self, title: &str, chart_data: &'a hyozu::Data) -> Element<'a, Message> {
+    fn view_chart_interactive<'a>(
+        &'a self,
+        title: &str,
+        chart_data: &'a hyozu::Data,
+        on_action: fn(hyozu::Action) -> Message,
+    ) -> Element<'a, Message> {
         section(
             title,
             chart(chart_data)
                 .style(hyozu::chart::transparent)
                 .width(Fill)
-                .height(Fill),
+                .height(Fill)
+                .on_action(on_action),
         )
     }
 
     fn view_details(&self) -> Element<'_, Message> {
-        fn header<'a>(label: &str) -> Element<'a, Message> {
-            container(
-                text(label.to_string())
-                    .font(BOLD)
-                    .size(10)
-                    .color(MUTED_COLOR)
-                    .align_x(Center),
-            )
-            .padding([2, 5])
-            .center_y(Fill)
-            .into()
-        }
-
-        fn cell<'a>(content: impl ToString) -> Element<'a, Message> {
-            container(text(content.to_string()).size(11).color(TEXT_COLOR))
-                .center_y(Fill)
-                .padding([2, 5])
-                .into()
-        }
-
-        let columns = [
-            table::column(header(""), |a: &model::Account| cell(a.name)),
-            table::column(header("RANKING"), |a: &model::Account| cell(a.ranking)).align_x(End),
-            table::column(header("REVENUE"), |a: &model::Account| cell(a.revenue)),
-            table::column(header("SEGMENT"), |a: &model::Account| cell(a.segment)),
-            table::column(header("COUNTRY"), |a: &model::Account| cell(a.country)),
-            table::column(header("INDUSTRY"), |a: &model::Account| cell(a.industry)),
-        ];
-
-        let tbl = table(columns, &self.model.top_accounts)
+        let tbl = table(account_columns(), &self.model.top_accounts)
             .padding_x(8.0)
             .padding_y(5.0)
             .separator_x(0.0)
@@ -794,7 +904,8 @@ impl Screen {
                 chart(&self.treemap_chart)
                     .style(hyozu::chart::transparent)
                     .width(Fill)
-                    .height(Fill),
+                    .height(Fill)
+                    .on_action(Message::TreemapClicked),
             ]
             .spacing(6),
         )
@@ -802,6 +913,37 @@ impl Screen {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
+
+fn tbl_header<'a>(label: &str) -> Element<'a, Message> {
+    container(
+        text(label.to_string())
+            .font(BOLD)
+            .size(10)
+            .color(MUTED_COLOR)
+            .align_x(Center),
+    )
+    .padding([2, 5])
+    .center_y(Fill)
+    .into()
+}
+
+fn tbl_cell<'a>(content: impl ToString) -> Element<'a, Message> {
+    container(text(content.to_string()).size(11).color(TEXT_COLOR))
+        .center_y(Fill)
+        .padding([2, 5])
+        .into()
+}
+
+fn account_columns<'a, 'b>() -> [table::Column<'a, 'b, &'a model::Account, Message>; 6] {
+    [
+        table::column(tbl_header(""), |a: &model::Account| tbl_cell(a.name)),
+        table::column(tbl_header("RANKING"), |a: &model::Account| tbl_cell(a.ranking)).align_x(End),
+        table::column(tbl_header("REVENUE"), |a: &model::Account| tbl_cell(a.revenue)),
+        table::column(tbl_header("SEGMENT"), |a: &model::Account| tbl_cell(a.segment)),
+        table::column(tbl_header("COUNTRY"), |a: &model::Account| tbl_cell(a.country)),
+        table::column(tbl_header("INDUSTRY"), |a: &model::Account| tbl_cell(a.industry)),
+    ]
+}
 
 fn section<'a>(title: &str, content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
     column![

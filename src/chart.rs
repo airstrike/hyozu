@@ -237,6 +237,7 @@ where
                     let plot_area_tree = &scene_tree.children[6];
                     let bars_tag = tree::Tag::of::<plot_area::bars::State>();
                     let pie_tag = tree::Tag::of::<plot_area::pie::State>();
+                    let treemap_tag = tree::Tag::of::<plot_area::treemap::State>();
 
                     // First pass: hit-test labels (labels win when overlapping shapes)
                     for (mark_idx, mark_tree) in plot_area_tree.children.iter().enumerate() {
@@ -316,6 +317,19 @@ where
                                         })));
                                         return;
                                     }
+                                }
+                            }
+                        } else if mark_tree.tag == treemap_tag {
+                            let tm_state = mark_tree.state.downcast_ref::<plot_area::treemap::State>();
+
+                            for (item_idx, rect) in tm_state.item_rects.iter().enumerate() {
+                                if rect.contains(local) {
+                                    shell.publish(on_action(Action::Clicked(crate::target::Target::Entry {
+                                        mark: mark_idx,
+                                        series: 0,
+                                        index: item_idx,
+                                    })));
+                                    return;
                                 }
                             }
                         }
