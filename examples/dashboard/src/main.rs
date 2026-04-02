@@ -611,7 +611,6 @@ impl Screen {
         };
 
         let mut grid = tile_grid::State::new(COLS);
-        grid.set_float(true);
         grid.add(0, 0, 3, 2, tile(WidgetKind::Overview));
         grid.add(0, 2, 3, 4, tile(WidgetKind::TurnoverBand));
         grid.add(0, 6, 3, 3, tile(WidgetKind::TurnoverSegment));
