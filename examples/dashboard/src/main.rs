@@ -1,8 +1,8 @@
 use iced::Alignment::End;
-use iced::widget::{button, column, container, progress_bar, row, rule, scrollable, space, table, text};
+use iced::widget::{button, column, container, pick_list, progress_bar, row, rule, scrollable, space, table, text};
 use iced::{Center, Color, Element, Fill, Font, Theme, color, font};
 
-use sweeten::widget::tile_grid::{self, CellHeight, grid_content};
+use sweeten::widget::tile_grid::{self, CellHeight, grid_content, title_bar};
 
 use hyozu::mark::treemap::item;
 use hyozu::{LegendPosition, Target, bar, bars, chart, data, treemap};
@@ -522,11 +522,10 @@ mod model {
     }
 }
 
-// ── Screen (UI state) ────────────────────────────────────────────────
+// ── Tile types ───────────────────────────────────────────────────────
 
-#[derive(Clone)]
-enum Panel {
-    FilterBar,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WidgetKind {
     Overview,
     TurnoverBand,
     TurnoverSegment,
@@ -535,18 +534,52 @@ enum Panel {
     Revenues,
 }
 
-enum View {
-    Index,
-    Detail {
-        title: String,
-        accounts: Vec<model::Account>,
-    },
+impl WidgetKind {
+    const ALL: &[Self] = &[
+        Self::Overview,
+        Self::TurnoverBand,
+        Self::TurnoverSegment,
+        Self::OwnerSegment,
+        Self::Details,
+        Self::Revenues,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Overview => "Account Overview",
+            Self::TurnoverBand => "Account By Turnover Band",
+            Self::TurnoverSegment => "Account By Turnover Segment",
+            Self::OwnerSegment => "Account By Owner & Segment",
+            Self::Details => "Account Details",
+            Self::Revenues => "Average Revenues",
+        }
+    }
 }
+
+impl std::fmt::Display for WidgetKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
+#[derive(Clone)]
+struct TileDetail {
+    title: String,
+    accounts: Vec<model::Account>,
+}
+
+#[derive(Clone)]
+struct Tile {
+    kind: Option<WidgetKind>,
+    detail: Option<TileDetail>,
+}
+
+// ── Screen ───────────────────────────────────────────────────────────
 
 struct Screen {
     model: model::Dashboard,
-    view: View,
-    grid: tile_grid::State<Panel>,
+    grid: tile_grid::State<Tile>,
+    focus: Option<tile_grid::ItemId>,
     turnover_band: hyozu::Data,
     turnover_segment: hyozu::Data,
     owner_segment: hyozu::Data,
@@ -555,11 +588,12 @@ struct Screen {
 
 #[derive(Debug, Clone)]
 enum Message {
-    BandClicked(hyozu::Action),
-    SegmentClicked(hyozu::Action),
-    OwnerClicked(hyozu::Action),
-    TreemapClicked(hyozu::Action),
-    Back,
+    GridAction(tile_grid::Action),
+    AddTile,
+    CloseTile(tile_grid::ItemId),
+    SetWidget(tile_grid::ItemId, WidgetKind),
+    ChartAction(tile_grid::ItemId, hyozu::Action),
+    Back(tile_grid::ItemId),
 }
 
 impl Screen {
@@ -571,20 +605,24 @@ impl Screen {
         let owner_segment = Self::build_owner_segment(&model);
         let treemap_chart = Self::build_treemap(&model);
 
+        let tile = |kind| Tile {
+            kind: Some(kind),
+            detail: None,
+        };
+
         let mut grid = tile_grid::State::new(COLS);
         grid.set_float(true);
-        grid.add(0, 0, 12, 1, Panel::FilterBar);
-        grid.add(0, 1, 3, 2, Panel::Overview);
-        grid.add(0, 3, 3, 4, Panel::TurnoverBand);
-        grid.add(0, 7, 3, 3, Panel::TurnoverSegment);
-        grid.add(3, 1, 5, 4, Panel::OwnerSegment);
-        grid.add(3, 5, 5, 5, Panel::Details);
-        grid.add(8, 1, 4, 9, Panel::Revenues);
+        grid.add(0, 0, 3, 2, tile(WidgetKind::Overview));
+        grid.add(0, 2, 3, 4, tile(WidgetKind::TurnoverBand));
+        grid.add(0, 6, 3, 3, tile(WidgetKind::TurnoverSegment));
+        grid.add(3, 0, 5, 4, tile(WidgetKind::OwnerSegment));
+        grid.add(3, 4, 5, 5, tile(WidgetKind::Details));
+        grid.add(8, 0, 4, 9, tile(WidgetKind::Revenues));
 
         Self {
             model,
-            view: View::Index,
             grid,
+            focus: None,
             turnover_band,
             turnover_segment,
             owner_segment,
@@ -594,98 +632,175 @@ impl Screen {
 
     fn update(&mut self, message: Message) {
         match message {
-            Message::BandClicked(hyozu::Action::Clicked(Target::Entry { index, .. }))
-            | Message::BandClicked(hyozu::Action::Clicked(Target::EntryLabel { index, .. })) => {
-                if let Some(band) = self.model.turnover_bands.get(index) {
-                    self.view = View::Detail {
-                        title: format!("Turnover Band: {}", band.label),
-                        accounts: self.model.top_accounts.clone(),
-                    };
+            Message::GridAction(action) => {
+                if action.is_click() {
+                    self.focus = Some(action.id());
+                }
+                self.grid.perform(action, |_, _| false);
+            }
+            Message::AddTile => {
+                self.grid.add_auto(3, 3, Tile {
+                    kind: None,
+                    detail: None,
+                });
+            }
+            Message::CloseTile(id) => {
+                self.grid.remove(id);
+                if self.focus == Some(id) {
+                    self.focus = None;
                 }
             }
-            Message::SegmentClicked(hyozu::Action::Clicked(Target::Entry { index, .. }))
-            | Message::SegmentClicked(hyozu::Action::Clicked(Target::EntryLabel { index, .. })) => {
-                if let Some(seg) = self.model.segment_counts.get(index) {
-                    self.view = View::Detail {
-                        title: format!("Segment: {}", seg.label),
-                        accounts: self
-                            .model
-                            .top_accounts
-                            .iter()
-                            .filter(|a| a.segment == seg.label)
-                            .cloned()
-                            .collect(),
-                    };
+            Message::SetWidget(id, kind) => {
+                if let Some(tile) = self.grid.get_mut(id) {
+                    tile.kind = Some(kind);
+                    tile.detail = None;
                 }
             }
-            Message::OwnerClicked(hyozu::Action::Clicked(Target::Entry { index, .. }))
-            | Message::OwnerClicked(hyozu::Action::Clicked(Target::EntryLabel { index, .. })) => {
-                if let Some(owner) = self.model.owners.get(index) {
-                    self.view = View::Detail {
-                        title: format!("Owner: {}", owner.name),
-                        accounts: self.model.top_accounts.clone(),
-                    };
+            Message::ChartAction(id, hyozu::Action::Clicked(ref target)) => {
+                let kind = self.grid.get(id).and_then(|t| t.kind);
+                let detail = self.build_detail(kind, target);
+                if let Some(tile) = self.grid.get_mut(id) {
+                    tile.detail = detail;
                 }
             }
-            Message::TreemapClicked(hyozu::Action::Clicked(Target::Entry { index, .. })) => {
-                if let Some(ind) = self.model.industries.get(index) {
-                    self.view = View::Detail {
-                        title: format!("Industry: {}", ind.name),
-                        accounts: self
-                            .model
-                            .top_accounts
-                            .iter()
-                            .filter(|a| a.industry == ind.name)
-                            .cloned()
-                            .collect(),
-                    };
+            Message::Back(id) => {
+                if let Some(tile) = self.grid.get_mut(id) {
+                    tile.detail = None;
                 }
-            }
-            Message::Back => {
-                self.view = View::Index;
             }
             _ => {}
         }
     }
 
-    fn view(&self) -> Element<'_, Message> {
-        match &self.view {
-            View::Index => self.view_index(),
-            View::Detail { title, accounts } => self.view_detail(title, accounts),
+    fn build_detail(&self, kind: Option<WidgetKind>, target: &Target) -> Option<TileDetail> {
+        let (Target::Entry { index, .. } | Target::EntryLabel { index, .. }) = target else {
+            return None;
+        };
+        let index = *index;
+
+        match kind {
+            Some(WidgetKind::TurnoverBand) => {
+                let band = self.model.turnover_bands.get(index)?;
+                Some(TileDetail {
+                    title: format!("Turnover Band: {}", band.label),
+                    accounts: self.model.top_accounts.clone(),
+                })
+            }
+            Some(WidgetKind::TurnoverSegment) => {
+                let seg = self.model.segment_counts.get(index)?;
+                Some(TileDetail {
+                    title: format!("Segment: {}", seg.label),
+                    accounts: self
+                        .model
+                        .top_accounts
+                        .iter()
+                        .filter(|a| a.segment == seg.label)
+                        .cloned()
+                        .collect(),
+                })
+            }
+            Some(WidgetKind::OwnerSegment) => {
+                let owner = self.model.owners.get(index)?;
+                Some(TileDetail {
+                    title: format!("Owner: {}", owner.name),
+                    accounts: self.model.top_accounts.clone(),
+                })
+            }
+            Some(WidgetKind::Revenues) => {
+                let ind = self.model.industries.get(index)?;
+                Some(TileDetail {
+                    title: format!("Industry: {}", ind.name),
+                    accounts: self
+                        .model
+                        .top_accounts
+                        .iter()
+                        .filter(|a| a.industry == ind.name)
+                        .cloned()
+                        .collect(),
+                })
+            }
+            _ => None,
         }
     }
 
-    fn view_index(&self) -> Element<'_, Message> {
-        let grid = sweeten::tile_grid(&self.grid, |_id, panel| {
-            let content: Element<'_, Message> = match panel {
-                Panel::FilterBar => self.view_filter_bar(),
-                Panel::Overview => self.view_overview(),
-                Panel::TurnoverBand => {
-                    self.view_chart_interactive("Account By Turnover Band", &self.turnover_band, Message::BandClicked)
-                }
-                Panel::TurnoverSegment => self.view_chart_interactive(
-                    "Account By Turnover Segment",
-                    &self.turnover_segment,
-                    Message::SegmentClicked,
-                ),
-                Panel::OwnerSegment => self.view_chart_interactive(
-                    "Account By Owner & Segment",
-                    &self.owner_segment,
-                    Message::OwnerClicked,
-                ),
-                Panel::Details => self.view_details(),
-                Panel::Revenues => self.view_revenues(),
+    // ── View ─────────────────────────────────────────────────────────
+
+    fn view(&self) -> Element<'_, Message> {
+        column![
+            self.view_filter_bar(),
+            self.view_toolbar(),
+            rule::horizontal(1),
+            self.view_grid(),
+        ]
+        .into()
+    }
+
+    fn view_toolbar(&self) -> Element<'_, Message> {
+        let add = button(text("+ Add Widget").size(13))
+            .on_press(Message::AddTile)
+            .style(button::primary)
+            .padding([6, 16]);
+
+        let info = text!("{}-column grid  |  {} widgets", self.grid.columns(), self.grid.len())
+            .size(12)
+            .color(MUTED_COLOR);
+
+        container(row![add, info, space::horizontal()].spacing(16).align_y(Center))
+            .padding([8, 14])
+            .into()
+    }
+
+    fn view_grid(&self) -> Element<'_, Message> {
+        let focus = self.focus;
+
+        let grid = sweeten::tile_grid(&self.grid, |id, tile| {
+            let is_focused = focus == Some(id);
+
+            // Title text
+            let title_text = match (&tile.kind, &tile.detail) {
+                (_, Some(detail)) => detail.title.as_str(),
+                (Some(kind), _) => kind.label(),
+                (None, _) => "New Widget",
             };
-            grid_content(content)
-                .draggable(false)
-                .resizable(false)
-                .style(panel_style)
+
+            // Controls (back + close)
+            let mut controls = row![].spacing(4);
+            if tile.detail.is_some() {
+                controls = controls.push(
+                    button(text("\u{2190}").size(14))
+                        .on_press(Message::Back(id))
+                        .style(button::text)
+                        .padding([2, 6]),
+                );
+            }
+            controls = controls.push(
+                button(text("\u{00D7}").size(14))
+                    .on_press(Message::CloseTile(id))
+                    .style(button::text)
+                    .padding([2, 6]),
+            );
+
+            // Body
+            let body: Element<'_, Message> = match (&tile.kind, &tile.detail) {
+                (_, Some(detail)) => self.view_tile_detail(detail),
+                (Some(kind), None) => self.view_tile_content(id, *kind),
+                (None, _) => self.view_tile_picker(id),
+            };
+
+            grid_content(body)
+                .title_bar(
+                    title_bar(text(title_text.to_string()).size(12).color(TITLE_COLOR).font(BOLD))
+                        .controls(controls)
+                        .padding([6, 10])
+                        .style(if is_focused { title_bar_focused } else { title_bar_style }),
+                )
+                .style(if is_focused { panel_focused } else { panel_style })
         })
         .width(Fill)
         .height(Fill)
         .spacing(GRID_SPACING)
         .cell_height(CellHeight::Fixed(CELL_H))
-        .locked(true);
+        .on_action(Message::GridAction);
 
         container(grid)
             .padding(8)
@@ -698,98 +813,72 @@ impl Screen {
             .into()
     }
 
-    fn view_detail<'a>(&'a self, title: &str, accounts: &'a [model::Account]) -> Element<'a, Message> {
-        let back = button(text("\u{2190} Back").size(13))
-            .on_press(Message::Back)
-            .style(button::text)
-            .padding([6, 12]);
+    // ── Tile content views ───────────────────────────────────────────
 
-        let header = row![back, text(title.to_string()).size(18).color(TITLE_COLOR).font(BOLD),]
-            .spacing(16)
-            .align_y(Center);
+    fn view_tile_content(&self, id: tile_grid::ItemId, kind: WidgetKind) -> Element<'_, Message> {
+        match kind {
+            WidgetKind::Overview => self.view_overview(),
+            WidgetKind::TurnoverBand => chart(&self.turnover_band)
+                .style(hyozu::chart::transparent)
+                .width(Fill)
+                .height(Fill)
+                .on_action(move |a| Message::ChartAction(id, a))
+                .into(),
+            WidgetKind::TurnoverSegment => chart(&self.turnover_segment)
+                .style(hyozu::chart::transparent)
+                .width(Fill)
+                .height(Fill)
+                .on_action(move |a| Message::ChartAction(id, a))
+                .into(),
+            WidgetKind::OwnerSegment => chart(&self.owner_segment)
+                .style(hyozu::chart::transparent)
+                .width(Fill)
+                .height(Fill)
+                .on_action(move |a| Message::ChartAction(id, a))
+                .into(),
+            WidgetKind::Details => self.view_table(),
+            WidgetKind::Revenues => self.view_treemap(id),
+        }
+    }
 
-        let count = text!("{} accounts", accounts.len()).size(13).color(MUTED_COLOR);
+    fn view_tile_picker(&self, id: tile_grid::ItemId) -> Element<'_, Message> {
+        let picker = pick_list(None::<WidgetKind>, WidgetKind::ALL, WidgetKind::to_string)
+            .on_select(move |kind| Message::SetWidget(id, kind))
+            .placeholder("Choose a widget...");
 
-        let body: Element<'_, Message> = if accounts.is_empty() {
+        container(picker).center(Fill).padding(20).into()
+    }
+
+    fn view_tile_detail<'a>(&'a self, detail: &'a TileDetail) -> Element<'a, Message> {
+        let n = detail.accounts.len();
+
+        if detail.accounts.is_empty() {
             container(
                 text("No matching accounts in the top 16")
-                    .size(14)
+                    .size(13)
                     .color(MUTED_COLOR)
                     .center(),
             )
             .center(Fill)
             .into()
         } else {
-            let tbl = table(account_columns(), accounts)
+            let tbl = table(account_columns(), &detail.accounts)
                 .padding_x(8.0)
                 .padding_y(5.0)
                 .separator_x(0.0)
                 .separator_y(1.0);
 
-            scrollable(Element::from(tbl)).height(Fill).into()
-        };
-
-        container(column![header, count, rule::horizontal(1), body].spacing(8).padding(16))
-            .width(Fill)
-            .height(Fill)
-            .style(|_| container::Style {
-                background: Some(CARD_BG.into()),
-                border: iced::Border {
-                    width: 1.0,
-                    color: DIVIDER,
-                    radius: 4.0.into(),
-                },
-                ..Default::default()
-            })
+            column![
+                text!("{n} accounts").size(11).color(MUTED_COLOR),
+                scrollable(Element::from(tbl)).height(Fill),
+            ]
+            .spacing(4)
+            .padding(8)
             .into()
+        }
     }
 
-    // ── Chart data builders ──────────────────────────────────────────
-
-    fn build_turnover_band(model: &model::Dashboard) -> hyozu::Data {
-        let values: Vec<i32> = model.turnover_bands.iter().map(|b| b.count as i32).collect();
-        let labels: Vec<&str> = model.turnover_bands.iter().map(|b| b.label).collect();
-
-        data(bars([bar(values).with_color(ACCENT)]).horizontal().with_size(0.65)).y_axis_labels(labels)
-    }
-
-    fn build_turnover_segment(model: &model::Dashboard) -> hyozu::Data {
-        let values: Vec<i32> = model.segment_counts.iter().map(|s| s.count as i32).collect();
-        let labels: Vec<&str> = model.segment_counts.iter().map(|s| s.label).collect();
-
-        data(bars([bar(values).with_color(ACCENT)]).horizontal().with_size(0.6)).y_axis_labels(labels)
-    }
-
-    fn build_owner_segment(model: &model::Dashboard) -> hyozu::Data {
-        let strategic: Vec<i32> = model.owners.iter().map(|o| o.strategic as i32).collect();
-        let big: Vec<i32> = model.owners.iter().map(|o| o.big as i32).collect();
-        let medium: Vec<i32> = model.owners.iter().map(|o| o.medium as i32).collect();
-        let small: Vec<i32> = model.owners.iter().map(|o| o.small as i32).collect();
-        let labels: Vec<&str> = model.owners.iter().map(|o| o.name).collect();
-
-        data(
-            bars([
-                bar(strategic).with_name("Strategic Account").with_color(STRATEGIC),
-                bar(big).with_name("Big Account").with_color(BIG_ACCT),
-                bar(medium).with_name("Medium Account").with_color(MEDIUM_ACCT),
-                bar(small).with_name("Small Account").with_color(SMALL_ACCT),
-            ])
-            .stacked()
-            .horizontal()
-            .with_size(0.7)
-            .data_labels(None),
-        )
-        .y_axis_labels(labels)
-        .legend(LegendPosition::Right)
-    }
-
-    fn build_treemap(model: &model::Dashboard) -> hyozu::Data {
-        let items: Vec<_> = model.industries.iter().map(|i| item(i.name, i.avg_revenue)).collect();
-
-        data(treemap(items))
-    }
-
-    // ── Panel views ──────────────────────────────────────────────────
+    // ── Widget-specific views ────────────────────────────────────────
 
     fn view_filter_bar(&self) -> Element<'_, Message> {
         let filters = self.model.filters.iter().map(|f| {
@@ -817,7 +906,7 @@ impl Screen {
         container(row(content).spacing(24).align_y(Center).padding([0, 16]))
             .center_y(Fill)
             .width(Fill)
-            .height(Fill)
+            .height(50)
             .style(|_| container::Style {
                 background: Some(HEADER_BG.into()),
                 ..Default::default()
@@ -846,49 +935,32 @@ impl Screen {
             .into()
         };
 
-        section(
-            "Account Overview",
-            column![
-                text(total).size(52).color(ACCENT).center().font(BOLD),
-                row![
-                    stat("PREVIOUS", &previous),
-                    stat("VARIANCE", &variance),
-                    stat("TREND", trend),
-                ]
-                .spacing(8),
+        column![
+            text(total).size(48).color(ACCENT).center().font(BOLD),
+            row![
+                stat("PREVIOUS", &previous),
+                stat("VARIANCE", &variance),
+                stat("TREND", trend),
             ]
-            .spacing(4)
-            .width(Fill),
-        )
+            .spacing(8),
+        ]
+        .spacing(4)
+        .width(Fill)
+        .padding(8)
+        .into()
     }
 
-    fn view_chart_interactive<'a>(
-        &'a self,
-        title: &str,
-        chart_data: &'a hyozu::Data,
-        on_action: fn(hyozu::Action) -> Message,
-    ) -> Element<'a, Message> {
-        section(
-            title,
-            chart(chart_data)
-                .style(hyozu::chart::transparent)
-                .width(Fill)
-                .height(Fill)
-                .on_action(on_action),
-        )
-    }
-
-    fn view_details(&self) -> Element<'_, Message> {
+    fn view_table(&self) -> Element<'_, Message> {
         let tbl = table(account_columns(), &self.model.top_accounts)
             .padding_x(8.0)
             .padding_y(5.0)
             .separator_x(0.0)
             .separator_y(1.0);
 
-        section("Account Details", scrollable(Element::from(tbl)).height(Fill))
+        scrollable(Element::from(tbl)).height(Fill).into()
     }
 
-    fn view_revenues(&self) -> Element<'_, Message> {
+    fn view_treemap(&self, id: tile_grid::ItemId) -> Element<'_, Message> {
         let tabs = row![
             text("BY INDUSTRY").size(10).color(TITLE_COLOR).font(BOLD),
             text("INDUSTRY DETAILS").size(10).color(MUTED_COLOR),
@@ -897,18 +969,59 @@ impl Screen {
         ]
         .spacing(12);
 
-        section(
-            "Average Revenues",
-            column![
-                tabs,
-                chart(&self.treemap_chart)
-                    .style(hyozu::chart::transparent)
-                    .width(Fill)
-                    .height(Fill)
-                    .on_action(Message::TreemapClicked),
-            ]
-            .spacing(6),
+        column![
+            tabs,
+            chart(&self.treemap_chart)
+                .style(hyozu::chart::transparent)
+                .width(Fill)
+                .height(Fill)
+                .on_action(move |a| Message::ChartAction(id, a)),
+        ]
+        .spacing(6)
+        .padding(4)
+        .into()
+    }
+
+    // ── Chart data builders ──────────────────────────────────────────
+
+    fn build_turnover_band(model: &model::Dashboard) -> hyozu::Data {
+        let values: Vec<i32> = model.turnover_bands.iter().map(|b| b.count as i32).collect();
+        let labels: Vec<&str> = model.turnover_bands.iter().map(|b| b.label).collect();
+        data(bars([bar(values).with_color(ACCENT)]).horizontal().with_size(0.65)).y_axis_labels(labels)
+    }
+
+    fn build_turnover_segment(model: &model::Dashboard) -> hyozu::Data {
+        let values: Vec<i32> = model.segment_counts.iter().map(|s| s.count as i32).collect();
+        let labels: Vec<&str> = model.segment_counts.iter().map(|s| s.label).collect();
+        data(bars([bar(values).with_color(ACCENT)]).horizontal().with_size(0.6)).y_axis_labels(labels)
+    }
+
+    fn build_owner_segment(model: &model::Dashboard) -> hyozu::Data {
+        let strategic: Vec<i32> = model.owners.iter().map(|o| o.strategic as i32).collect();
+        let big: Vec<i32> = model.owners.iter().map(|o| o.big as i32).collect();
+        let medium: Vec<i32> = model.owners.iter().map(|o| o.medium as i32).collect();
+        let small: Vec<i32> = model.owners.iter().map(|o| o.small as i32).collect();
+        let labels: Vec<&str> = model.owners.iter().map(|o| o.name).collect();
+
+        data(
+            bars([
+                bar(strategic).with_name("Strategic Account").with_color(STRATEGIC),
+                bar(big).with_name("Big Account").with_color(BIG_ACCT),
+                bar(medium).with_name("Medium Account").with_color(MEDIUM_ACCT),
+                bar(small).with_name("Small Account").with_color(SMALL_ACCT),
+            ])
+            .stacked()
+            .horizontal()
+            .with_size(0.7)
+            .data_labels(None),
         )
+        .y_axis_labels(labels)
+        .legend(LegendPosition::Right)
+    }
+
+    fn build_treemap(model: &model::Dashboard) -> hyozu::Data {
+        let items: Vec<_> = model.industries.iter().map(|i| item(i.name, i.avg_revenue)).collect();
+        data(treemap(items))
     }
 }
 
@@ -945,16 +1058,7 @@ fn account_columns<'a, 'b>() -> [table::Column<'a, 'b, &'a model::Account, Messa
     ]
 }
 
-fn section<'a>(title: &str, content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
-    column![
-        text(title.to_string()).size(13).color(TITLE_COLOR).font(BOLD),
-        rule::horizontal(1),
-        content.into(),
-    ]
-    .spacing(6)
-    .padding(12)
-    .into()
-}
+// ── Styles ───────────────────────────────────────────────────────────
 
 fn panel_style(_theme: &Theme) -> container::Style {
     container::Style {
@@ -962,8 +1066,36 @@ fn panel_style(_theme: &Theme) -> container::Style {
         border: iced::Border {
             width: 1.0,
             color: DIVIDER,
-            radius: 4.0.into(),
+            radius: 6.0.into(),
         },
+        ..Default::default()
+    }
+}
+
+fn panel_focused(_theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(CARD_BG.into()),
+        border: iced::Border {
+            width: 2.0,
+            color: ACCENT,
+            radius: 6.0.into(),
+        },
+        ..Default::default()
+    }
+}
+
+fn title_bar_style(_theme: &Theme) -> container::Style {
+    container::Style {
+        text_color: Some(TITLE_COLOR),
+        background: Some(CARD_BG.into()),
+        ..Default::default()
+    }
+}
+
+fn title_bar_focused(_theme: &Theme) -> container::Style {
+    container::Style {
+        text_color: Some(TITLE_COLOR),
+        background: Some(CARD_BG.into()),
         ..Default::default()
     }
 }
