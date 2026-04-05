@@ -53,6 +53,19 @@ pub struct AxisLayout {
     pub right_width: f32,
     pub top_height: f32,
     pub bottom_height: f32,
+    /// Insets from edge labels to keep marks aligned with tick positions.
+    /// Horizontal insets come from the bottom/top axis, vertical from left/right.
+    pub insets: PlotInsets,
+}
+
+/// Pixel insets applied to the data-mapping region within the plot area,
+/// so that marks align with inset axis tick positions.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PlotInsets {
+    pub left: f32,
+    pub right: f32,
+    pub top: f32,
+    pub bottom: f32,
 }
 
 impl Plane {
@@ -501,6 +514,30 @@ where
         (x_min, x_max, y_min, y_max)
     }
 
+    /// Returns the minimum pixel inset required at each edge of the data-mapping
+    /// region for this plot area's series (e.g. data labels that extend past
+    /// the end of a bar). Used by the scene as a `min_inset` floor for axis
+    /// guides so ticks, bars, and labels all align.
+    pub fn compute_series_insets(
+        &self,
+        plot_size: crate::core::Size,
+        x_bounds: (f64, f64),
+        y_bounds: (f64, f64),
+    ) -> PlotInsets {
+        let mut insets = PlotInsets::default();
+        for series in &self.series {
+            let series_insets = match series {
+                Series::Bars(bars) => bars.compute_label_insets(plot_size, x_bounds, y_bounds),
+                _ => continue,
+            };
+            insets.left = insets.left.max(series_insets.left);
+            insets.right = insets.right.max(series_insets.right);
+            insets.top = insets.top.max(series_insets.top);
+            insets.bottom = insets.bottom.max(series_insets.bottom);
+        }
+        insets
+    }
+
     /// Layout the plot area - creates plane and delegates to each series
     pub fn layout(
         &self,
@@ -560,16 +597,17 @@ where
             });
         }
 
+        let insets = &axis_layout.insets;
         let plane = Plane {
             x_min,
             x_max,
             y_min,
             y_max,
             bounds: Rectangle {
-                x: 0.0,
-                y: 0.0,
-                width: size.width,
-                height: size.height,
+                x: insets.left,
+                y: insets.top,
+                width: (size.width - insets.left - insets.right).max(0.0),
+                height: (size.height - insets.top - insets.bottom).max(0.0),
             },
             obstacles,
         };

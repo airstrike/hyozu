@@ -1,4 +1,4 @@
-use super::Plane;
+use super::{Plane, PlotInsets};
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
 use crate::core::{Rectangle, Size};
@@ -54,6 +54,85 @@ where
     /// Reconcile the tree with current Bars state
     pub(super) fn diff(&self, _tree: &mut Tree) {
         // No children to diff
+    }
+
+    /// Returns the pixel inset required on each edge of the data-mapping region
+    /// so that `Position::Above` data labels don't clip against the plot area
+    /// boundary. Only labels that extend past the bar end (outside the bar)
+    /// contribute; inside-placement labels return zero insets.
+    ///
+    /// For each bar, solves `R >= extent - (extent - pad - label_width) / v`
+    /// where `v ∈ [0, 1]` is the bar's normalized position along the value
+    /// axis. Returns the max across all bars.
+    pub(super) fn compute_label_insets(
+        &self,
+        plot_size: Size,
+        x_bounds: (f64, f64),
+        y_bounds: (f64, f64),
+    ) -> PlotInsets {
+        use crate::mark::bar::Direction;
+
+        let mut insets = PlotInsets::default();
+        let is_horizontal = self.data.direction == Direction::Horizontal;
+
+        // Which axis bounds drive the bar end? For horizontal bars, the bar
+        // length is plotted along x (from x_min); for vertical, along y.
+        let (min_v, max_v) = if is_horizontal { x_bounds } else { y_bounds };
+        let range = max_v - min_v;
+        if range <= 0.0 {
+            return insets;
+        }
+
+        let extent = if is_horizontal {
+            plot_size.width
+        } else {
+            plot_size.height
+        };
+        let pad = 4.0_f32;
+
+        for series in &self.data.series {
+            let Some(label_config) = &series.label else {
+                continue;
+            };
+            if label_config.position != Position::Above {
+                continue;
+            }
+
+            let label_size = label_config.size.map(|p| p.0).unwrap_or(12.0);
+            let char_width = label_size * 0.6;
+
+            for point in &series.points {
+                // point.y carries the bar length in both orientations
+                let value = point.y;
+                let v = ((value - min_v) / range) as f32;
+                // Only bars past midpoint can really need a large inset; the
+                // formula naturally yields <=0 otherwise, but skip v<=0 to
+                // avoid negative-range division artefacts.
+                if v <= 0.0 {
+                    continue;
+                }
+
+                let text = (label_config.format)(value);
+                if text.is_empty() {
+                    continue;
+                }
+                let label_width = text.len() as f32 * char_width + 6.0;
+
+                // Assumes the other-end inset on the same axis is 0 (safe
+                // under-estimate of extent; any actual other-end inset makes
+                // the true required value slightly larger, typically <2px).
+                let required = extent - (extent - pad - label_width) / v;
+                let required = required.max(0.0);
+
+                if is_horizontal {
+                    insets.right = insets.right.max(required);
+                } else {
+                    insets.top = insets.top.max(required);
+                }
+            }
+        }
+
+        insets
     }
 
     /// Layout the bars - calculates bar positions and sizes

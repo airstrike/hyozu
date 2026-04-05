@@ -4,6 +4,8 @@ use iced::{Center, Color, Element, Fill, Font, Theme, color, font};
 
 use sweeten::widget::tile_grid::{self, CellHeight, grid_content, title_bar};
 
+use hyozu::mark::bar::Label;
+use hyozu::mark::bar::label::Position as LabelPosition;
 use hyozu::mark::treemap::item;
 use hyozu::{LegendPosition, Target, bar, bars, chart, data, treemap};
 
@@ -986,13 +988,25 @@ impl Screen {
     fn build_turnover_band(model: &model::Dashboard) -> hyozu::Data {
         let values: Vec<i32> = model.turnover_bands.iter().map(|b| b.count as i32).collect();
         let labels: Vec<&str> = model.turnover_bands.iter().map(|b| b.label).collect();
-        data(bars([bar(values).with_color(ACCENT)]).horizontal().with_size(0.65)).y_axis_labels(labels)
+        data(
+            bars([bar(values).with_color(ACCENT)])
+                .horizontal()
+                .with_size(0.65)
+                .data_labels(Label::new().with_position(LabelPosition::End)),
+        )
+        .y_axis_labels(labels)
     }
 
     fn build_turnover_segment(model: &model::Dashboard) -> hyozu::Data {
         let values: Vec<i32> = model.segment_counts.iter().map(|s| s.count as i32).collect();
         let labels: Vec<&str> = model.segment_counts.iter().map(|s| s.label).collect();
-        data(bars([bar(values).with_color(ACCENT)]).horizontal().with_size(0.6)).y_axis_labels(labels)
+        data(
+            bars([bar(values).with_color(ACCENT)])
+                .horizontal()
+                .with_size(0.6)
+                .data_labels(Label::new().with_position(LabelPosition::End)),
+        )
+        .y_axis_labels(labels)
     }
 
     fn build_owner_segment(model: &model::Dashboard) -> hyozu::Data {

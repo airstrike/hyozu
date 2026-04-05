@@ -273,8 +273,18 @@ where
             let left_tree = &mut second_children[0];
 
             let remaining_h = available.height - title_height;
+            // Phase 3 is a measurement pass; sibling axis sizes aren't known
+            // yet, so we pass (0, 0) overflow and (0, 0) min_inset. Insets
+            // don't affect the returned width/height, so the measurement
+            // remains correct. Data bounds are written to state.
             let bottom_height = if let Some(guide) = &self.bottom_axis {
-                let node = guide.layout(bottom_tree, renderer, &lim(available.width, remaining_h));
+                let node = guide.layout(
+                    bottom_tree,
+                    renderer,
+                    &lim(available.width, remaining_h),
+                    (0.0, 0.0),
+                    (0.0, 0.0),
+                );
                 node.size().height
             } else {
                 0.0
@@ -282,7 +292,13 @@ where
 
             let vertical = remaining_h - bottom_height;
             let left_width = if let Some(guide) = &self.left_axis {
-                let node = guide.layout(left_tree, renderer, &lim(available.width, vertical));
+                let node = guide.layout(
+                    left_tree,
+                    renderer,
+                    &lim(available.width, vertical),
+                    (0.0, 0.0),
+                    (0.0, 0.0),
+                );
                 node.size().width
             } else {
                 0.0
@@ -319,46 +335,96 @@ where
         let vertical_space = remaining_height - bottom_height - below_legend_h;
         let plot_height = vertical_space;
 
+        // --- Phase 6.5: Series-driven inset floor ---
+        // Ask the plot area how much inset its series need past the data
+        // mapping region (e.g., for data labels that extend past bar ends).
+        // This becomes a floor for the axis insets so ticks & bars stay aligned.
+        let series_insets = {
+            use crate::chart::guide;
+            let x_bounds = self.bottom_axis.as_ref().map(|_| {
+                let st = tree.children[4]
+                    .state
+                    .downcast_ref::<guide::State<Renderer::Paragraph>>();
+                (st.bounds.min(), st.bounds.max())
+            });
+            let y_bounds = self.left_axis.as_ref().map(|_| {
+                let st = tree.children[5]
+                    .state
+                    .downcast_ref::<guide::State<Renderer::Paragraph>>();
+                (st.bounds.min(), st.bounds.max())
+            });
+            let xb = x_bounds.unwrap_or((0.0, 1.0));
+            let yb = y_bounds.unwrap_or((0.0, 1.0));
+            self.plot_area
+                .compute_series_insets(crate::core::Size::new(plot_width, plot_height), xb, yb)
+        };
+
         // --- Phase 7: Final layout pass ---
         let (first_children, second_children) = tree.children.split_at_mut(5);
 
-        let left_axis_node = self
-            .left_axis
-            .as_ref()
-            .map(|guide| guide.layout(&mut second_children[0], renderer, &lim(available.width, plot_height)));
+        // Overflow budgets: sibling axis columns absorb edge-label overhang.
+        // Vertical axis: (top_overflow, bottom_overflow) = (top axis, bottom axis).
+        // Horizontal axis: (left_overflow, right_overflow) = (left axis, right axis).
+        let left_overflow = (top_height, bottom_height);
+        let bottom_overflow = (left_width, right_width);
 
-        let bottom_axis_node = self
-            .bottom_axis
-            .as_ref()
-            .map(|guide| guide.layout(&mut first_children[4], renderer, &lim(plot_width, remaining_height)));
+        // Min-inset floors from series (data labels).
+        // Vertical axis: (top, bottom) of Plane. Horizontal axis: (left, right).
+        let left_min_inset = (series_insets.top, series_insets.bottom);
+        let bottom_min_inset = (series_insets.left, series_insets.right);
+
+        let left_axis_node = self.left_axis.as_ref().map(|guide| {
+            guide.layout(
+                &mut second_children[0],
+                renderer,
+                &lim(available.width, plot_height),
+                left_overflow,
+                left_min_inset,
+            )
+        });
+
+        let bottom_axis_node = self.bottom_axis.as_ref().map(|guide| {
+            guide.layout(
+                &mut first_children[4],
+                renderer,
+                &lim(plot_width, remaining_height),
+                bottom_overflow,
+                bottom_min_inset,
+            )
+        });
 
         // Axis bounds for plot area coordinate sync
-        let axis_bounds = {
+        let (axis_bounds, plot_insets) = {
             use crate::chart::guide;
-            let x_bounds = if self.bottom_axis.is_some() {
-                Some(
-                    first_children[4]
-                        .state
-                        .downcast_ref::<guide::State<Renderer::Paragraph>>()
-                        .bounds,
-                )
+            use crate::chart::plot_area::PlotInsets;
+
+            let (x_bounds, h_insets) = if self.bottom_axis.is_some() {
+                let st = first_children[4]
+                    .state
+                    .downcast_ref::<guide::State<Renderer::Paragraph>>();
+                (Some(st.bounds), st.label_insets)
             } else {
-                None
+                (None, (0.0, 0.0))
             };
-            let y_bounds = if self.left_axis.is_some() {
-                Some(
-                    second_children[0]
-                        .state
-                        .downcast_ref::<guide::State<Renderer::Paragraph>>()
-                        .bounds,
-                )
+            let (y_bounds, v_insets) = if self.left_axis.is_some() {
+                let st = second_children[0]
+                    .state
+                    .downcast_ref::<guide::State<Renderer::Paragraph>>();
+                (Some(st.bounds), st.label_insets)
             } else {
-                None
+                (None, (0.0, 0.0))
             };
-            match (x_bounds, y_bounds) {
+            let bounds = match (x_bounds, y_bounds) {
                 (Some(x), Some(y)) => Some((x.min(), x.max(), y.min(), y.max())),
                 _ => None,
-            }
+            };
+            let insets = PlotInsets {
+                left: h_insets.0,
+                right: h_insets.1,
+                top: v_insets.0,
+                bottom: v_insets.1,
+            };
+            (bounds, insets)
         };
 
         let axis_layout = crate::chart::plot_area::AxisLayout {
@@ -366,6 +432,7 @@ where
             right_width,
             top_height,
             bottom_height,
+            insets: plot_insets,
         };
 
         let plot_area_node = self.plot_area.layout(
@@ -539,7 +606,7 @@ where
         // Left axis line
         if let Some(guide) = &self.left_axis {
             let left_layout = line_layouts.next().expect("left axis layout must exist");
-            guide.draw_axis_line(renderer, design, left_layout);
+            guide.draw_axis_line(&tree.children[5], renderer, design, left_layout);
         }
 
         // Skip plot area
@@ -548,7 +615,7 @@ where
         // Bottom axis line
         if let Some(guide) = &self.bottom_axis {
             let bottom_layout = line_layouts.next().expect("bottom axis layout must exist");
-            guide.draw_axis_line(renderer, design, bottom_layout);
+            guide.draw_axis_line(&tree.children[4], renderer, design, bottom_layout);
         }
     }
 }

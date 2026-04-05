@@ -342,6 +342,9 @@ where
     pub tick_positions: Vec<f64>,
     /// Cached bounds from tick marks - for coordinate system
     pub bounds: Bounds,
+    /// Edge label insets to prevent overhang at axis boundaries.
+    /// For horizontal axes: (left, right). For vertical axes: (top, bottom).
+    pub label_insets: (f32, f32),
 }
 
 /// A Guide wraps an Axis and handles UI layout with proper text measurement.
@@ -889,6 +892,7 @@ where
                 label_info: Vec::new(),
                 tick_positions: Vec::new(),
                 bounds: Bounds::exact(0.0, 1.0),
+                label_insets: (0.0, 0.0),
             }),
             children,
         }
@@ -903,7 +907,22 @@ where
     }
 
     /// Layout the guide, measuring text labels and positioning ticks.
-    pub fn layout(&self, tree: &mut Tree, renderer: &Renderer, limits: &Limits) -> Node {
+    ///
+    /// `overflow` is the pixel budget available outside each end of the axis
+    /// for edge-label overhang (e.g. the sibling axis column). `.0` is the
+    /// start (left for horizontal, top for vertical); `.1` is the end.
+    ///
+    /// `min_inset` is a floor imposed by other chart elements (e.g. series
+    /// data labels that extend past bar ends). The final inset is computed
+    /// as `max(0, half_label - overflow, min_inset)`.
+    pub fn layout(
+        &self,
+        tree: &mut Tree,
+        renderer: &Renderer,
+        limits: &Limits,
+        overflow: (f32, f32),
+        min_inset: (f32, f32),
+    ) -> Node {
         // Compute bounds first, then generate ticks within those bounds
         let bounds = self.compute_axis_bounds();
         let (label_info, tick_positions) = self.compute_ticks_and_labels(bounds);
@@ -934,6 +953,8 @@ where
                 label_offset,
                 min_value,
                 max_value,
+                overflow,
+                min_inset,
             ),
             Orientation::Bottom | Orientation::Top => self.layout_horizontal(
                 state,
@@ -943,6 +964,8 @@ where
                 label_offset,
                 min_value,
                 max_value,
+                overflow,
+                min_inset,
             ),
         }
     }
@@ -958,6 +981,8 @@ where
         label_offset: f32,
         min_value: f64,
         max_value: f64,
+        overflow: (f32, f32),
+        min_inset: (f32, f32),
     ) -> Node {
         // Use cached label info from state
         let label_data = &state.label_info;
@@ -972,7 +997,8 @@ where
         let mut children = Vec::new();
         let mut max_label_width = 0.0f32;
 
-        for (i, (pos, label)) in label_data.iter().enumerate() {
+        // First pass: measure all labels
+        for (i, (_pos, label)) in label_data.iter().enumerate() {
             let paragraph = &mut state.labels[i];
 
             use crate::core::alignment;
@@ -994,29 +1020,46 @@ where
                 weight: None,
             });
 
-            let label_width = paragraph.min_bounds().width;
-            max_label_width = max_label_width.max(label_width);
+            max_label_width = max_label_width.max(paragraph.min_bounds().width);
+        }
 
-            // Calculate Y position for this tick within our height
-            let tick_value = *pos;
-            let label_height = paragraph.min_bounds().height;
+        // Compute edge label insets (half-height of top/bottom center-aligned labels),
+        // reduced by the overflow budget available on each side, floored by min_inset.
+        // labels[last] = max value = top of axis, labels[0] = min value = bottom.
+        let n = label_data.len();
+        let top_half = if n > 0 {
+            state.labels[n - 1].min_bounds().height / 2.0
+        } else {
+            0.0
+        };
+        let bottom_half = if n > 0 {
+            state.labels[0].min_bounds().height / 2.0
+        } else {
+            0.0
+        };
+        let top_inset = (top_half - overflow.0).max(0.0).max(min_inset.0);
+        let bottom_inset = (bottom_half - overflow.1).max(0.0).max(min_inset.1);
+        let usable_height = (max_size.height - top_inset - bottom_inset).max(0.0);
 
-            // Skip if not enough room for the label
+        state.label_insets = (top_inset, bottom_inset);
+
+        // Second pass: position labels within the inset range
+        for (i, (pos, _label)) in label_data.iter().enumerate() {
+            let label_width = state.labels[i].min_bounds().width;
+            let label_height = state.labels[i].min_bounds().height;
+
             if max_size.height < label_height {
                 continue;
             }
 
+            let tick_value = *pos;
             let y = if value_range > 0.0 {
-                (max_size.height as f64 - ((tick_value - min_value) / value_range) * max_size.height as f64) as f32
+                let normalized = ((tick_value - min_value) / value_range) as f32;
+                top_inset + usable_height - normalized * usable_height
             } else {
                 max_size.height / 2.0
             };
 
-            // Don't clamp: edge labels extend beyond the axis bounds (the title
-            // above and the bottom axis below provide natural overflow space).
-            // This keeps every label centered on its tick mark.
-
-            // Create a node for this tick positioned at the calculated y
             children.push(
                 Node::new(Size::new(label_width, label_height))
                     .move_to(Point::ORIGIN + crate::core::Vector::new(0.0, y)),
@@ -1045,6 +1088,8 @@ where
         label_offset: f32,
         min_value: f64,
         max_value: f64,
+        overflow: (f32, f32),
+        min_inset: (f32, f32),
     ) -> Node {
         // Use cached label info from state
         let label_data = &state.label_info;
@@ -1058,7 +1103,8 @@ where
         // Position each label along the x-axis
         let mut children = Vec::new();
 
-        for (i, (pos, label)) in label_data.iter().enumerate() {
+        // First pass: measure all labels
+        for (i, (_pos, label)) in label_data.iter().enumerate() {
             let paragraph = &mut state.labels[i];
 
             use crate::core::alignment;
@@ -1079,18 +1125,33 @@ where
                 letter_spacing: Default::default(),
                 weight: None,
             });
+        }
 
-            let label_width = paragraph.min_bounds().width;
+        // Compute edge label insets (half-width of first/last center-aligned labels),
+        // reduced by the overflow budget available on each side, floored by min_inset.
+        let left_half = state.labels.first().map(|p| p.min_bounds().width / 2.0).unwrap_or(0.0);
+        let right_half = state
+            .labels
+            .get(label_data.len().saturating_sub(1))
+            .map(|p| p.min_bounds().width / 2.0)
+            .unwrap_or(0.0);
+        let left_inset = (left_half - overflow.0).max(0.0).max(min_inset.0);
+        let right_inset = (right_half - overflow.1).max(0.0).max(min_inset.1);
+        let usable_width = (max_size.width - left_inset - right_inset).max(0.0);
 
-            // Calculate X position for this tick within our width
+        state.label_insets = (left_inset, right_inset);
+
+        // Second pass: position labels within the inset range
+        for (i, (pos, _label)) in label_data.iter().enumerate() {
+            let label_width = state.labels[i].min_bounds().width;
+
             let tick_value = *pos;
             let x = if value_range > 0.0 {
-                (((tick_value - min_value) / value_range) * max_size.width as f64) as f32
+                left_inset + (((tick_value - min_value) / value_range) * usable_width as f64) as f32
             } else {
                 max_size.width / 2.0
             };
 
-            // Create a node for this tick positioned at the calculated x
             children.push(
                 Node::new(Size::new(label_width, 20.0)).move_to(Point::ORIGIN + crate::core::Vector::new(x, 0.0)),
             );
@@ -1104,14 +1165,21 @@ where
     /// Draws the axis line only using canvas geometry so it composites
     /// in the same pipeline as marks. Call after the plot area to ensure
     /// axis lines render on top of marks (bars, areas, etc.).
-    pub fn draw_axis_line<D>(&self, renderer: &mut Renderer, design: &D, layout: crate::core::Layout<'_>)
-    where
+    pub fn draw_axis_line<D>(
+        &self,
+        tree: &crate::core::widget::Tree,
+        renderer: &mut Renderer,
+        design: &D,
+        layout: crate::core::Layout<'_>,
+    ) where
         D: crate::design::Design + ?Sized,
         Renderer: crate::widget::renderer::geometry::Renderer,
     {
         use crate::widget::canvas::{Frame, Path, Stroke};
 
         let bounds = layout.bounds();
+        let state = tree.state.downcast_ref::<State<Renderer::Paragraph>>();
+        let (inset_start, inset_end) = state.label_insets;
 
         let background = design.background_color();
         let text_pair = design.text_pair();
@@ -1123,10 +1191,16 @@ where
 
         let mut frame = Frame::new(renderer, bounds.size());
         let path = match self.axis.orientation() {
-            Orientation::Bottom => Path::line(Point::new(0.0, 0.0), Point::new(bounds.width, 0.0)),
+            Orientation::Bottom => {
+                let x0 = inset_start;
+                let x1 = bounds.width - inset_end;
+                Path::line(Point::new(x0, 0.0), Point::new(x1, 0.0))
+            }
             Orientation::Left => {
                 let x = bounds.width;
-                Path::line(Point::new(x, 0.0), Point::new(x, bounds.height))
+                let y0 = inset_start;
+                let y1 = bounds.height - inset_end;
+                Path::line(Point::new(x, y0), Point::new(x, y1))
             }
             _ => return, // TODO: Top and Right orientations
         };
@@ -1182,6 +1256,7 @@ where
 
         // Draw all tick marks using canvas geometry (same pipeline as marks)
         let tick_length = 5.0;
+        let (inset_start, inset_end) = state.label_insets;
         if !tick_positions.is_empty() {
             let mut frame = Frame::new(renderer, bounds.size());
             let path = Path::new(|builder| {
@@ -1194,12 +1269,14 @@ where
 
                     match self.axis.orientation() {
                         Orientation::Bottom => {
-                            let x = normalized * bounds.width;
+                            let usable = bounds.width - inset_start - inset_end;
+                            let x = inset_start + normalized * usable;
                             builder.move_to(Point::new(x, 0.0));
                             builder.line_to(Point::new(x, tick_length));
                         }
                         Orientation::Left => {
-                            let y = bounds.height - normalized * bounds.height;
+                            let usable = bounds.height - inset_start - inset_end;
+                            let y = inset_start + usable - normalized * usable;
                             builder.move_to(Point::new(bounds.width - tick_length, y));
                             builder.line_to(Point::new(bounds.width, y));
                         }
