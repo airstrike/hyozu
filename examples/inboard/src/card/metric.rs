@@ -105,9 +105,7 @@ fn build_line(series: &[model::metric::Series], theme: &Theme) -> hyozu::Data {
         })
         .collect();
 
-    let mut data = hyozu::data(marks)
-        .x_axis(|_| hyozu::Axis::none())
-        .y_axis(|_| hyozu::Axis::none());
+    let mut data = hyozu::data(marks).x_axis(hyozu::Axis::none).y_axis(hyozu::Axis::none);
 
     if series.len() > 1 {
         data = data.legend(hyozu::LegendPosition::Above);
@@ -132,9 +130,7 @@ fn build_bar(series: &[model::metric::Series], theme: &Theme) -> hyozu::Data {
 
     let bars = hyozu::bars(bar_series).data_labels(None);
 
-    let mut data = hyozu::data(bars)
-        .x_axis(|_| hyozu::Axis::none())
-        .y_axis(|_| hyozu::Axis::none());
+    let mut data = hyozu::data(bars).x_axis(hyozu::Axis::none).y_axis(hyozu::Axis::none);
 
     if series.len() > 1 {
         data = data.legend(hyozu::LegendPosition::Above);

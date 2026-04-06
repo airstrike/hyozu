@@ -220,18 +220,18 @@ pub struct Axis {
 }
 
 impl Axis {
-    /// An invisible axis that allocates no space.
+    /// Hides all visual elements of this axis while preserving its kind
+    /// and bounds computation.
     ///
-    /// Disables the axis line, labels, ticks, and grid lines. Use this
-    /// for sparkline-style charts where axes are not needed.
-    pub fn none() -> Self {
-        Self {
-            show_line: false,
-            show_labels: false,
-            show_grid: false,
-            ticks: tick::Style::None.into(),
-            ..Self::new(Orientation::Bottom)
-        }
+    /// Disables the axis line, labels, ticks, and grid lines so the axis
+    /// allocates no space, but the data range is still computed correctly
+    /// (e.g. `ScalarAnchored` for bars, `Scalar` for lines).
+    pub fn none(mut self) -> Self {
+        self.show_line = false;
+        self.show_labels = false;
+        self.show_grid = false;
+        self.ticks = tick::Style::None.into();
+        self
     }
 
     /// Create a new axis with the given orientation.
