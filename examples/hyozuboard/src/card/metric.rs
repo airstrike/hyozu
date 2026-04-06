@@ -61,25 +61,39 @@ pub fn view<'a, Message: 'a>(
         .into()
 }
 
-/// Build chart data from a metric body and its series.
+/// Build chart data from a metric body and a matched record.
+///
+/// Each chart kind pulls the fields it needs from the record:
+/// line/bar use `series` + `labels`, map uses `geo_points`.
 pub(crate) fn build_chart(
     body: &model::metric::Body,
-    series: &[model::metric::Series],
-    labels: Option<&[String]>,
+    record: &model::metric::Record,
     theme: &Theme,
-) -> hyozu::Data {
+) -> Option<hyozu::Data> {
     let chart_kind = body.chart.as_ref().map(|c| c.kind).unwrap_or(model::metric::Kind::Line);
 
-    let mut data = match chart_kind {
-        model::metric::Kind::Line => build_line(series, theme),
-        model::metric::Kind::Bar => build_bar(series, theme),
-    };
-
-    if let Some(labels) = labels {
-        data = data.x_axis_labels(labels.to_vec());
+    match chart_kind {
+        model::metric::Kind::Line => {
+            let series = record.series.as_ref()?;
+            let mut data = build_line(series, theme);
+            if let Some(labels) = &record.labels {
+                data = data.x_axis_labels(labels.clone());
+            }
+            Some(data)
+        }
+        model::metric::Kind::Bar => {
+            let series = record.series.as_ref()?;
+            let mut data = build_bar(series, theme);
+            if let Some(labels) = &record.labels {
+                data = data.x_axis_labels(labels.clone());
+            }
+            Some(data)
+        }
+        model::metric::Kind::Map => {
+            let geo_points = record.geo_points.as_ref()?;
+            Some(build_map(geo_points, theme))
+        }
     }
-
-    data
 }
 
 fn build_line(series: &[model::metric::Series], theme: &Theme) -> hyozu::Data {
@@ -162,6 +176,25 @@ fn muted_axis(axis: hyozu::Axis, color: iced::Color) -> hyozu::Axis {
         .with_axis_color(faint)
         .with_label_color(faint)
         .with_label_size(9)
+}
+
+/// Build chart data from geo points for a bubble-map card.
+pub(crate) fn build_map(geo_points: &[model::metric::GeoPoint], theme: &Theme) -> hyozu::Data {
+    let points: Vec<_> = geo_points
+        .iter()
+        .map(|gp| {
+            let mut pt = hyozu::map_point(gp.lat, gp.lon, gp.value);
+            if let Some(label) = &gp.label {
+                pt = pt.label(label);
+            }
+            if let Some(c) = gp.color {
+                pt = pt.color(theme::resolve(c, theme));
+            }
+            pt
+        })
+        .collect();
+
+    hyozu::data(hyozu::bubble_map(points))
 }
 
 fn normalize(data: &[f64]) -> Vec<f64> {

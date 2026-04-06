@@ -2,6 +2,7 @@ pub mod annotation;
 pub mod area;
 pub mod bar;
 pub mod boxplot;
+pub mod bubble_map;
 pub mod gauge;
 pub mod heatmap;
 pub mod line;
@@ -16,6 +17,7 @@ pub mod xy;
 pub use area::{Area, IntoAreas, area, areas};
 pub use bar::{Bars, IntoBars, bar, bars};
 pub use boxplot::{BoxPlot, boxplot, entry, entry_from_data};
+pub use bubble_map::{BubbleMap, MapPoint, bubble_map, map_point};
 pub use gauge::{Gauge, gauge};
 pub use heatmap::{Heatmap, heatmap};
 pub use line::{IntoLines, Line, line};
@@ -42,6 +44,7 @@ pub enum Mark {
     Area(Area),
     Bars(Bars),
     BoxPlot(BoxPlot),
+    BubbleMap(BubbleMap),
     Line(Line),
     Pie(Pie),
     Gauge(Gauge),
@@ -139,6 +142,16 @@ impl Mark {
                     color: item.color,
                 })
                 .collect(),
+            Mark::BubbleMap(bm) => bm
+                .points
+                .iter()
+                .filter_map(|p| {
+                    p.name.as_ref().map(|name| LegendEntry {
+                        name: name.clone(),
+                        color: p.color,
+                    })
+                })
+                .collect(),
             // Rule, Tick, Gauge, Heatmap don't contribute to legend
             Mark::Rule(_) | Mark::Tick(_) | Mark::Gauge(_) | Mark::Waterfall(_) | Mark::Heatmap(_) => Vec::new(),
         }
@@ -220,5 +233,11 @@ impl From<Treemap> for Mark {
 impl From<Violin> for Mark {
     fn from(violin: Violin) -> Self {
         Mark::Violin(violin)
+    }
+}
+
+impl From<BubbleMap> for Mark {
+    fn from(bm: BubbleMap) -> Self {
+        Mark::BubbleMap(bm)
     }
 }

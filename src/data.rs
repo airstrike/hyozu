@@ -8,9 +8,9 @@ pub use area::Area;
 pub use axis::{Axis, Orientation};
 pub use datum::{Datum, IntoDatums};
 pub use mark::{
-    Bars, BoxPlot, Gauge, Heatmap, LegendEntry, Line, Mark, Pie, Rule, Treemap, Violin, Waterfall, Xy, areas, bar,
-    bars, boxplot, entry, entry_from_data, gauge, heatmap, line, pie, rule, treemap, violin, violin_entry,
-    violin_from_data, waterfall, xy,
+    Bars, BoxPlot, BubbleMap, Gauge, Heatmap, LegendEntry, Line, MapPoint, Mark, Pie, Rule, Treemap, Violin, Waterfall,
+    Xy, areas, bar, bars, boxplot, bubble_map, entry, entry_from_data, gauge, heatmap, line, map_point, pie, rule,
+    treemap, violin, violin_entry, violin_from_data, waterfall, xy,
 };
 
 /// Trait for types that can be converted into chart Data.
@@ -61,6 +61,7 @@ fn axes_for_mark(mark: &Mark) -> (Option<Axis>, Option<Axis>) {
         }
         Mark::BoxPlot(bp) => (Some(bp.x_axis()), Some(bp.y_axis())),
         Mark::Line(_) => (Some(Line::x_axis()), Some(Line::y_axis())),
+        Mark::BubbleMap(_) => (BubbleMap::x_axis(), BubbleMap::y_axis()),
         Mark::Pie(_) => (Pie::x_axis(), Pie::y_axis()),
         Mark::Gauge(_) => (Gauge::x_axis(), Gauge::y_axis()),
         Mark::Treemap(_) => (Treemap::x_axis(), Treemap::y_axis()),
@@ -177,6 +178,12 @@ impl IntoData for Treemap {
 }
 
 impl IntoData for Violin {
+    fn into_data(self) -> Data {
+        Mark::from(self).into_data()
+    }
+}
+
+impl IntoData for BubbleMap {
     fn into_data(self) -> Data {
         Mark::from(self).into_data()
     }

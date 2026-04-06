@@ -32,24 +32,22 @@ enum Message {
 impl App {
     fn new() -> Self {
         let wf = waterfall::waterfall([
-            waterfall::entry(500, Total).label("$500"),
-            waterfall::entry(-200, Decrease).label("-$200"),
-            waterfall::entry(300, Total).label("$300"),
-            waterfall::entry(-80, Decrease).label("-$80"),
-            waterfall::entry(-60, Decrease).label("-$60"),
-            waterfall::entry(20, Increase).label("+$20"),
-            waterfall::entry(180, Total).label("$180"),
+            waterfall::entry(2733, Total).label("$2,733M"),
+            waterfall::entry(50, Increase).label("+$50M"),
+            waterfall::entry(-30, Decrease).label("-$30M"),
+            waterfall::entry(45, Increase).label("+$45M"),
+            waterfall::entry(-25, Decrease).label("-$25M"),
+            waterfall::entry(40, Increase).label("+$40M"),
+            waterfall::entry(-20, Decrease).label("-$20M"),
+            waterfall::entry(35, Increase).label("+$35M"),
+            waterfall::entry(-75, Decrease).label("-$75M"),
+            waterfall::entry(2753, Total).label("$2,753M"),
         ]);
 
         Self {
-            data: data(wf).title("Quarterly P&L").x_axis_labels([
-                "Revenue",
-                "COGS",
-                "Gross Profit",
-                "SG&A",
-                "R&D",
-                "Other Income",
-                "EBITDA",
+            data: data(wf).title("Cash Flow FY 2025").x_axis_labels([
+                "Opening", "Q1 Ops", "Q1 CapEx", "Q2 Ops", "Q2 CapEx", "Q3 Ops", "Q3 CapEx", "Q4 Ops", "Q4 CapEx",
+                "Closing",
             ]),
             theme: hyozu::theme::paper(),
             all_themes: hyozu::theme::all_themes().collect(),

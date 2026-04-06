@@ -338,5 +338,49 @@
       }
     },
     "workspace_ref": { "workspace_id": "ws_income_statement", "sheet": "P&L" }
+  },
+
+  {
+    "id": "card_geo_profit",
+    "type": "metric",
+    "header": { "label": "Gross Profit by Entity Mapped" },
+    "meta": {
+      "description": "Gross profit by entity plotted on a world map. Bubble size represents absolute change (delta PY). Blue = positive growth, orange/red = negative growth.",
+      "currency": "USD",
+      "unit": "currency",
+      "magnitude": "thousands",
+      "tags": ["finance", "profit", "entity", "geographic"]
+    },
+    "body": {
+      "data": [
+        {
+          "value": "$148.6M",
+          "delta": { "display": "+$9.4M", "direction": "positive", "period": "vs PY" },
+          "geo_points": [
+            { "lat": 29.76, "lon": -95.37, "value": 1459.0, "label": "Houston", "color": "primary" },
+            { "lat": 34.05, "lon": -118.24, "value": 2274.5, "label": "Los Angeles", "color": "primary" },
+            { "lat": 40.71, "lon": -74.01, "value": 3323.2, "label": "New York", "color": "primary" },
+            { "lat": 37.77, "lon": -122.42, "value": 2836.2, "label": "San Francisco", "color": "accent" },
+            { "lat": 52.23, "lon": 21.01, "value": 283.7, "label": "Warsaw", "color": "primary" },
+            { "lat": 49.61, "lon": 6.13, "value": 3248.2, "label": "Luxembourg", "color": "danger" },
+            { "lat": 40.42, "lon": -3.70, "value": 727.2, "label": "Madrid", "color": "danger" },
+            { "lat": 50.85, "lon": 4.35, "value": 471.1, "label": "Brussels", "color": "danger" }
+          ]
+        }
+      ],
+      "chart": { "type": "map" }
+    },
+    "footer": {
+      "author": { "user_id": "u_josh", "display_name": "Josh Meltzer" },
+      "data_source": { "system": "NetSuite GL", "agent": "FP&A Analyst" },
+      "updated": "2026-04-05T14:28:00Z"
+    },
+    "sizing": {
+      "default": "full",
+      "variants": {
+        "small": { "grid": [3, 1], "show": ["value", "delta"] },
+        "full": { "grid": [6, 2], "show": ["value", "delta", "chart"] }
+      }
+    }
   }
 ]

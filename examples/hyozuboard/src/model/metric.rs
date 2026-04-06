@@ -22,6 +22,8 @@ pub struct Record {
     pub series: Option<Vec<Series>>,
     #[serde(default)]
     pub labels: Option<Vec<String>>,
+    #[serde(default)]
+    pub geo_points: Option<Vec<GeoPoint>>,
     #[serde(flatten)]
     pub selectors: BTreeMap<String, serde_json::Value>,
 }
@@ -74,4 +76,17 @@ pub struct Chart {
 pub enum Kind {
     Line,
     Bar,
+    Map,
+}
+
+/// A geographic point for bubble-map charts.
+#[derive(Deserialize)]
+pub struct GeoPoint {
+    pub lat: f64,
+    pub lon: f64,
+    pub value: f64,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub color: Option<Token>,
 }

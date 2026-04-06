@@ -59,10 +59,8 @@ impl State {
         };
 
         let record = body.data.iter().find(|r| r.matches(selections))?;
-        let series = record.series.as_ref()?;
-        let labels = record.labels.as_deref();
 
-        Some(metric::build_chart(body, series, labels, theme))
+        metric::build_chart(body, record, theme)
     }
 }
 

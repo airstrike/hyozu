@@ -466,7 +466,8 @@ where
                     | crate::Mark::Tick(_)
                     | crate::Mark::Pie(_)
                     | crate::Mark::Gauge(_)
-                    | crate::Mark::Treemap(_) => {}
+                    | crate::Mark::Treemap(_)
+                    | crate::Mark::BubbleMap(_) => {}
                 }
             }
 
@@ -663,12 +664,19 @@ where
                     }
                 }
                 crate::Mark::Waterfall(wf) => {
-                    let mut running: f64 = 0.0;
-                    for (i, entry) in wf.entries.iter().enumerate() {
-                        if is_x_axis {
+                    if is_x_axis {
+                        for (i, _) in wf.entries.iter().enumerate() {
                             min = min.min(i as f64);
                             max = max.max(i as f64);
-                        } else {
+                        }
+                    } else {
+                        // Track the envelope of all running totals (steps + totals)
+                        // and decide whether to zoom into the step range.
+                        let mut running: f64 = 0.0;
+                        let mut envelope_min: f64 = f64::INFINITY;
+                        let mut envelope_max: f64 = f64::NEG_INFINITY;
+
+                        for entry in &wf.entries {
                             match entry.kind {
                                 crate::mark::waterfall::EntryKind::Total => {
                                     running = entry.value;
@@ -677,8 +685,23 @@ where
                                     running += entry.value;
                                 }
                             }
-                            min = min.min(running).min(0.0);
-                            max = max.max(running);
+                            envelope_min = envelope_min.min(running);
+                            envelope_max = envelope_max.max(running);
+                        }
+
+                        let envelope_range = envelope_max - envelope_min;
+                        let full_range = envelope_max.max(0.0) - envelope_min.min(0.0);
+
+                        if full_range > 0.0 && envelope_range / full_range < 0.4 {
+                            // Steps are small relative to the full 0-based range.
+                            // Zoom in so the steps occupy ~50 % of the chart height.
+                            let padding = envelope_range * 0.5;
+                            min = min.min(envelope_min - padding);
+                            max = max.max(envelope_max + padding);
+                        } else {
+                            // Steps are large enough — use normal 0-based range.
+                            min = min.min(envelope_min).min(0.0);
+                            max = max.max(envelope_max);
                         }
                     }
                 }
@@ -801,7 +824,7 @@ where
                         }
                     }
                 },
-                crate::Mark::Pie(_) | crate::Mark::Gauge(_) | crate::Mark::Treemap(_) => {}
+                crate::Mark::Pie(_) | crate::Mark::Gauge(_) | crate::Mark::Treemap(_) | crate::Mark::BubbleMap(_) => {}
             }
         }
 
@@ -810,7 +833,7 @@ where
         // For vertical bars: value axis is Y; for horizontal bars: value axis is X
         {
             let has_vertical_bars = self.marks.iter().any(|m| {
-                matches!(m, crate::Mark::Area(_) | crate::Mark::Waterfall(_))
+                matches!(m, crate::Mark::Area(_))
                     || matches!(m, crate::Mark::Bars(b) if b.direction() == crate::mark::bar::Direction::Vertical)
             });
             let has_horizontal_bars = self
