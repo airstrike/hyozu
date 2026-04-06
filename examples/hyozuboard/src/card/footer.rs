@@ -20,7 +20,7 @@ fn pills<'a, Message: 'a>(
     muted: iced::Color,
 ) -> impl Iterator<Item = Element<'a, Message>> {
     card.context.values().map(move |value| {
-        container(text!("{value}").size(9).color(muted))
+        container(text!("{value}").size(10).color(muted))
             .padding([2, 6])
             .style(style::pill)
             .into()

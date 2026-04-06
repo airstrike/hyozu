@@ -55,7 +55,7 @@ pub fn view<'a, Message: 'a>(
         });
 
     column([value, delta, chart].into_iter().flatten())
-        .spacing(4)
+        .spacing(2)
         .width(Fill)
         .height(Fill)
         .into()
@@ -161,7 +161,7 @@ fn muted_axis(axis: hyozu::Axis, color: iced::Color) -> hyozu::Axis {
     axis.show_grid(false)
         .with_axis_color(faint)
         .with_label_color(faint)
-        .with_label_size(8)
+        .with_label_size(9)
 }
 
 fn normalize(data: &[f64]) -> Vec<f64> {

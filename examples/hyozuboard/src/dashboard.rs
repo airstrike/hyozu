@@ -113,12 +113,18 @@ fn label<'a>(card: &'a model::card::Card, theme: &'a iced::Theme) -> iced::widge
 
     let info = card.meta.as_ref().and_then(|m| m.description.as_deref()).map(|desc| {
         tooltip(
-            text("i").size(9).color(muted),
-            text(desc).size(10),
+            container(text("i").size(8).color(muted).center())
+                .width(16)
+                .height(16)
+                .center(16)
+                .style(style::info_icon),
+            container(text(desc).size(11))
+                .max_width(260)
+                .padding(8)
+                .style(style::tooltip),
             tooltip::Position::Bottom,
         )
         .gap(4)
-        .style(style::tooltip)
         .into()
     });
 
@@ -188,6 +194,18 @@ mod style {
                 width: 1.0,
                 color: palette.background.strong.color,
                 radius: 4.0.into(),
+            },
+            ..Default::default()
+        }
+    }
+
+    pub fn info_icon(theme: &Theme) -> container::Style {
+        let palette = theme.palette();
+        container::Style {
+            border: iced::Border {
+                width: 1.0,
+                color: palette.background.strong.color,
+                radius: 99.0.into(),
             },
             ..Default::default()
         }
