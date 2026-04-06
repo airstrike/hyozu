@@ -220,6 +220,20 @@ pub struct Axis {
 }
 
 impl Axis {
+    /// An invisible axis that allocates no space.
+    ///
+    /// Disables the axis line, labels, ticks, and grid lines. Use this
+    /// for sparkline-style charts where axes are not needed.
+    pub fn none() -> Self {
+        Self {
+            show_line: false,
+            show_labels: false,
+            show_grid: false,
+            ticks: tick::Style::None.into(),
+            ..Self::new(Orientation::Bottom)
+        }
+    }
+
     /// Create a new axis with the given orientation.
     ///
     /// All styling is optional and will fallback to the design system if not specified.

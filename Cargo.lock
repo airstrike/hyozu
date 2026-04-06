@@ -1350,6 +1350,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyozuboard"
+version = "0.1.0"
+dependencies = [
+ "hyozu",
+ "iced",
+ "jiff",
+ "serde",
+ "serde_json",
+ "sweeten",
+]
+
+[[package]]
 name = "hyper"
 version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
