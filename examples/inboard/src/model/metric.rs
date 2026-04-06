@@ -20,6 +20,8 @@ pub struct Record {
     pub delta: Option<Delta>,
     #[serde(default)]
     pub series: Option<Vec<Series>>,
+    #[serde(default)]
+    pub labels: Option<Vec<String>>,
     #[serde(flatten)]
     pub selectors: BTreeMap<String, serde_json::Value>,
 }

@@ -24,13 +24,15 @@
           "period": "FY 2025",
           "value": "$91.4M",
           "delta": { "display": "+9.1%", "direction": "positive", "period": "vs FY24" },
-          "series": [{ "data": [7.0, 7.2, 7.4, 7.3, 7.6, 7.8, 7.5, 7.9, 8.0, 7.7, 8.0, 8.0], "color": "primary" }]
+          "series": [{ "data": [7.0, 7.2, 7.4, 7.3, 7.6, 7.8, 7.5, 7.9, 8.0, 7.7, 8.0, 8.0], "color": "primary" }],
+          "labels": ["Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun"]
         },
         {
           "period": "FY 2026 YTD",
           "value": "$48.2M",
           "delta": { "display": "+12.4%", "direction": "positive", "period": "YTD vs PY" },
-          "series": [{ "data": [6.8, 7.1, 7.4, 7.2, 8.0, 8.6, 9.1], "color": "primary" }]
+          "series": [{ "data": [6.8, 7.1, 7.4, 7.2, 8.0, 8.6, 9.1], "color": "primary" }],
+          "labels": ["Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr"]
         }
       ],
       "chart": { "type": "bar" }
@@ -68,7 +70,8 @@
         {
           "value": "$62.1M",
           "delta": { "display": "+18.3%", "direction": "positive", "period": "YoY" },
-          "series": [{ "data": [42, 44, 47, 50, 52, 55, 58, 62.1], "color": "success" }]
+          "series": [{ "data": [42, 44, 47, 50, 52, 55, 58, 62.1], "color": "success" }],
+          "labels": ["Q1'24", "Q2'24", "Q3'24", "Q4'24", "Q1'25", "Q2'25", "Q3'25", "Q4'25"]
         }
       ],
       "chart": { "type": "line" }
@@ -111,13 +114,15 @@
           "view": "Debt / EBITDA",
           "value": "0.6x",
           "delta": { "display": "-0.1x", "direction": "positive", "period": "vs PQ" },
-          "series": [{ "data": [1.1, 1.0, 0.9, 0.85, 0.8, 0.75, 0.7, 0.6], "color": "primary" }]
+          "series": [{ "data": [1.1, 1.0, 0.9, 0.85, 0.8, 0.75, 0.7, 0.6], "color": "primary" }],
+          "labels": ["Q1'24", "Q2'24", "Q3'24", "Q4'24", "Q1'25", "Q2'25", "Q3'25", "Q4'25"]
         },
         {
           "view": "Net Debt / EBITDA",
           "value": "0.4x",
           "delta": { "display": "-0.05x", "direction": "positive", "period": "vs PQ" },
-          "series": [{ "data": [0.8, 0.75, 0.7, 0.65, 0.6, 0.55, 0.5, 0.4], "color": "primary" }]
+          "series": [{ "data": [0.8, 0.75, 0.7, 0.65, 0.6, 0.55, 0.5, 0.4], "color": "primary" }],
+          "labels": ["Q1'24", "Q2'24", "Q3'24", "Q4'24", "Q1'25", "Q2'25", "Q3'25", "Q4'25"]
         }
       ],
       "chart": { "type": "line" }
@@ -158,7 +163,8 @@
         {
           "value": "$1.8M",
           "delta": { "display": "-$200K", "direction": "positive", "period": "vs prior mo" },
-          "series": [{ "data": [2.4, 2.3, 2.2, 2.1, 2.0, 2.0, 1.9, 1.8], "color": "success" }]
+          "series": [{ "data": [2.4, 2.3, 2.2, 2.1, 2.0, 2.0, 1.9, 1.8], "color": "success" }],
+          "labels": ["Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"]
         }
       ],
       "chart": { "type": "line" }
@@ -302,7 +308,8 @@
           "series": [
             { "label": "Actuals", "data": [5.2, 5.4, 5.5, 5.6, 5.7, 5.8, 5.6, 5.7, 5.9, 5.8, 5.9, 6.1], "color": "primary" },
             { "label": "Budget", "data": [5.8, 5.8, 5.8, 5.8, 5.8, 5.8, 5.8, 5.8, 5.9, 5.9, 5.9, 5.9], "color": "muted" }
-          ]
+          ],
+          "labels": ["Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun"]
         },
         {
           "period": "FY 2026 YTD",
@@ -311,7 +318,8 @@
           "series": [
             { "label": "Actuals", "data": [5.0, 5.1, 5.2, 5.2, 5.4, 5.5, 5.4], "color": "primary" },
             { "label": "Budget", "data": [5.4, 5.5, 5.5, 5.5, 5.5, 5.6, 5.5], "color": "muted" }
-          ]
+          ],
+          "labels": ["Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr"]
         }
       ],
       "chart": { "type": "bar" }

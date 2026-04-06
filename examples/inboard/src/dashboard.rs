@@ -92,7 +92,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
     .cell_height(CellHeight::Fixed(theme::CELL_H))
     .on_action(Message::GridAction);
 
-    container(scrollable(grid).width(Fill))
+    container(scrollable(grid).width(Fill).spacing(5))
         .padding(8)
         .width(Fill)
         .height(Fill)

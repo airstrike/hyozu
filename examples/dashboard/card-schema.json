@@ -203,6 +203,11 @@
               "color": { "$ref": "#/$defs/semantic_color", "default": "primary" }
             }
           }
+        },
+        "labels": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "X-axis labels for the chart. One label per data point. When omitted, the x-axis shows integer indices. Length should match the series data arrays."
         }
       },
       "additionalProperties": { "type": "string", "description": "Selector key-value pairs. Keys must match keys in the card's selectors object." }

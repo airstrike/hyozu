@@ -62,13 +62,24 @@ pub fn view<'a, Message: 'a>(
 }
 
 /// Build chart data from a metric body and its series.
-pub(crate) fn build_chart(body: &model::metric::Body, series: &[model::metric::Series], theme: &Theme) -> hyozu::Data {
+pub(crate) fn build_chart(
+    body: &model::metric::Body,
+    series: &[model::metric::Series],
+    labels: Option<&[String]>,
+    theme: &Theme,
+) -> hyozu::Data {
     let chart_kind = body.chart.as_ref().map(|c| c.kind).unwrap_or(model::metric::Kind::Line);
 
-    match chart_kind {
+    let mut data = match chart_kind {
         model::metric::Kind::Line => build_line(series, theme),
         model::metric::Kind::Bar => build_bar(series, theme),
+    };
+
+    if let Some(labels) = labels {
+        data = data.x_axis_labels(labels.to_vec());
     }
+
+    data
 }
 
 fn build_line(series: &[model::metric::Series], theme: &Theme) -> hyozu::Data {
@@ -105,7 +116,10 @@ fn build_line(series: &[model::metric::Series], theme: &Theme) -> hyozu::Data {
         })
         .collect();
 
-    let mut data = hyozu::data(marks).x_axis(hyozu::Axis::none).y_axis(hyozu::Axis::none);
+    let muted = theme::muted(theme);
+    let mut data = hyozu::data(marks)
+        .x_axis(|a| muted_axis(a, muted))
+        .y_axis(hyozu::Axis::none);
 
     if series.len() > 1 {
         data = data.legend(hyozu::LegendPosition::Above);
@@ -130,12 +144,24 @@ fn build_bar(series: &[model::metric::Series], theme: &Theme) -> hyozu::Data {
 
     let bars = hyozu::bars(bar_series).data_labels(None);
 
-    let mut data = hyozu::data(bars).x_axis(hyozu::Axis::none).y_axis(hyozu::Axis::none);
+    let muted = theme::muted(theme);
+    let mut data = hyozu::data(bars)
+        .x_axis(|a| muted_axis(a, muted))
+        .y_axis(hyozu::Axis::none);
 
     if series.len() > 1 {
         data = data.legend(hyozu::LegendPosition::Above);
     }
     data
+}
+
+/// X-axis with muted styling — very subtle line and small labels.
+fn muted_axis(axis: hyozu::Axis, color: iced::Color) -> hyozu::Axis {
+    let faint = iced::Color { a: 0.5, ..color };
+    axis.show_grid(false)
+        .with_axis_color(faint)
+        .with_label_color(faint)
+        .with_label_size(8)
 }
 
 fn normalize(data: &[f64]) -> Vec<f64> {
