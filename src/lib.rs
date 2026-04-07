@@ -40,6 +40,7 @@ pub use data::mark::{
     choropleth, choropleth_entry, entry, entry_from_data, gauge, heatmap, line, map_point, pie, rule, tick, treemap,
     violin, violin_entry, violin_from_data, waterfall, xy,
 };
+pub use data::tooltip::{Tooltip, TooltipEntry};
 
 pub use map::Map;
 pub use sparkline::sparkline;

@@ -3,6 +3,7 @@ pub mod axis;
 pub mod datum;
 pub mod legend;
 pub mod mark;
+pub mod tooltip;
 
 pub use area::Area;
 pub use axis::{Axis, Orientation};
@@ -50,6 +51,9 @@ pub struct Data {
 
     /// Optional legend configuration
     pub(crate) legend: Option<legend::Legend>,
+
+    /// Optional tooltip configuration
+    pub(crate) tooltip: Option<tooltip::Tooltip>,
 }
 
 /// Returns the default axis pair for a given mark type.
@@ -115,6 +119,7 @@ impl IntoData for Mark {
             palette: None,
             selection: None,
             legend: None,
+            tooltip: None,
         }
     }
 }
@@ -206,6 +211,7 @@ impl IntoData for Vec<Mark> {
             palette: None,
             selection: None,
             legend: None,
+            tooltip: None,
         }
     }
 }
@@ -346,6 +352,24 @@ impl Data {
     /// ```
     pub fn legend(mut self, legend: impl Into<legend::Legend>) -> Self {
         self.legend = Some(legend.into());
+        self
+    }
+
+    /// Enables tooltips on the chart.
+    ///
+    /// Accepts a `Tooltip` directly or a closure `Fn(&TooltipEntry) -> String`
+    /// thanks to the `From` impl.
+    ///
+    /// # Examples
+    /// ```ignore
+    /// // Default tooltip (name: value)
+    /// data(line("Revenue", [(0, 10)])).tooltip(Tooltip::default())
+    ///
+    /// // Custom format
+    /// data(line("Revenue", [(0, 10)])).tooltip(|e: &TooltipEntry| format!("${:.2}", e.y))
+    /// ```
+    pub fn tooltip(mut self, tooltip: impl Into<tooltip::Tooltip>) -> Self {
+        self.tooltip = Some(tooltip.into());
         self
     }
 

@@ -18,7 +18,7 @@ where
     Message: 'a,
     Renderer: crate::core::text::Renderer + geometry::Renderer,
 {
-    pub(super) data: &'a crate::mark::area::Area,
+    pub(crate) data: &'a crate::mark::area::Area,
     _marker: std::marker::PhantomData<(Message, Renderer)>,
 }
 

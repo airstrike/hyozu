@@ -22,7 +22,7 @@ where
     Message: 'a,
     Renderer: crate::core::text::Renderer + geometry::Renderer,
 {
-    pub(super) data: &'a crate::bar::Bars,
+    pub(crate) data: &'a crate::bar::Bars,
     _marker: std::marker::PhantomData<(Message, Renderer)>,
 }
 

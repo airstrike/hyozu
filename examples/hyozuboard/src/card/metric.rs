@@ -133,7 +133,8 @@ fn build_line(series: &[model::metric::Series], theme: &Theme) -> hyozu::Data {
     let muted = theme::muted(theme);
     let mut data = hyozu::data(marks)
         .x_axis(|a| muted_axis(a, muted))
-        .y_axis(hyozu::Axis::none);
+        .y_axis(hyozu::Axis::none)
+        .tooltip(hyozu::Tooltip::default());
 
     if series.len() > 1 {
         data = data.legend(hyozu::LegendPosition::Above);

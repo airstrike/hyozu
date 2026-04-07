@@ -90,6 +90,17 @@ impl Plane {
 
         crate::core::Point::new(x, y)
     }
+
+    /// Inverse of the x part of `to_pixel`: map a pixel x-coordinate back to
+    /// a data-space x value.
+    pub fn to_data_x(&self, pixel_x: f32) -> f64 {
+        if self.bounds.width == 0.0 {
+            self.x_min
+        } else {
+            let t = (pixel_x - self.bounds.x) / self.bounds.width;
+            self.x_min + (t as f64) * (self.x_max - self.x_min)
+        }
+    }
 }
 
 /// A series that can be rendered in the plot area
@@ -131,7 +142,7 @@ where
     Message: 'a,
     Renderer: text::Renderer + geometry::Renderer,
 {
-    series: Vec<Series<'a, Message, Renderer>>,
+    pub(crate) series: Vec<Series<'a, Message, Renderer>>,
 }
 
 impl<'a, Message, Renderer> PlotArea<'a, Message, Renderer>
@@ -164,6 +175,33 @@ where
             .collect();
 
         Self { series }
+    }
+
+    /// Computes the cumulative palette index for a specific series within
+    /// a mark. Iterates `series[0..mark_idx]` summing their slot counts,
+    /// then adds `series_idx`.
+    pub(crate) fn color_offset_for(&self, mark_idx: usize, series_idx: usize) -> usize {
+        let mut offset: usize = 0;
+        for series in self.series.iter().take(mark_idx) {
+            offset += match series {
+                Series::Area(a) => a.data.series.len(),
+                Series::Bars(bars) => bars.data.series.len(),
+                Series::BoxPlot(bp) => bp.data.entries.len(),
+                Series::Line(_) => 1,
+                Series::Xy(_) => 1,
+                Series::Pie(pie) => pie.data.slices.len(),
+                Series::Gauge(_) => 1,
+                Series::Treemap(tm) => tm.data.items.len(),
+                Series::Waterfall(_) => 3,
+                Series::Heatmap(_) => 0,
+                Series::BubbleMap(bm) => bm.data.points.len(),
+                Series::Choropleth(_) => 0,
+                Series::Violin(v) => v.data.entries.len(),
+                Series::Tick(_) => 0,
+                Series::Rule(_) => 0,
+            };
+        }
+        offset + series_idx
     }
 
     /// Returns the initial tree state for this PlotArea

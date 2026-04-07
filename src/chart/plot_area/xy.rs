@@ -20,7 +20,7 @@ where
     Message: 'a,
     Renderer: text::Renderer + geometry::Renderer,
 {
-    pub(super) data: &'a crate::mark::xy::Xy,
+    pub(crate) data: &'a crate::mark::xy::Xy,
     _marker: std::marker::PhantomData<(Message, Renderer)>,
 }
 

@@ -31,7 +31,7 @@ where
     Message: 'a,
     Renderer: text::Renderer + geometry::Renderer,
 {
-    pub(super) data: &'a crate::line::Line,
+    pub(crate) data: &'a crate::line::Line,
     _marker: std::marker::PhantomData<(Message, Renderer)>,
 }
 

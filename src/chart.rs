@@ -8,7 +8,8 @@ pub mod value;
 use std::borrow::Cow;
 
 use crate::core::widget::{Tree, tree};
-use crate::core::{Element, Event, Layout, Length, Padding, Rectangle, Size, Widget, layout, mouse};
+use crate::core::{Element, Event, Layout, Length, Padding, Point, Rectangle, Size, Widget, layout, mouse};
+use crate::data::tooltip::TooltipEntry;
 use crate::widget::Renderer;
 
 use crate::{Action, Data, design};
@@ -35,6 +36,15 @@ where
 #[derive(Default)]
 struct State {
     is_pressed: bool,
+    hover: Option<HoverState>,
+}
+
+/// Hover state holding the snapped data-x and the matching entries.
+struct HoverState {
+    /// Snapped data-space x coordinate.
+    data_x: f64,
+    /// Matching entries: (mark_index, series_index, point_index).
+    entries: Vec<(usize, usize, usize)>,
 }
 
 /// Creates a chart widget from data.
@@ -121,6 +131,143 @@ where
     }
 }
 
+/// Compute the absolute plot bounds from chart bounds, padding, and plane.
+fn compute_plot_bounds(
+    chart_bounds: Rectangle,
+    padding: Padding,
+    plot_area_offset: Point,
+    plane: &plot_area::Plane,
+) -> Rectangle {
+    Rectangle {
+        x: chart_bounds.x + padding.left + plot_area_offset.x + plane.bounds.x,
+        y: chart_bounds.y + padding.top + plot_area_offset.y + plane.bounds.y,
+        width: plane.bounds.width,
+        height: plane.bounds.height,
+    }
+}
+
+/// Scan the plot area tree for the nearest pixel x, then collect all entries
+/// at that x. Returns `None` if no hoverable points exist or the cursor is
+/// too far from any point.
+fn find_nearest_hover(local: Point, plot_area_tree: &Tree, plane: &plot_area::Plane) -> Option<HoverState> {
+    let line_tag = tree::Tag::of::<plot_area::line::State>();
+    let area_tag = tree::Tag::of::<plot_area::area::State>();
+    let xy_tag = tree::Tag::of::<plot_area::xy::State>();
+    let bars_tag = tree::Tag::of::<plot_area::bars::State>();
+
+    let mut best_dist = f32::INFINITY;
+    let mut best_pixel_x = 0.0f32;
+
+    // Pass 1: find globally nearest pixel_x
+    for child in &plot_area_tree.children {
+        if child.tag == line_tag {
+            let s = child.state.downcast_ref::<plot_area::line::State>();
+            for pt in &s.pixel_points {
+                let d = (pt.x - local.x).abs();
+                if d < best_dist {
+                    best_dist = d;
+                    best_pixel_x = pt.x;
+                }
+            }
+        } else if child.tag == area_tag {
+            let s = child.state.downcast_ref::<plot_area::area::State>();
+            for sub in &s.series_points {
+                for pt in sub {
+                    let d = (pt.x - local.x).abs();
+                    if d < best_dist {
+                        best_dist = d;
+                        best_pixel_x = pt.x;
+                    }
+                }
+            }
+        } else if child.tag == xy_tag {
+            let s = child.state.downcast_ref::<plot_area::xy::State>();
+            for pt in &s.pixel_points {
+                let d = (pt.x - local.x).abs();
+                if d < best_dist {
+                    best_dist = d;
+                    best_pixel_x = pt.x;
+                }
+            }
+        } else if child.tag == bars_tag {
+            let s = child.state.downcast_ref::<plot_area::bars::State>();
+            for rects in &s.series_rects {
+                for rect in rects {
+                    let center_x = rect.x + rect.width / 2.0;
+                    let d = (center_x - local.x).abs();
+                    if d < best_dist {
+                        best_dist = d;
+                        best_pixel_x = center_x;
+                    }
+                }
+            }
+        }
+    }
+
+    if best_dist == f32::INFINITY {
+        return None;
+    }
+
+    // Snap threshold: 30px max distance
+    if best_dist > 30.0 {
+        return None;
+    }
+
+    let data_x = plane.to_data_x(best_pixel_x);
+
+    // Pass 2: collect all entries at that pixel_x (within tolerance)
+    let tolerance = 0.5f32;
+    // Bars need a wider tolerance because bar center x can differ from line pixel x
+    let bar_tolerance = 4.0f32;
+    let mut entries = Vec::new();
+
+    for (mark_idx, child) in plot_area_tree.children.iter().enumerate() {
+        if child.tag == line_tag {
+            let s = child.state.downcast_ref::<plot_area::line::State>();
+            for (pt_idx, pt) in s.pixel_points.iter().enumerate() {
+                if (pt.x - best_pixel_x).abs() <= tolerance {
+                    entries.push((mark_idx, 0, pt_idx));
+                    break; // one entry per line series
+                }
+            }
+        } else if child.tag == area_tag {
+            let s = child.state.downcast_ref::<plot_area::area::State>();
+            for (ser_idx, sub) in s.series_points.iter().enumerate() {
+                for (pt_idx, pt) in sub.iter().enumerate() {
+                    if (pt.x - best_pixel_x).abs() <= tolerance {
+                        entries.push((mark_idx, ser_idx, pt_idx));
+                        break;
+                    }
+                }
+            }
+        } else if child.tag == xy_tag {
+            let s = child.state.downcast_ref::<plot_area::xy::State>();
+            for (pt_idx, pt) in s.pixel_points.iter().enumerate() {
+                if (pt.x - best_pixel_x).abs() <= tolerance {
+                    entries.push((mark_idx, 0, pt_idx));
+                    break;
+                }
+            }
+        } else if child.tag == bars_tag {
+            let s = child.state.downcast_ref::<plot_area::bars::State>();
+            for (ser_idx, rects) in s.series_rects.iter().enumerate() {
+                for (bar_idx, rect) in rects.iter().enumerate() {
+                    let center_x = rect.x + rect.width / 2.0;
+                    if (center_x - best_pixel_x).abs() <= bar_tolerance {
+                        entries.push((mark_idx, ser_idx, bar_idx));
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    if entries.is_empty() {
+        return None;
+    }
+    Some(HoverState { data_x, entries })
+}
+
 impl<'a, Message, Design, Theme> Widget<Message, Theme, Renderer> for Chart<'a, Message, Design, Theme>
 where
     Design: design::Design + Clone + 'a,
@@ -189,37 +336,66 @@ where
             return;
         }
 
-        let Some(on_action) = &self.on_action else {
-            return;
-        };
-
         let state = tree.state.downcast_mut::<State>();
+        let has_tooltip = self.scene.has_tooltip();
+        let has_action = self.on_action.is_some();
+
+        if !has_tooltip && !has_action {
+            return;
+        }
 
         // Compute absolute plot area bounds from the layout tree.
-        // layout = chart widget (absolute), child[0] = scene (padded),
-        // scene's plot_area_offset gives the position within the scene.
         let chart_bounds = layout.bounds();
         let plot_area_offset = self.scene.plot_area_offset();
         let scene_tree = &tree.children[0];
         let plot_area_state = scene_tree.children[6].state.downcast_ref::<plot_area::State>();
-        let plot_bounds = match &plot_area_state.plane {
-            Some(plane) => Rectangle {
-                x: chart_bounds.x + self.padding.left + plot_area_offset.x + plane.bounds.x,
-                y: chart_bounds.y + self.padding.top + plot_area_offset.y + plane.bounds.y,
-                width: plane.bounds.width,
-                height: plane.bounds.height,
-            },
-            None => return,
+        let Some(plane) = &plot_area_state.plane else {
+            return;
         };
+        let plot_bounds = compute_plot_bounds(chart_bounds, self.padding, plot_area_offset, plane);
 
         match event {
-            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+            // === HOVER HANDLING ===
+            Event::Mouse(mouse::Event::CursorMoved { .. }) if has_tooltip => match cursor.position_in(plot_bounds) {
+                Some(local) => {
+                    let plot_area_tree = &scene_tree.children[6];
+                    let new_hover = find_nearest_hover(Point::new(local.x, local.y), plot_area_tree, plane);
+
+                    let changed = match (&state.hover, &new_hover) {
+                        (Some(old), Some(new_h)) => (old.data_x - new_h.data_x).abs() > f64::EPSILON,
+                        (None, Some(_)) | (Some(_), None) => true,
+                        (None, None) => false,
+                    };
+
+                    state.hover = new_hover;
+                    if changed {
+                        shell.request_redraw();
+                    }
+                }
+                None => {
+                    if state.hover.is_some() {
+                        state.hover = None;
+                        shell.request_redraw();
+                    }
+                }
+            },
+            Event::Mouse(mouse::Event::CursorLeft) if has_tooltip => {
+                if state.hover.is_some() {
+                    state.hover = None;
+                    shell.request_redraw();
+                }
+            }
+
+            // === CLICK HANDLING ===
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) if has_action => {
                 if cursor.is_over(plot_bounds) {
                     state.is_pressed = true;
                     shell.capture_event();
                 }
             }
-            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) if has_action => {
+                let on_action = self.on_action.as_ref().unwrap();
+
                 if state.is_pressed {
                     state.is_pressed = false;
                     shell.capture_event();
@@ -231,7 +407,7 @@ where
                         return;
                     };
 
-                    let local = crate::core::Point::new(local.x, local.y);
+                    let local = Point::new(local.x, local.y);
 
                     // Hit-test against bar/pie elements in the tree
                     let plot_area_tree = &scene_tree.children[6];
@@ -408,6 +584,53 @@ where
             cursor,
             viewport,
         );
+
+        // Draw tooltip overlay
+        let state = tree.state.downcast_ref::<State>();
+        if let Some(hover) = &state.hover
+            && let Some(tooltip_config) = self.scene.tooltip()
+        {
+            let scene_tree = &tree.children[0];
+            let plot_area_state = scene_tree.children[6].state.downcast_ref::<plot_area::State>();
+            if let Some(plane) = &plot_area_state.plane {
+                draw_tooltip_overlay(
+                    renderer,
+                    design,
+                    layout.bounds(),
+                    self.padding,
+                    self.scene.plot_area_offset(),
+                    plane,
+                    hover,
+                    tooltip_config,
+                    &self.scene,
+                    scene_tree,
+                    viewport,
+                );
+            }
+        }
+    }
+
+    fn mouse_interaction(
+        &self,
+        tree: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        _viewport: &Rectangle,
+        _renderer: &Renderer,
+    ) -> mouse::Interaction {
+        if self.scene.has_tooltip() {
+            let chart_bounds = layout.bounds();
+            let plot_area_offset = self.scene.plot_area_offset();
+            let scene_tree = &tree.children[0];
+            let plot_area_state = scene_tree.children[6].state.downcast_ref::<plot_area::State>();
+            if let Some(plane) = &plot_area_state.plane {
+                let plot_bounds = compute_plot_bounds(chart_bounds, self.padding, plot_area_offset, plane);
+                if cursor.is_over(plot_bounds) {
+                    return mouse::Interaction::Crosshair;
+                }
+            }
+        }
+        mouse::Interaction::None
     }
 }
 
@@ -436,6 +659,294 @@ pub fn draw_background(renderer: &mut Renderer, style: &Style, bounds: Rectangle
             style.background.unwrap_or(crate::core::Color::TRANSPARENT),
         );
     }
+}
+
+/// Draws the tooltip overlay (tracking line, markers, tooltip box).
+///
+/// Wrapped in `renderer.with_layer()` so the entire overlay composites
+/// above chart content (lines, bars, axes, etc.).
+#[allow(clippy::too_many_arguments, clippy::unit_arg)]
+fn draw_tooltip_overlay<Message>(
+    renderer: &mut Renderer,
+    design: &dyn design::Design,
+    chart_bounds: Rectangle,
+    padding: Padding,
+    plot_area_offset: Point,
+    plane: &plot_area::Plane,
+    hover: &HoverState,
+    tooltip_config: &crate::data::tooltip::Tooltip,
+    scene: &scene::Scene<'_, Message, Renderer>,
+    scene_tree: &Tree,
+    viewport: &Rectangle,
+) {
+    use crate::core::renderer::Renderer as _;
+    use crate::core::text::Renderer as _;
+    use crate::widget::canvas::{Frame, Path, Stroke};
+    use crate::widget::renderer::geometry;
+
+    let plot_bounds = compute_plot_bounds(chart_bounds, padding, plot_area_offset, plane);
+    let plot_area = scene.plot_area();
+    let plot_area_tree = &scene_tree.children[6];
+
+    let background = design.background_color();
+    let text_pair = design.text_pair();
+    let text_color = design.text_color().resolve(background, text_pair, None);
+    let palette = scene.resolve_palette(design);
+
+    // Compute the tracking pixel x from data_x
+    let tracking_pixel_x = {
+        let t = if plane.x_max > plane.x_min {
+            ((hover.data_x - plane.x_min) / (plane.x_max - plane.x_min)) as f32
+        } else {
+            0.5
+        };
+        plane.bounds.x + t * plane.bounds.width
+    };
+
+    // Build tooltip entries and collect pixel positions
+    let line_tag = tree::Tag::of::<plot_area::line::State>();
+    let area_tag = tree::Tag::of::<plot_area::area::State>();
+    let xy_tag = tree::Tag::of::<plot_area::xy::State>();
+    let bars_tag = tree::Tag::of::<plot_area::bars::State>();
+
+    let mut entries: Vec<(TooltipEntry, Point, crate::core::Color)> = Vec::new();
+
+    for &(mark_idx, series_idx, pt_idx) in &hover.entries {
+        let series = &plot_area.series[mark_idx];
+        let child = &plot_area_tree.children[mark_idx];
+
+        let (datum, name, explicit_color) = if child.tag == line_tag {
+            if let plot_area::Series::Line(line) = series {
+                let pt = &line.data.points[pt_idx];
+                (
+                    crate::data::Datum { x: pt.x, y: pt.y },
+                    line.data.name().map(|s| s.to_string()),
+                    line.data.color,
+                )
+            } else {
+                continue;
+            }
+        } else if child.tag == area_tag {
+            if let plot_area::Series::Area(area) = series {
+                let ser = &area.data.series[series_idx];
+                let pt = &ser.points[pt_idx];
+                (
+                    crate::data::Datum { x: pt.x, y: pt.y },
+                    ser.name().map(|s| s.to_string()),
+                    ser.color,
+                )
+            } else {
+                continue;
+            }
+        } else if child.tag == xy_tag {
+            if let plot_area::Series::Xy(xy) = series {
+                let pt = &xy.data.points[pt_idx];
+                (
+                    crate::data::Datum { x: pt.x, y: pt.y },
+                    xy.data.name.as_deref().map(|s| s.to_string()),
+                    None,
+                )
+            } else {
+                continue;
+            }
+        } else if child.tag == bars_tag {
+            if let plot_area::Series::Bars(bars) = series {
+                let bar_series = &bars.data.series[series_idx];
+                let pt = &bar_series.points[pt_idx];
+                (
+                    crate::data::Datum { x: pt.x, y: pt.y },
+                    bar_series.name().map(|s| s.to_string()),
+                    bar_series.color().cloned(),
+                )
+            } else {
+                continue;
+            }
+        } else {
+            continue;
+        };
+
+        let pixel = plane.to_pixel(datum);
+
+        // Resolve series color: use explicit mark color if set, else palette
+        let series_color = if let Some(c) = explicit_color {
+            c.resolve(background, text_pair, None)
+        } else {
+            let color_idx = plot_area.color_offset_for(mark_idx, series_idx);
+            palette.get(color_idx).resolve(background, text_pair, None)
+        };
+
+        entries.push((
+            TooltipEntry {
+                x: datum.x,
+                y: datum.y,
+                series_name: name,
+                series_index: series_idx,
+                mark_index: mark_idx,
+                color: series_color,
+            },
+            pixel,
+            series_color,
+        ));
+    }
+
+    if entries.is_empty() {
+        return;
+    }
+
+    // Wrap everything in a layer so it composites above chart content
+    renderer.with_layer(*viewport, |renderer| {
+        // --- Draw tracking line and markers via canvas Frame ---
+        let frame_size = crate::core::Size::new(plane.bounds.width, plane.bounds.height);
+        let mut frame = Frame::new(renderer, frame_size);
+
+        // Tracking line — muted and dashed
+        if tooltip_config.tracking_line {
+            let line_x = tracking_pixel_x - plane.bounds.x;
+            let tracking_color = crate::core::Color { a: 0.18, ..text_color };
+            let path = Path::line(Point::new(line_x, 0.0), Point::new(line_x, plane.bounds.height));
+            let dash_pattern: [f32; 2] = [4.0, 3.0];
+            let stroke = Stroke {
+                line_dash: crate::widget::canvas::LineDash {
+                    segments: &dash_pattern,
+                    offset: 0,
+                },
+                ..Stroke::default().with_width(1.0).with_color(tracking_color)
+            };
+            frame.stroke(&path, stroke);
+        }
+
+        // Markers
+        if tooltip_config.markers {
+            for (_, pixel, series_color) in &entries {
+                let cx = pixel.x - plane.bounds.x;
+                let cy = pixel.y - plane.bounds.y;
+                let radius = 4.0;
+
+                let circle = Path::circle(Point::new(cx, cy), radius);
+                frame.fill(&circle, *series_color);
+
+                let ring = Path::circle(Point::new(cx, cy), radius);
+                frame.stroke(
+                    &ring,
+                    Stroke::default().with_width(1.5).with_color(crate::core::Color::WHITE),
+                );
+            }
+        }
+
+        renderer.with_translation(crate::core::Vector::new(plot_bounds.x, plot_bounds.y), |renderer| {
+            geometry::Renderer::draw_geometry(renderer, frame.into_geometry());
+        });
+
+        // --- Draw tooltip box using renderer fill_quad/fill_text ---
+        let font = renderer.default_font();
+        let font_size: f32 = 12.0;
+        let line_height_px: f32 = 18.0;
+        let swatch_size: f32 = 8.0;
+        let swatch_gap: f32 = 6.0;
+        let box_padding: f32 = 8.0;
+        let box_gap: f32 = 8.0;
+
+        let formatted: Vec<String> = entries
+            .iter()
+            .map(|(entry, _, _)| (tooltip_config.format)(entry))
+            .collect();
+
+        let char_width = font_size * 0.58;
+        let max_text_width: f32 = formatted
+            .iter()
+            .map(|s| s.len() as f32 * char_width)
+            .fold(0.0f32, f32::max);
+
+        let box_width = box_padding * 2.0 + swatch_size + swatch_gap + max_text_width;
+        let box_height = box_padding * 2.0 + entries.len() as f32 * line_height_px;
+
+        // Position tooltip box: right of tracking line if in left half, else left
+        let half_x = plot_bounds.x + plane.bounds.width / 2.0;
+        let abs_tracking_x = plot_bounds.x + tracking_pixel_x - plane.bounds.x;
+        let box_x = if abs_tracking_x < half_x {
+            abs_tracking_x + box_gap
+        } else {
+            abs_tracking_x - box_width - box_gap
+        };
+
+        // Vertically center on mean y of entries, clamped within chart bounds
+        let mean_y: f32 = entries.iter().map(|(_, pt, _)| pt.y).sum::<f32>() / entries.len() as f32;
+        let abs_mean_y = plot_bounds.y + mean_y - plane.bounds.y;
+        let box_y = (abs_mean_y - box_height / 2.0)
+            .max(chart_bounds.y + 2.0)
+            .min(chart_bounds.y + chart_bounds.height - box_height - 2.0);
+
+        // Tooltip background — opaque by default (ensures readability on transparent charts)
+        let tooltip_bg = crate::core::Color { a: 1.0, ..background };
+        let divider_color = design.divider_color().resolve(background, text_pair, None);
+
+        renderer.fill_quad(
+            crate::core::renderer::Quad {
+                bounds: Rectangle {
+                    x: box_x,
+                    y: box_y,
+                    width: box_width,
+                    height: box_height,
+                },
+                border: crate::core::Border {
+                    width: 1.0,
+                    radius: 4.0.into(),
+                    color: divider_color,
+                },
+                ..Default::default()
+            },
+            tooltip_bg,
+        );
+
+        // Draw each entry line
+        for (i, ((_entry, _pixel, series_color), text)) in entries.iter().zip(formatted.iter()).enumerate() {
+            let row_y = box_y + box_padding + i as f32 * line_height_px;
+
+            // Colored swatch circle
+            let swatch_y = row_y + (line_height_px - swatch_size) / 2.0;
+            renderer.fill_quad(
+                crate::core::renderer::Quad {
+                    bounds: Rectangle {
+                        x: box_x + box_padding,
+                        y: swatch_y,
+                        width: swatch_size,
+                        height: swatch_size,
+                    },
+                    border: crate::core::Border {
+                        radius: (swatch_size / 2.0).into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                *series_color,
+            );
+
+            // Text label
+            let text_x = box_x + box_padding + swatch_size + swatch_gap;
+            renderer.fill_text(
+                crate::core::text::Text {
+                    content: text.clone(),
+                    bounds: Size::new(max_text_width + 10.0, line_height_px),
+                    size: font_size.into(),
+                    font,
+                    align_x: crate::core::alignment::Horizontal::Left.into(),
+                    align_y: crate::core::alignment::Vertical::Top,
+                    line_height: crate::core::text::LineHeight::default(),
+                    shaping: crate::core::text::Shaping::Basic,
+                    wrapping: crate::core::text::Wrapping::None,
+                    ellipsis: crate::core::text::Ellipsis::default(),
+                    hint_factor: renderer.scale_factor(),
+                    font_features: Vec::new(),
+                    font_variations: Vec::new(),
+                    letter_spacing: Default::default(),
+                    weight: None,
+                },
+                Point::new(text_x, row_y + (line_height_px - font_size) / 2.0),
+                text_color,
+                *viewport,
+            );
+        }
+    });
 }
 
 /// The appearance of a chart.

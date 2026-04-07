@@ -28,14 +28,33 @@ impl Ord for OrderedFloat {
     }
 }
 
-/// Default label formatting function
-fn default_format(value: f64) -> String {
-    // For integers, show without decimal point
-    if value.fract() == 0.0 {
-        format!("{:.0}", value)
-    } else {
-        format!("{}", value)
+/// Format a tick value with an explicit decimal precision derived from
+/// the tick step size. This is the D3-style approach: if the step is 0.2
+/// we need 1 decimal place; if 0.05, 2 places; if 5, 0 places.
+fn default_format_with_precision(value: f64, precision: Option<usize>) -> String {
+    match precision {
+        Some(p) => format!("{:.prec$}", value, prec = p),
+        None => {
+            // Fallback: guess from the value itself
+            if value == 0.0 || (value.round() - value).abs() < 1e-9 {
+                format!("{:.0}", value)
+            } else {
+                // Show enough decimals to be meaningful, but not floating-point garbage
+                let s = format!("{:.10}", value);
+                s.trim_end_matches('0').trim_end_matches('.').to_string()
+            }
+        }
     }
+}
+
+/// Compute the number of decimal places needed to cleanly display a
+/// given tick step. E.g. step=0.2 → 1, step=0.05 → 2, step=5 → 0.
+fn precision_for_step(step: f64) -> usize {
+    if step <= 0.0 || !step.is_finite() {
+        return 1;
+    }
+    let p = (-step.log10()).ceil() as i32;
+    p.max(0) as usize
 }
 
 /// Compute a nice step size for a given range and target tick count
@@ -409,7 +428,7 @@ where
 
         let (axis_min, axis_max) = (bounds.min(), bounds.max());
 
-        let data_positions = if is_categorical {
+        let (data_positions, nice_step) = if is_categorical {
             // Categorical: collect unique X positions from data
             use std::collections::BTreeSet;
             let mut values: BTreeSet<OrderedFloat> = BTreeSet::new();
@@ -472,17 +491,21 @@ where
                 }
             }
 
-            values.into_iter().map(|OrderedFloat(v)| v).collect()
+            (values.into_iter().map(|OrderedFloat(v)| v).collect(), None)
         } else {
             // Continuous: generate nice ticks WITHIN the bounds
             // Use time-aligned ticks for time-based axes
             let alignment = self.axis.ticks.alignment;
             if self.axis.kind() == Kind::Time {
-                nice_time_ticks(axis_min, axis_max, 6, alignment)
+                (nice_time_ticks(axis_min, axis_max, 6, alignment), None)
             } else {
-                self.nice_ticks(axis_min, axis_max, 6, alignment)
+                let (ticks, step) = self.nice_ticks(axis_min, axis_max, 6, alignment);
+                (ticks, Some(step))
             }
         };
+
+        // Derive format precision from the tick step (D3-style)
+        let step_precision = nice_step.map(precision_for_step);
 
         // For time axes, get the interval for smart formatting
         let time_interval = if self.axis.kind() == Kind::Time {
@@ -509,26 +532,23 @@ where
             Frequency::Custom(custom) => custom.clone(),
         };
 
-        // Create label formatting function based on Labels configuration
+        // Create label formatting function based on Labels configuration.
+        // When no custom format is provided, use step-derived precision
+        // so that floating-point noise is hidden (e.g. 0.6 not 0.600000001).
         let format_label = |pos: f64| -> String {
             if let Some(ref labels) = self.axis.labels.values {
-                // Custom categorical labels
                 let index = pos.round() as usize;
                 if index < labels.len() {
                     labels[index].clone()
                 } else {
-                    // Fallback if index out of bounds
-                    default_format(pos)
+                    default_format_with_precision(pos, step_precision)
                 }
             } else if let Some(ref format_fn) = self.axis.labels.format {
-                // Use the provided format function
                 format_fn(pos)
             } else if let Some(interval) = time_interval {
-                // Smart time formatting based on interval scale
                 interval.format(pos as i64)
             } else {
-                // Auto-generate labels
-                default_format(pos)
+                default_format_with_precision(pos, step_precision)
             }
         };
 
@@ -860,11 +880,14 @@ where
         }
     }
 
-    /// Generate nice tick positions within [min, max]
-    /// Bounds are assumed to already be nice (from compute_axis_bounds)
-    fn nice_ticks(&self, min: f64, max: f64, target_count: usize, alignment: Alignment) -> Vec<f64> {
+    /// Generate nice tick positions within [min, max].
+    ///
+    /// Returns (ticks, step) so callers can derive format precision from the step.
+    /// Uses multiplication-based positioning (`start + i * step`) instead of
+    /// repeated addition to avoid floating-point error accumulation.
+    fn nice_ticks(&self, min: f64, max: f64, target_count: usize, alignment: Alignment) -> (Vec<f64>, f64) {
         if min >= max {
-            return vec![min];
+            return (vec![min], 0.0);
         }
 
         let range = max - min;
@@ -873,35 +896,24 @@ where
         let mut ticks = Vec::new();
 
         match alignment {
-            Alignment::Auto => {
-                // Generate ticks starting from min, stepping by nice_step
-                // Since bounds are already nice, ticks should align
-                let mut value = min;
-                while value <= max + nice_step * 0.001 {
-                    ticks.push(value);
-                    value += nice_step;
-                }
-            }
-            Alignment::SnapToStart => {
-                // Start exactly at min
-                let mut value = min;
-                while value <= max + nice_step * 0.001 {
-                    ticks.push(value);
-                    value += nice_step;
+            Alignment::Auto | Alignment::SnapToStart => {
+                // Use multiplication from the starting value to avoid
+                // floating-point drift: start + i * step
+                let n = ((max - min) / nice_step + 0.001).floor() as usize + 1;
+                for i in 0..n {
+                    ticks.push(min + i as f64 * nice_step);
                 }
             }
             Alignment::SnapToEnd => {
-                // Work backward from max
-                let mut value = max;
-                while value >= min - nice_step * 0.001 {
-                    ticks.push(value);
-                    value -= nice_step;
+                // Work backward from max using multiplication
+                let n = ((max - min) / nice_step + 0.001).floor() as usize + 1;
+                for i in (0..n).rev() {
+                    ticks.push(max - i as f64 * nice_step);
                 }
-                ticks.reverse();
             }
         }
 
-        ticks
+        (ticks, nice_step)
     }
 
     /// Returns the initial tree state for this Guide

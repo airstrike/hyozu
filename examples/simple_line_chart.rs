@@ -1,7 +1,7 @@
 use iced::Task;
 use iced::widget::center;
 
-use hyozu::{chart, data, line};
+use hyozu::{Tooltip, chart, data, line};
 
 pub fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
@@ -30,7 +30,8 @@ impl App {
                 line(std::array::from_fn::<usize, 10, _>(|i| (i * 7) % 13))
                     .data_labels(Position::Auto + Show::FirstAndLast),
             )
-            .title("Temperature Over Time"),
+            .title("Temperature Over Time")
+            .tooltip(Tooltip::default()),
         }
     }
 

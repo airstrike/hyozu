@@ -30,6 +30,8 @@ where
     plot_area_offset: crate::core::Point,
     /// Current selection (borrowed from Data).
     selection: &'a Option<crate::target::Target>,
+    /// Optional tooltip configuration (borrowed from Data).
+    tooltip: Option<&'a crate::data::tooltip::Tooltip>,
 }
 
 impl<'a, Message, Renderer> Scene<'a, Message, Renderer>
@@ -207,12 +209,34 @@ where
             color_slots,
             plot_area_offset: crate::core::Point::ORIGIN,
             selection: &data.selection,
+            tooltip: data.tooltip.as_ref(),
         }
     }
 
     /// Returns the plot area offset within the scene (stored during layout).
     pub(crate) fn plot_area_offset(&self) -> crate::core::Point {
         self.plot_area_offset
+    }
+
+    /// Returns whether a tooltip is configured.
+    pub(crate) fn has_tooltip(&self) -> bool {
+        self.tooltip.is_some()
+    }
+
+    /// Returns the tooltip configuration, if any.
+    pub(crate) fn tooltip(&self) -> Option<&'a crate::data::tooltip::Tooltip> {
+        self.tooltip
+    }
+
+    /// Returns a reference to the plot area.
+    pub(crate) fn plot_area(&self) -> &PlotArea<'a, Message, Renderer> {
+        &self.plot_area
+    }
+
+    /// Resolves the palette using the given design.
+    pub(crate) fn resolve_palette(&self, design: &dyn crate::design::Design) -> palette::Resolved {
+        let seed = design.palette_seed();
+        palette::Resolved::resolve(&self.palette, &seed, self.color_slots)
     }
 
     /// Layout the scene with proper tree delegation to 7 pieces.
