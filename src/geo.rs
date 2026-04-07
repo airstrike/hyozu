@@ -1,909 +1,999 @@
-//! Simplified world map geometry for bubble-map background rendering.
+//! Geographic data model and (optional) GeoJSON parsing.
 //!
-//! Each polygon is a closed ring of `(longitude, latitude)` pairs.
-//! Outlines are coarse (~500 total vertices) but recognizable at
-//! dashboard thumbnail sizes.
+//! Coordinates are stored as `(lon, lat)` matching the GeoJSON spec.
+//! Users who need `(lat, lon)` order (common in mapping APIs) should
+//! convert at the boundary.
 
-/// A single polygon ring: `&[(lon, lat)]`.
-pub type Polygon = &'static [(f32, f32)];
+use std::collections::HashMap;
 
-/// Returns all land-mass polygon rings.
-pub fn world_polygons() -> &'static [Polygon] {
-    POLYGONS
+// ── Core types ─────────────────────────────────────────────────────
+
+/// Axis-aligned bounding box in geographic coordinates.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GeoBounds {
+    pub min_lon: f32,
+    pub min_lat: f32,
+    pub max_lon: f32,
+    pub max_lat: f32,
 }
 
-static POLYGONS: &[Polygon] = &[
-    NORTH_AMERICA,
-    CENTRAL_AMERICA,
-    SOUTH_AMERICA,
-    EUROPE,
-    AFRICA,
-    MIDDLE_EAST,
-    SOUTH_ASIA,
-    EAST_ASIA,
-    SOUTHEAST_ASIA,
-    AUSTRALIA,
-    JAPAN,
-    GREAT_BRITAIN,
-    IRELAND,
-    ICELAND,
-    SCANDINAVIA,
-    INDONESIA_JAVA,
-    INDONESIA_SUMATRA,
-    INDONESIA_BORNEO,
-    NEW_ZEALAND_NORTH,
-    NEW_ZEALAND_SOUTH,
-    MADAGASCAR,
-    SRI_LANKA,
-    GREENLAND,
-    ITALY,
-];
+impl GeoBounds {
+    pub fn new(min_lon: f32, min_lat: f32, max_lon: f32, max_lat: f32) -> Self {
+        Self {
+            min_lon,
+            min_lat,
+            max_lon,
+            max_lat,
+        }
+    }
 
-// ── North America ──────────────────────────────────────────────────
+    pub fn contains(&self, lon: f32, lat: f32) -> bool {
+        lon >= self.min_lon && lon <= self.max_lon && lat >= self.min_lat && lat <= self.max_lat
+    }
 
-static NORTH_AMERICA: &[(f32, f32)] = &[
-    // Alaska west
-    (-168.0, 65.0),
-    (-166.0, 61.0),
-    (-163.0, 60.0),
-    (-157.0, 58.0),
-    (-152.0, 60.0),
-    (-148.0, 61.0),
-    (-141.0, 60.0),
-    // Pacific coast
-    (-137.0, 58.5),
-    (-135.0, 57.0),
-    (-131.0, 55.0),
-    (-128.0, 51.0),
-    (-125.0, 48.5),
-    (-124.0, 46.0),
-    (-124.0, 42.0),
-    (-120.0, 35.0),
-    (-117.5, 33.0),
-    // Baja & Mexico Pacific
-    (-117.0, 32.5),
-    (-115.0, 30.0),
-    (-112.0, 28.0),
-    (-110.0, 24.0),
-    (-106.0, 23.0),
-    (-105.0, 20.0),
-    // Gulf coast
-    (-97.0, 26.0),
-    (-97.0, 28.0),
-    (-94.0, 29.5),
-    (-90.0, 29.0),
-    (-89.0, 30.0),
-    (-85.0, 30.0),
-    (-82.0, 25.0),
-    // Florida east / Atlantic
-    (-80.0, 25.0),
-    (-80.5, 28.0),
-    (-81.0, 31.0),
-    (-78.0, 34.0),
-    (-75.5, 36.0),
-    (-74.0, 39.0),
-    (-72.0, 41.0),
-    (-70.0, 42.0),
-    (-67.0, 44.5),
-    (-66.0, 44.5),
-    // Maritime Canada
-    (-64.0, 45.5),
-    (-61.0, 46.5),
-    (-60.0, 47.0),
-    (-56.0, 47.5),
-    (-55.0, 49.0),
-    (-57.0, 51.5),
-    (-60.0, 53.5),
-    // Labrador
-    (-64.0, 55.0),
-    (-63.0, 58.0),
-    (-65.0, 60.0),
-    (-69.0, 61.0),
-    // Hudson Bay east
-    (-78.0, 62.0),
-    (-80.0, 60.0),
-    (-82.0, 56.0),
-    (-88.0, 52.0),
-    (-90.0, 52.5),
-    (-95.0, 56.0),
-    (-94.0, 60.0),
-    (-92.0, 62.0),
-    // Arctic
-    (-88.0, 65.0),
-    (-85.0, 67.0),
-    (-90.0, 70.0),
-    (-100.0, 72.0),
-    (-115.0, 72.0),
-    (-128.0, 71.0),
-    (-140.0, 70.0),
-    // Back to Alaska
-    (-150.0, 71.0),
-    (-157.0, 71.5),
-    (-163.0, 70.0),
-    (-168.0, 65.0),
-];
+    pub fn extend(&mut self, lon: f32, lat: f32) {
+        self.min_lon = self.min_lon.min(lon);
+        self.min_lat = self.min_lat.min(lat);
+        self.max_lon = self.max_lon.max(lon);
+        self.max_lat = self.max_lat.max(lat);
+    }
 
-// ── Central America ────────────────────────────────────────────────
+    pub fn intersects(&self, other: &GeoBounds) -> bool {
+        self.min_lon <= other.max_lon
+            && self.max_lon >= other.min_lon
+            && self.min_lat <= other.max_lat
+            && self.max_lat >= other.min_lat
+    }
+}
 
-static CENTRAL_AMERICA: &[(f32, f32)] = &[
-    (-92.0, 18.0),
-    (-87.0, 16.0),
-    (-84.0, 15.0),
-    (-83.0, 14.5),
-    (-83.5, 11.0),
-    (-82.5, 9.0),
-    (-80.0, 8.0),
-    (-78.0, 9.0),
-    (-77.5, 8.0),
-    (-80.0, 7.0),
-    (-83.0, 8.5),
-    (-85.5, 11.0),
-    (-87.5, 13.0),
-    (-90.0, 14.0),
-    (-92.0, 15.0),
-    (-92.0, 18.0),
-];
+/// Predefined map scopes with associated bounding boxes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MapScope {
+    World,
+    NorthAmerica,
+    UnitedStates,
+    Europe,
+    LatinAmerica,
+    Asia,
+    Africa,
+    Custom(GeoBounds),
+}
 
-// ── South America ──────────────────────────────────────────────────
+impl MapScope {
+    pub fn bounds(self) -> GeoBounds {
+        match self {
+            Self::World => GeoBounds::new(-180.0, -60.0, 180.0, 85.0),
+            Self::NorthAmerica => GeoBounds::new(-170.0, 7.0, -50.0, 84.0),
+            Self::UnitedStates => GeoBounds::new(-125.0, 24.0, -66.0, 50.0),
+            Self::Europe => GeoBounds::new(-25.0, 34.0, 45.0, 72.0),
+            Self::LatinAmerica => GeoBounds::new(-120.0, -56.0, -34.0, 33.0),
+            Self::Asia => GeoBounds::new(25.0, -15.0, 180.0, 55.0),
+            Self::Africa => GeoBounds::new(-20.0, -36.0, 55.0, 38.0),
+            Self::Custom(bounds) => bounds,
+        }
+    }
+}
 
-static SOUTH_AMERICA: &[(f32, f32)] = &[
-    // North coast
-    (-77.0, 8.5),
-    (-73.0, 11.5),
-    (-71.0, 12.0),
-    (-67.0, 10.5),
-    (-63.0, 10.5),
-    (-60.0, 8.5),
-    (-57.0, 6.0),
-    (-52.0, 4.0),
-    (-50.0, 2.0),
-    // Brazil east coast
-    (-48.0, -1.0),
-    (-44.0, -2.5),
-    (-41.0, -3.0),
-    (-38.5, -4.0),
-    (-35.0, -7.0),
-    (-35.0, -10.0),
-    (-37.0, -12.5),
-    (-39.0, -15.0),
-    (-40.0, -20.0),
-    (-41.5, -22.0),
-    (-44.0, -23.0),
-    (-48.0, -25.5),
-    (-48.5, -28.5),
-    // Southern cone
-    (-51.0, -31.0),
-    (-53.0, -33.0),
-    (-56.5, -35.0),
-    (-58.5, -35.0),
-    (-58.0, -38.0),
-    (-63.0, -39.0),
-    (-65.0, -41.0),
-    (-65.5, -43.0),
-    (-67.0, -45.0),
-    (-66.0, -48.0),
-    (-68.0, -50.0),
-    (-69.5, -52.0),
-    (-68.5, -54.5),
-    (-66.0, -55.0),
-    // Tierra del Fuego → Pacific
-    (-72.0, -52.0),
-    (-74.0, -49.0),
-    (-75.0, -46.0),
-    (-74.5, -42.0),
-    (-73.0, -38.0),
-    (-72.0, -34.0),
-    (-71.0, -30.0),
-    (-70.0, -24.0),
-    (-70.5, -18.5),
-    (-75.0, -15.0),
-    (-76.0, -12.0),
-    (-78.0, -6.0),
-    (-80.0, -3.0),
-    (-80.0, 0.0),
-    (-78.0, 2.0),
-    (-77.5, 5.0),
-    (-77.0, 8.5),
-];
+/// A single geographic feature with one or more polygon rings.
+#[derive(Debug, Clone)]
+pub struct GeoFeature {
+    pub id: String,
+    pub name: String,
+    pub polygons: Vec<Vec<(f32, f32)>>,
+    pub properties: HashMap<String, String>,
+}
 
-// ── Europe ─────────────────────────────────────────────────────────
+impl GeoFeature {
+    /// Computes the bounding box of all polygon vertices.
+    pub fn bounds(&self) -> Option<GeoBounds> {
+        let mut iter = self.polygons.iter().flat_map(|ring| ring.iter().copied());
+        let (lon, lat) = iter.next()?;
+        let mut bounds = GeoBounds::new(lon, lat, lon, lat);
+        for (lon, lat) in iter {
+            bounds.extend(lon, lat);
+        }
+        Some(bounds)
+    }
+}
 
-static EUROPE: &[(f32, f32)] = &[
-    // Iberia
-    (-9.5, 37.0),
-    (-9.0, 39.0),
-    (-8.0, 43.5),
-    (-4.0, 43.5),
-    (-2.0, 43.5),
-    // France Atlantic
-    (-1.5, 46.0),
-    (-2.5, 48.0),
-    (-5.0, 48.5),
-    (-2.0, 49.0),
-    (1.5, 51.0),
-    // Low Countries / Germany
-    (3.5, 51.5),
-    (5.0, 53.0),
-    (7.0, 54.0),
-    (9.5, 54.8),
-    (10.0, 56.0),
-    (12.5, 56.0),
-    // Baltic
-    (13.0, 54.5),
-    (14.5, 54.0),
-    (18.5, 55.0),
-    (20.0, 54.5),
-    (21.0, 56.0),
-    (24.0, 57.0),
-    (24.0, 59.0),
-    (28.0, 59.5),
-    // Finland / Russia NW
-    (30.0, 60.0),
-    (28.0, 61.0),
-    (25.0, 65.0),
-    (27.0, 70.0),
-    (30.0, 70.5),
-    // Kola → Archangel
-    (40.0, 69.0),
-    (45.0, 68.5),
-    (58.0, 68.0),
-    (60.0, 66.0),
-    // Ural border
-    (60.0, 60.0),
-    (56.0, 55.0),
-    (52.0, 52.0),
-    (50.0, 51.0),
-    (46.0, 49.0),
-    (40.0, 47.0),
-    (38.0, 46.0),
-    // Black Sea north
-    (36.0, 46.0),
-    (34.0, 45.5),
-    (30.0, 46.5),
-    (28.5, 45.5),
-    // Balkans / Med
-    (29.5, 44.0),
-    (28.0, 43.5),
-    (26.5, 41.5),
-    (24.0, 40.0),
-    (23.5, 38.0),
-    (22.0, 37.0),
-    (20.0, 39.5),
-    (19.5, 42.0),
-    (17.0, 43.0),
-    (15.5, 42.0),
-    (14.0, 45.0),
-    (13.5, 46.0),
-    // Alps
-    (10.0, 47.0),
-    (7.0, 46.0),
-    (6.0, 44.0),
-    (3.0, 43.0),
-    // Mediterranean Spain
-    (0.0, 40.0),
-    (-1.0, 38.0),
-    (-5.5, 36.0),
-    (-7.5, 37.0),
-    (-9.5, 37.0),
-];
+/// A collection of [`GeoFeature`]s with O(1) lookup by id.
+#[derive(Debug, Clone)]
+pub struct GeoData {
+    pub features: Vec<GeoFeature>,
+    index: HashMap<String, usize>,
+}
 
-// ── Africa ─────────────────────────────────────────────────────────
+// ── GeoData methods ────────────────────────────────────────────────
 
-static AFRICA: &[(f32, f32)] = &[
-    // NW corner
-    (-17.0, 15.0),
-    (-16.0, 18.0),
-    (-13.0, 22.0),
-    (-13.0, 27.0),
-    (-8.0, 32.0),
-    (-6.0, 35.0),
-    (-2.0, 35.5),
-    (3.0, 37.0),
-    (8.0, 37.0),
-    (10.0, 37.0),
-    // Tunisia / Libya
-    (11.0, 33.0),
-    (15.0, 32.0),
-    (20.0, 32.0),
-    (25.0, 32.0),
-    // Egypt
-    (29.0, 31.0),
-    (32.0, 31.5),
-    (34.5, 29.5),
-    (35.0, 28.0),
-    (36.5, 22.0),
-    // Horn of Africa
-    (38.0, 18.0),
-    (42.0, 15.0),
-    (43.0, 12.0),
-    (45.0, 11.5),
-    (48.0, 11.0),
-    (51.0, 11.0),
-    // East coast
-    (49.0, 8.0),
-    (47.0, 4.0),
-    (44.0, 1.5),
-    (42.0, -1.0),
-    (41.5, -3.0),
-    (40.5, -8.0),
-    (39.5, -11.0),
-    (40.5, -15.0),
-    (36.0, -18.0),
-    (35.5, -22.0),
-    (35.0, -26.0),
-    (33.0, -29.0),
-    (30.0, -31.0),
-    (28.0, -33.0),
-    // South coast
-    (26.0, -34.0),
-    (22.0, -34.5),
-    (18.5, -34.0),
-    (17.5, -32.5),
-    // West coast
-    (15.0, -27.0),
-    (12.0, -18.0),
-    (12.0, -12.0),
-    (13.0, -6.0),
-    (11.0, -3.0),
-    (9.0, 1.0),
-    (9.5, 4.0),
-    (7.0, 5.0),
-    (4.0, 6.5),
-    (2.5, 6.5),
-    (-1.0, 5.0),
-    (-5.0, 5.0),
-    (-8.0, 5.0),
-    (-10.0, 7.0),
-    (-12.0, 8.0),
-    (-15.0, 11.0),
-    (-16.5, 13.0),
-    (-17.0, 15.0),
-];
+impl GeoData {
+    /// Creates a new `GeoData` from a list of features, building the
+    /// id-to-index lookup table.
+    pub fn new(features: Vec<GeoFeature>) -> Self {
+        let index = features.iter().enumerate().map(|(i, f)| (f.id.clone(), i)).collect();
+        Self { features, index }
+    }
 
-// ── Middle East / Arabian Peninsula ────────────────────────────────
+    /// O(1) lookup by feature id.
+    pub fn get(&self, id: &str) -> Option<&GeoFeature> {
+        self.index.get(id).map(|&i| &self.features[i])
+    }
 
-static MIDDLE_EAST: &[(f32, f32)] = &[
-    (35.0, 28.0),
-    (34.0, 27.0),
-    (37.0, 22.0),
-    (40.0, 19.0),
-    (43.0, 16.0),
-    (45.0, 13.5),
-    (48.0, 14.0),
-    (51.0, 16.0),
-    (55.0, 17.0),
-    (56.0, 20.0),
-    (56.5, 24.5),
-    (55.5, 26.0),
-    (52.0, 25.0),
-    (51.0, 24.0),
-    (50.5, 26.0),
-    (48.5, 29.5),
-    (48.0, 30.5),
-    (47.0, 30.0),
-    (44.5, 29.5),
-    (41.0, 31.5),
-    (36.0, 33.5),
-    (35.5, 32.0),
-    (35.0, 28.0),
-];
+    pub fn len(&self) -> usize {
+        self.features.len()
+    }
 
-// ── South / Central Asia (Turkey–Iran–Pakistan–India) ──────────────
+    pub fn is_empty(&self) -> bool {
+        self.features.is_empty()
+    }
 
-static SOUTH_ASIA: &[(f32, f32)] = &[
-    // Turkey east
-    (36.0, 37.0),
-    (40.0, 38.0),
-    (44.0, 37.5),
-    (44.5, 39.5),
-    (40.0, 41.0),
-    (43.0, 42.0),
-    (46.0, 42.0),
-    (48.0, 40.0),
-    (50.0, 39.5),
-    (52.0, 37.0),
-    (54.0, 37.0),
-    // Iran
-    (58.0, 37.5),
-    (60.5, 36.5),
-    (62.0, 35.0),
-    (64.0, 36.0),
-    (67.0, 37.0),
-    // Afghanistan / Pakistan
-    (69.0, 37.0),
-    (71.0, 36.0),
-    (73.0, 37.0),
-    (77.0, 35.0),
-    // India north → east
-    (80.0, 32.0),
-    (82.0, 28.5),
-    (88.0, 28.0),
-    (89.0, 26.5),
-    (92.0, 27.0),
-    (96.0, 28.0),
-    (97.0, 27.0),
-    // Myanmar / Bangladesh
-    (97.5, 25.0),
-    (98.5, 20.0),
-    (96.0, 16.0),
-    (92.5, 16.0),
-    (91.0, 22.0),
-    (89.0, 22.0),
-    (88.0, 22.0),
-    // India east coast
-    (87.0, 20.0),
-    (82.0, 16.0),
-    (80.0, 13.0),
-    (80.0, 9.0),
-    (77.0, 8.0),
-    // India west coast
-    (76.0, 10.0),
-    (74.0, 13.0),
-    (73.0, 17.0),
-    (72.0, 20.0),
-    (68.5, 24.0),
-    (67.0, 25.0),
-    (62.0, 25.0),
-    (58.0, 25.5),
-    (57.0, 27.0),
-    (54.0, 27.0),
-    (52.0, 29.0),
-    (48.5, 29.5),
-    (47.0, 30.0),
-    (44.5, 33.0),
-    (42.0, 37.0),
-    (39.0, 37.0),
-    (36.5, 36.5),
-    (36.0, 37.0),
-];
+    /// Exposes the id-to-index map for Phase 6 choropleth matching.
+    pub fn id_index(&self) -> &HashMap<String, usize> {
+        &self.index
+    }
 
-// ── East Asia (Russia / China / Korea) ─────────────────────────────
+    /// Bounding box encompassing all features.
+    pub fn bounds(&self) -> Option<GeoBounds> {
+        let mut iter = self.features.iter().filter_map(|f| f.bounds());
+        let first = iter.next()?;
+        let mut bounds = first;
+        for fb in iter {
+            bounds.extend(fb.min_lon, fb.min_lat);
+            bounds.extend(fb.max_lon, fb.max_lat);
+        }
+        Some(bounds)
+    }
 
-static EAST_ASIA: &[(f32, f32)] = &[
-    // Russia Pacific coast
-    (131.0, 43.0),
-    (133.0, 43.5),
-    (135.0, 48.0),
-    (137.0, 47.0),
-    (140.0, 50.0),
-    (141.0, 53.0),
-    (143.0, 51.5),
-    (144.0, 49.0),
-    (143.5, 46.5),
-    (145.0, 44.0),
-    (142.0, 42.0),
-    // Russia far east → Arctic
-    (150.0, 46.0),
-    (155.0, 50.0),
-    (158.0, 53.0),
-    (160.0, 60.0),
-    (162.0, 63.0),
-    (170.0, 65.0),
-    (178.0, 68.0),
-    (180.0, 69.0),
-    (180.0, 72.0),
-    (170.0, 70.0),
-    (160.0, 69.0),
-    (150.0, 68.0),
-    (140.0, 66.0),
-    (130.0, 67.0),
-    (120.0, 68.0),
-    (110.0, 69.0),
-    (100.0, 68.0),
-    (90.0, 68.0),
-    (80.0, 68.0),
-    (70.0, 68.0),
-    // South through Central Asia
-    (68.0, 60.0),
-    (60.0, 54.0),
-    (56.0, 51.0),
-    (55.0, 49.0),
-    (52.0, 46.0),
-    // Kazakhstan → Mongolia
-    (55.0, 42.0),
-    (60.0, 42.0),
-    (66.0, 40.0),
-    (70.0, 40.0),
-    (73.0, 40.5),
-    (80.0, 42.0),
-    (87.0, 49.0),
-    (92.0, 50.0),
-    (98.0, 50.0),
-    (104.0, 52.0),
-    (110.0, 50.0),
-    (116.0, 50.0),
-    (120.0, 52.0),
-    (126.0, 48.0),
-    (128.0, 42.0),
-    // Korea
-    (129.5, 36.0),
-    (127.0, 34.0),
-    (126.0, 37.0),
-    (125.0, 38.0),
-    (124.5, 40.0),
-    // China coast
-    (122.0, 40.0),
-    (121.5, 37.0),
-    (120.0, 35.0),
-    (122.0, 31.0),
-    (121.0, 29.0),
-    (120.0, 27.0),
-    (117.0, 24.0),
-    (114.0, 23.0),
-    (110.5, 20.0),
-    (109.0, 18.0),
-    (108.5, 20.0),
-    (106.5, 22.0),
-    (100.0, 22.0),
-    (98.0, 24.0),
-    (97.5, 28.0),
-    (92.0, 28.0),
-    (87.0, 28.0),
-    (82.0, 30.0),
-    (79.0, 32.0),
-    (76.0, 36.0),
-    (73.0, 37.0),
-    (71.0, 39.0),
-    (68.0, 39.0),
-    (65.0, 38.0),
-    (62.0, 38.0),
-    // Up to Caspian
-    (53.0, 40.0),
-    (50.0, 39.0),
-    (48.5, 42.0),
-    (44.0, 42.0),
-    (40.5, 43.5),
-    (39.5, 45.0),
-    (37.0, 47.0),
-    (40.0, 49.0),
-    (44.0, 49.0),
-    (46.0, 52.0),
-    (50.0, 52.0),
-    (52.0, 53.0),
-    (56.0, 55.0),
-    (60.0, 57.0),
-    (60.0, 60.0),
-    (68.0, 60.0),
-    // Not actually closed to Russia Pacific: this polygon
-    // wraps the full Russia+China landmass
-    (131.0, 43.0),
-];
+    /// Returns a new `GeoData` containing only features whose bounding
+    /// box intersects the given scope.
+    pub fn filter_by_scope(&self, scope: MapScope) -> GeoData {
+        let scope_bounds = scope.bounds();
+        let filtered: Vec<GeoFeature> = self
+            .features
+            .iter()
+            .filter(|f| f.bounds().map(|b| b.intersects(&scope_bounds)).unwrap_or(false))
+            .cloned()
+            .collect();
+        GeoData::new(filtered)
+    }
 
-// ── Southeast Asia (Indochina) ─────────────────────────────────────
+    /// Returns a new `GeoData` containing only features where the given
+    /// property key matches the given value.
+    pub fn filter_by_property(&self, key: &str, value: &str) -> GeoData {
+        let filtered: Vec<GeoFeature> = self
+            .features
+            .iter()
+            .filter(|f| f.properties.get(key).map(|v| v == value).unwrap_or(false))
+            .cloned()
+            .collect();
+        GeoData::new(filtered)
+    }
+}
 
-static SOUTHEAST_ASIA: &[(f32, f32)] = &[
-    (98.5, 20.0),
-    (100.5, 20.5),
-    (101.0, 17.0),
-    (103.0, 14.0),
-    (103.5, 11.0),
-    (103.0, 8.5),
-    (102.0, 6.0),
-    (100.5, 2.0),
-    (103.5, 1.3),
-    (104.0, 1.5),
-    (104.5, 3.0),
-    (106.0, 6.0),
-    (106.5, 10.0),
-    (109.0, 12.0),
-    (109.0, 14.0),
-    (108.0, 16.0),
-    (106.5, 17.0),
-    (106.5, 20.0),
-    (105.0, 22.0),
-    (102.0, 22.0),
-    (100.0, 21.0),
-    (98.5, 20.0),
-];
+// ── Projection ────────────────────────────────────────────────────
 
-// ── Australia ──────────────────────────────────────────────────────
+/// Projection algorithm for mapping geographic coordinates to 2D.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum ProjectionKind {
+    /// Conformal projection (preserves local shape). Default.
+    /// `x = lon`, `y = ln(tan(π/4 + lat/2))`.
+    #[default]
+    Mercator,
+    /// Simple linear projection. `x = lon`, `y = lat`.
+    /// Distorts shapes at high latitudes.
+    Equirectangular,
+    /// Lambert cylindrical equal-area. `x = lon`, `y = sin(lat)`.
+    /// Better for choropleth where area perception matters.
+    EqualArea,
+    /// Natural Earth projection. Pseudo-cylindrical, designed for
+    /// pleasing world maps. The standard for atlases and news media.
+    NaturalEarth,
+}
 
-static AUSTRALIA: &[(f32, f32)] = &[
-    (130.0, -11.0),
-    (132.0, -11.5),
-    (136.0, -12.0),
-    (136.5, -14.0),
-    (132.0, -14.5),
-    (130.5, -13.5),
-    (129.5, -15.0),
-    (127.0, -14.0),
-    (124.0, -16.0),
-    (123.0, -16.5),
-    (122.0, -18.0),
-    (119.0, -19.5),
-    (116.0, -21.0),
-    (114.5, -22.5),
-    (113.5, -25.0),
-    (114.0, -27.0),
-    (114.5, -30.0),
-    (115.0, -34.0),
-    (117.0, -35.0),
-    (120.0, -34.0),
-    (127.0, -33.5),
-    (131.0, -31.5),
-    (133.0, -32.0),
-    (135.0, -34.5),
-    (137.0, -35.5),
-    (139.0, -35.5),
-    (140.0, -37.5),
-    (142.0, -38.5),
-    (145.0, -38.5),
-    (147.0, -39.0),
-    (149.0, -37.5),
-    (150.0, -36.0),
-    (151.0, -34.0),
-    (153.0, -28.0),
-    (153.5, -25.0),
-    (150.0, -22.5),
-    (148.0, -20.0),
-    (146.0, -19.0),
-    (143.0, -14.5),
-    (142.0, -11.0),
-    (139.0, -10.5),
-    (137.0, -12.0),
-    (135.0, -12.0),
-    (133.0, -11.0),
-    (130.0, -11.0),
-];
+/// Projects geographic coordinates `(lon, lat)` to pixel coordinates `(x, y)`.
+///
+/// # Coordinate convention
+///
+/// Input is always `(lon, lat)` — longitude first, matching GeoJSON spec.
+/// Output is `(x, y)` pixel coordinates within the fitted viewport.
+///
+/// # Usage
+///
+/// ```ignore
+/// let proj = Projection::mercator().fit_size(800.0, 600.0, bounds);
+/// let (px, py) = proj.project(-74.0, 40.7); // NYC
+/// ```
+#[derive(Debug, Clone, Copy)]
+pub struct Projection {
+    kind: ProjectionKind,
+    scale: f32,
+    translate_x: f32,
+    translate_y: f32,
+}
 
-// ── Japan ──────────────────────────────────────────────────────────
+impl Projection {
+    /// Creates a new projection with the given kind.
+    /// Call `fit_size` to configure scale and translation for a viewport.
+    pub fn new(kind: ProjectionKind) -> Self {
+        Self {
+            kind,
+            scale: 1.0,
+            translate_x: 0.0,
+            translate_y: 0.0,
+        }
+    }
 
-static JAPAN: &[(f32, f32)] = &[
-    // Simplified main islands
-    (130.0, 31.0),
-    (131.0, 33.5),
-    (132.0, 34.0),
-    (134.0, 34.5),
-    (135.5, 35.0),
-    (136.5, 36.5),
-    (139.5, 36.0),
-    (140.0, 37.0),
-    (140.0, 39.5),
-    (140.5, 41.0),
-    (141.0, 41.5),
-    (142.0, 43.0),
-    (145.0, 43.5),
-    (145.5, 44.5),
-    (143.0, 44.0),
-    (141.0, 43.0),
-    (140.0, 42.0),
-    (139.5, 42.5),
-    (140.0, 40.0),
-    (139.0, 38.0),
-    (137.0, 35.0),
-    (135.0, 33.5),
-    (132.0, 33.0),
-    (130.5, 33.5),
-    (130.0, 31.0),
-];
+    pub fn mercator() -> Self {
+        Self::new(ProjectionKind::Mercator)
+    }
 
-// ── British Isles ──────────────────────────────────────────────────
+    pub fn equirectangular() -> Self {
+        Self::new(ProjectionKind::Equirectangular)
+    }
 
-static GREAT_BRITAIN: &[(f32, f32)] = &[
-    (-5.5, 50.0),
-    (-3.5, 50.5),
-    (-1.0, 51.0),
-    (1.5, 51.0),
-    (1.0, 52.5),
-    (0.0, 53.0),
-    (-1.0, 54.0),
-    (-3.0, 54.0),
-    (-3.0, 55.0),
-    (-2.0, 56.5),
-    (-3.0, 58.0),
-    (-5.0, 58.5),
-    (-5.0, 57.0),
-    (-6.0, 56.0),
-    (-5.5, 55.5),
-    (-4.5, 55.0),
-    (-5.0, 54.0),
-    (-4.5, 53.0),
-    (-5.0, 52.0),
-    (-5.5, 50.0),
-];
+    pub fn equal_area() -> Self {
+        Self::new(ProjectionKind::EqualArea)
+    }
 
-static IRELAND: &[(f32, f32)] = &[
-    (-9.5, 51.5),
-    (-6.0, 51.5),
-    (-6.0, 53.0),
-    (-6.5, 54.5),
-    (-7.5, 55.0),
-    (-8.5, 55.5),
-    (-10.0, 54.0),
-    (-10.5, 52.5),
-    (-9.5, 51.5),
-];
+    pub fn natural_earth() -> Self {
+        Self::new(ProjectionKind::NaturalEarth)
+    }
 
-// ── Iceland ────────────────────────────────────────────────────────
+    /// Projects a geographic coordinate to pixel coordinates.
+    ///
+    /// Input: `(lon, lat)` in degrees — longitude first, latitude second.
+    /// Output: `(x, y)` in pixels within the fitted viewport.
+    pub fn project(&self, lon: f32, lat: f32) -> (f32, f32) {
+        let (raw_x, raw_y) = self.project_raw(lon, lat);
+        let x = raw_x * self.scale + self.translate_x;
+        let y = raw_y * self.scale + self.translate_y;
+        (x, y)
+    }
 
-static ICELAND: &[(f32, f32)] = &[
-    (-22.0, 64.0),
-    (-18.0, 63.5),
-    (-14.0, 64.5),
-    (-13.5, 65.5),
-    (-15.0, 66.0),
-    (-18.0, 66.5),
-    (-22.0, 66.0),
-    (-24.0, 65.0),
-    (-22.0, 64.0),
-];
+    /// Raw (unscaled, untranslated) projection.
+    fn project_raw(&self, lon: f32, lat: f32) -> (f32, f32) {
+        let lat_rad = lat.to_radians();
+        match self.kind {
+            ProjectionKind::Mercator => {
+                let clamped = lat_rad.clamp(-85.0_f32.to_radians(), 85.0_f32.to_radians());
+                let x = lon.to_radians();
+                let y = -((std::f32::consts::FRAC_PI_4 + clamped / 2.0).tan().ln());
+                (x, y)
+            }
+            ProjectionKind::Equirectangular => {
+                let x = lon.to_radians();
+                let y = -lat_rad;
+                (x, y)
+            }
+            ProjectionKind::EqualArea => {
+                let x = lon.to_radians();
+                let y = -lat_rad.sin();
+                (x, y)
+            }
+            ProjectionKind::NaturalEarth => {
+                // Polynomial coefficients from Tom Patterson (same as D3).
+                let phi = lat_rad;
+                let phi2 = phi * phi;
 
-// ── Scandinavia (extra peninsula, not in Europe polygon) ───────────
+                let x = lon.to_radians()
+                    * (0.8707 + phi2 * (-0.131979 + phi2 * (-0.013791 + phi2 * (0.003971 + phi2 * -0.001529))));
+                let y =
+                    -phi * (1.007226 + phi2 * (0.015085 + phi2 * (-0.044475 + phi2 * (0.028874 + phi2 * -0.005916))));
+                (x, y)
+            }
+        }
+    }
 
-static SCANDINAVIA: &[(f32, f32)] = &[
-    (5.0, 58.0),
-    (5.0, 60.0),
-    (5.0, 62.0),
-    (7.0, 63.0),
-    (11.0, 63.0),
-    (13.0, 64.0),
-    (14.0, 66.0),
-    (15.5, 67.0),
-    (18.0, 69.0),
-    (20.0, 69.5),
-    (24.0, 70.0),
-    (27.0, 70.5),
-    (30.0, 70.0),
-    (28.0, 68.0),
-    (25.0, 65.0),
-    (22.0, 60.0),
-    (18.5, 59.5),
-    (16.5, 56.5),
-    (12.5, 56.0),
-    (11.0, 58.0),
-    (8.0, 58.0),
-    (5.0, 58.0),
-];
+    /// Computes scale and translation so that `bounds` fills the given
+    /// viewport `(width, height)` with uniform scaling and centering.
+    ///
+    /// Analogous to D3's `projection.fitSize([width, height], object)`.
+    /// Preserves aspect ratio; blank bands appear on the shorter axis.
+    pub fn fit_size(mut self, width: f32, height: f32, bounds: GeoBounds) -> Self {
+        // Project all four corners (non-linear projections produce different
+        // extents at different latitudes).
+        let (x0, y0) = self.project_raw(bounds.min_lon, bounds.max_lat);
+        let (x1, y1) = self.project_raw(bounds.max_lon, bounds.max_lat);
+        let (x2, y2) = self.project_raw(bounds.min_lon, bounds.min_lat);
+        let (x3, y3) = self.project_raw(bounds.max_lon, bounds.min_lat);
 
-// ── Indonesian Islands (simplified) ────────────────────────────────
+        let px_min = x0.min(x1).min(x2).min(x3);
+        let px_max = x0.max(x1).max(x2).max(x3);
+        let py_min = y0.min(y1).min(y2).min(y3);
+        let py_max = y0.max(y1).max(y2).max(y3);
 
-static INDONESIA_JAVA: &[(f32, f32)] = &[
-    (105.0, -6.0),
-    (107.0, -6.5),
-    (110.0, -7.0),
-    (112.0, -7.5),
-    (114.0, -8.5),
-    (112.0, -8.0),
-    (109.0, -7.5),
-    (106.0, -7.0),
-    (105.0, -6.0),
-];
+        let proj_width = px_max - px_min;
+        let proj_height = py_max - py_min;
 
-static INDONESIA_SUMATRA: &[(f32, f32)] = &[
-    (104.0, 1.5),
-    (105.5, -1.5),
-    (106.0, -4.0),
-    (105.5, -5.5),
-    (103.0, -4.5),
-    (101.0, -2.0),
-    (99.0, 0.5),
-    (98.0, 2.0),
-    (98.5, 4.0),
-    (100.0, 3.0),
-    (102.0, 2.5),
-    (104.0, 1.5),
-];
+        if proj_width <= 0.0 || proj_height <= 0.0 {
+            self.scale = 1.0;
+            self.translate_x = width / 2.0;
+            self.translate_y = height / 2.0;
+            return self;
+        }
 
-static INDONESIA_BORNEO: &[(f32, f32)] = &[
-    (109.5, 1.0),
-    (110.0, 1.5),
-    (112.0, 1.5),
-    (115.0, 4.5),
-    (117.5, 6.5),
-    (118.0, 5.0),
-    (118.5, 3.5),
-    (117.5, 1.0),
-    (116.0, 0.0),
-    (115.0, -2.0),
-    (114.0, -3.5),
-    (112.0, -3.5),
-    (111.0, -2.5),
-    (110.0, -1.0),
-    (109.5, 1.0),
-];
+        // Uniform scale: fit the larger dimension, blank bands on the other.
+        let scale_x = width / proj_width;
+        let scale_y = height / proj_height;
+        self.scale = scale_x.min(scale_y);
 
-// ── New Zealand ────────────────────────────────────────────────────
+        // Center the projected bounds in the viewport.
+        let scaled_width = proj_width * self.scale;
+        let scaled_height = proj_height * self.scale;
+        self.translate_x = (width - scaled_width) / 2.0 - px_min * self.scale;
+        self.translate_y = (height - scaled_height) / 2.0 - py_min * self.scale;
 
-static NEW_ZEALAND_NORTH: &[(f32, f32)] = &[
-    (174.0, -36.0),
-    (176.0, -37.5),
-    (178.0, -37.5),
-    (177.0, -39.0),
-    (175.5, -41.0),
-    (174.0, -41.5),
-    (173.0, -39.5),
-    (174.5, -37.0),
-    (174.0, -36.0),
-];
+        self
+    }
+}
 
-static NEW_ZEALAND_SOUTH: &[(f32, f32)] = &[
-    (172.5, -41.0),
-    (174.0, -41.5),
-    (173.5, -43.5),
-    (172.0, -44.5),
-    (170.0, -46.0),
-    (168.0, -46.5),
-    (167.0, -45.5),
-    (167.5, -44.0),
-    (170.0, -42.5),
-    (172.5, -41.0),
-];
+// ── GeoJSON parsing (behind feature flag) ──────────────────────────
 
-// ── Madagascar ─────────────────────────────────────────────────────
+#[cfg(feature = "geojson")]
+mod geojson_parser {
+    use super::*;
+    use std::fmt;
 
-static MADAGASCAR: &[(f32, f32)] = &[
-    (49.5, -12.0),
-    (50.0, -15.5),
-    (47.5, -20.0),
-    (44.5, -25.0),
-    (44.0, -22.0),
-    (44.5, -19.0),
-    (46.0, -16.0),
-    (48.0, -13.5),
-    (49.5, -12.0),
-];
+    /// Errors that can occur during GeoJSON parsing.
+    #[derive(Debug)]
+    pub enum GeoError {
+        InvalidJson(String),
+        UnsupportedGeometry(String),
+        MissingField(String),
+    }
 
-// ── Sri Lanka ──────────────────────────────────────────────────────
+    impl fmt::Display for GeoError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            match self {
+                GeoError::InvalidJson(msg) => write!(f, "invalid JSON: {msg}"),
+                GeoError::UnsupportedGeometry(msg) => {
+                    write!(f, "unsupported geometry: {msg}")
+                }
+                GeoError::MissingField(msg) => write!(f, "missing field: {msg}"),
+            }
+        }
+    }
 
-static SRI_LANKA: &[(f32, f32)] = &[
-    (80.0, 9.5),
-    (81.5, 8.0),
-    (82.0, 7.0),
-    (81.0, 6.0),
-    (80.0, 6.5),
-    (79.5, 8.0),
-    (80.0, 9.5),
-];
+    impl std::error::Error for GeoError {}
 
-// ── Greenland ──────────────────────────────────────────────────────
+    /// Parses a GeoJSON string into a [`GeoData`] collection.
+    ///
+    /// Supports `Polygon` and `MultiPolygon` geometry types. Other types
+    /// are silently skipped. Only outer rings are retained (holes are
+    /// discarded). Rings that cross the antimeridian are automatically
+    /// split into eastern and western halves.
+    pub fn parse_geojson(input: &str) -> Result<GeoData, GeoError> {
+        let root: serde_json::Value = serde_json::from_str(input).map_err(|e| GeoError::InvalidJson(e.to_string()))?;
 
-static GREENLAND: &[(f32, f32)] = &[
-    (-50.0, 61.0),
-    (-44.0, 60.0),
-    (-42.0, 62.0),
-    (-37.0, 64.0),
-    (-30.0, 66.0),
-    (-25.0, 68.0),
-    (-22.0, 70.0),
-    (-18.0, 72.0),
-    (-18.0, 76.0),
-    (-20.0, 78.0),
-    (-30.0, 80.0),
-    (-40.0, 82.0),
-    (-50.0, 82.0),
-    (-55.0, 80.0),
-    (-60.0, 78.0),
-    (-68.0, 77.0),
-    (-72.0, 78.0),
-    (-68.0, 76.0),
-    (-60.0, 73.0),
-    (-55.0, 70.0),
-    (-53.0, 67.0),
-    (-52.0, 64.0),
-    (-50.0, 61.0),
-];
+        let features_arr = root
+            .get("features")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| GeoError::MissingField("features".into()))?;
 
-// ── Italy ──────────────────────────────────────────────────────────
+        let mut features = Vec::with_capacity(features_arr.len());
 
-static ITALY: &[(f32, f32)] = &[
-    (12.5, 46.0),
-    (13.5, 45.5),
-    (13.5, 44.0),
-    (14.5, 42.5),
-    (16.0, 41.5),
-    (16.5, 40.0),
-    (16.0, 39.0),
-    (15.5, 38.0),
-    (16.5, 38.0),
-    (15.5, 37.5),
-    (12.5, 38.0),
-    (13.0, 38.5),
-    (11.0, 38.5),
-    (9.5, 39.0),
-    (8.5, 39.5),
-    (9.0, 41.0),
-    (10.5, 43.0),
-    (12.5, 44.0),
-    (12.0, 45.0),
-    (12.5, 46.0),
-];
+        for feat_val in features_arr {
+            // Skip features with null geometry.
+            let geom = match feat_val.get("geometry") {
+                Some(g) if !g.is_null() => g,
+                _ => continue,
+            };
+
+            let geom_type = geom.get("type").and_then(|t| t.as_str()).unwrap_or("");
+
+            let coords = match geom.get("coordinates") {
+                Some(c) => c,
+                None => continue,
+            };
+
+            let polygons = match geom_type {
+                "Polygon" => parse_ring_array(coords),
+                "MultiPolygon" => {
+                    let mut all = Vec::new();
+                    if let Some(polys) = coords.as_array() {
+                        for poly in polys {
+                            all.extend(parse_ring_array(poly));
+                        }
+                    }
+                    all
+                }
+                _ => continue, // silently skip other geometry types
+            };
+
+            if polygons.is_empty() {
+                continue;
+            }
+
+            // Extract properties.
+            let props_val = feat_val.get("properties");
+            let mut properties = HashMap::new();
+
+            let prop_keys = ["NAME", "ISO_A3", "CONTINENT", "ECONOMY", "postal"];
+            for key in &prop_keys {
+                if let Some(val) = props_val.and_then(|p| p.get(*key)).and_then(|v| v.as_str()) {
+                    properties.insert((*key).to_string(), val.to_string());
+                }
+            }
+
+            // ID precedence: ISO_A3 > postal > NAME
+            let id = properties
+                .get("ISO_A3")
+                .filter(|v| !v.is_empty() && *v != "-99")
+                .or_else(|| properties.get("postal").filter(|v| !v.is_empty()))
+                .or_else(|| properties.get("NAME").filter(|v| !v.is_empty()))
+                .cloned()
+                .unwrap_or_default();
+
+            let name = properties.get("NAME").cloned().unwrap_or_default();
+
+            features.push(GeoFeature {
+                id,
+                name,
+                polygons,
+                properties,
+            });
+        }
+
+        Ok(GeoData::new(features))
+    }
+
+    /// Parses a JSON coordinate array into polygon rings.
+    ///
+    /// Only the outer ring (index 0) is taken from each polygon; holes
+    /// are discarded. Each ring is passed through antimeridian splitting,
+    /// and rings with fewer than 3 points are filtered out.
+    fn parse_ring_array(polygon_coords: &serde_json::Value) -> Vec<Vec<(f32, f32)>> {
+        let rings = match polygon_coords.as_array() {
+            Some(r) => r,
+            None => return Vec::new(),
+        };
+
+        // Only take the outer ring (index 0).
+        let outer = match rings.first().and_then(|r| r.as_array()) {
+            Some(r) => r,
+            None => return Vec::new(),
+        };
+
+        let ring: Vec<(f32, f32)> = outer
+            .iter()
+            .filter_map(|pt| {
+                let arr = pt.as_array()?;
+                let lon = arr.first()?.as_f64()? as f32;
+                let lat = arr.get(1)?.as_f64()? as f32;
+                Some((lon, lat))
+            })
+            .collect();
+
+        let split = split_antimeridian(ring);
+        split.into_iter().filter(|r| r.len() >= 3).collect()
+    }
+
+    /// Splits a polygon ring that crosses the antimeridian (±180 longitude)
+    /// into separate eastern and western halves.
+    ///
+    /// If no crossing is detected the original ring is returned as-is.
+    fn split_antimeridian(ring: Vec<(f32, f32)>) -> Vec<Vec<(f32, f32)>> {
+        if ring.len() < 2 {
+            return vec![ring];
+        }
+
+        // Detect whether any crossing occurs.
+        let has_crossing = ring.windows(2).any(|w| (w[1].0 - w[0].0).abs() > 180.0);
+
+        if !has_crossing {
+            return vec![ring];
+        }
+
+        let mut east: Vec<(f32, f32)> = Vec::new();
+        let mut west: Vec<(f32, f32)> = Vec::new();
+
+        for i in 0..ring.len() {
+            let (lon, lat) = ring[i];
+
+            // Check for crossing from previous point.
+            if i > 0 {
+                let (prev_lon, prev_lat) = ring[i - 1];
+                let delta = lon - prev_lon;
+
+                if delta.abs() > 180.0 {
+                    // Interpolate latitude at the ±180 boundary.
+                    let (effective_lon, effective_prev_lon) = if delta > 0.0 {
+                        // Crossed from east to west (prev was positive, current
+                        // jumped to negative via wrapping).
+                        (lon - 360.0, prev_lon)
+                    } else {
+                        // Crossed from west to east.
+                        (lon + 360.0, prev_lon)
+                    };
+
+                    let t = (180.0_f32 - effective_prev_lon.abs()) / (effective_lon - effective_prev_lon).abs();
+                    let interp_lat = prev_lat + t * (lat - prev_lat);
+
+                    // Add boundary points to both halves.
+                    east.push((180.0, interp_lat));
+                    west.push((-180.0, interp_lat));
+                }
+            }
+
+            if lon >= 0.0 {
+                east.push((lon, lat));
+            } else {
+                west.push((lon, lat));
+            }
+        }
+
+        let mut result = Vec::new();
+        if east.len() >= 3 {
+            result.push(east);
+        }
+        if west.len() >= 3 {
+            result.push(west);
+        }
+        result
+    }
+}
+
+#[cfg(feature = "geojson")]
+pub use geojson_parser::{GeoError, parse_geojson};
+
+// ── Tests ──────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn geo_bounds_contains() {
+        let b = GeoBounds::new(-10.0, -10.0, 10.0, 10.0);
+        assert!(b.contains(0.0, 0.0));
+        assert!(b.contains(-10.0, -10.0));
+        assert!(b.contains(10.0, 10.0));
+        assert!(!b.contains(11.0, 0.0));
+        assert!(!b.contains(0.0, -11.0));
+    }
+
+    #[test]
+    fn geo_bounds_intersects() {
+        let a = GeoBounds::new(0.0, 0.0, 10.0, 10.0);
+        let b = GeoBounds::new(5.0, 5.0, 15.0, 15.0);
+        let c = GeoBounds::new(20.0, 20.0, 30.0, 30.0);
+
+        assert!(a.intersects(&b));
+        assert!(b.intersects(&a));
+        assert!(!a.intersects(&c));
+        assert!(!c.intersects(&a));
+    }
+
+    #[test]
+    fn geo_data_new_builds_index() {
+        let features = vec![
+            GeoFeature {
+                id: "USA".into(),
+                name: "United States".into(),
+                polygons: vec![vec![(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]],
+                properties: HashMap::new(),
+            },
+            GeoFeature {
+                id: "CAN".into(),
+                name: "Canada".into(),
+                polygons: vec![vec![(2.0, 2.0), (3.0, 2.0), (3.0, 3.0)]],
+                properties: HashMap::new(),
+            },
+        ];
+
+        let data = GeoData::new(features);
+        assert_eq!(data.len(), 2);
+        assert!(!data.is_empty());
+        assert!(data.get("USA").is_some());
+        assert_eq!(data.get("USA").unwrap().name, "United States");
+        assert!(data.get("CAN").is_some());
+        assert!(data.get("BRA").is_none());
+    }
+
+    #[test]
+    fn geo_data_bounds() {
+        let features = vec![
+            GeoFeature {
+                id: "A".into(),
+                name: "A".into(),
+                polygons: vec![vec![(-5.0, -5.0), (5.0, 5.0), (0.0, 0.0)]],
+                properties: HashMap::new(),
+            },
+            GeoFeature {
+                id: "B".into(),
+                name: "B".into(),
+                polygons: vec![vec![(10.0, 10.0), (20.0, 20.0), (15.0, 15.0)]],
+                properties: HashMap::new(),
+            },
+        ];
+
+        let data = GeoData::new(features);
+        let bounds = data.bounds().unwrap();
+        assert_eq!(bounds.min_lon, -5.0);
+        assert_eq!(bounds.min_lat, -5.0);
+        assert_eq!(bounds.max_lon, 20.0);
+        assert_eq!(bounds.max_lat, 20.0);
+    }
+
+    #[test]
+    fn filter_by_property() {
+        let mut props_af = HashMap::new();
+        props_af.insert("CONTINENT".into(), "Africa".into());
+        let mut props_eu = HashMap::new();
+        props_eu.insert("CONTINENT".into(), "Europe".into());
+
+        let features = vec![
+            GeoFeature {
+                id: "NGA".into(),
+                name: "Nigeria".into(),
+                polygons: vec![vec![(3.0, 6.0), (4.0, 6.0), (4.0, 7.0)]],
+                properties: props_af.clone(),
+            },
+            GeoFeature {
+                id: "ZAF".into(),
+                name: "South Africa".into(),
+                polygons: vec![vec![(28.0, -30.0), (29.0, -30.0), (29.0, -29.0)]],
+                properties: props_af,
+            },
+            GeoFeature {
+                id: "FRA".into(),
+                name: "France".into(),
+                polygons: vec![vec![(2.0, 48.0), (3.0, 48.0), (3.0, 49.0)]],
+                properties: props_eu,
+            },
+        ];
+
+        let data = GeoData::new(features);
+        let africa = data.filter_by_property("CONTINENT", "Africa");
+        assert_eq!(africa.len(), 2);
+        assert!(africa.get("NGA").is_some());
+        assert!(africa.get("ZAF").is_some());
+    }
+
+    #[test]
+    fn map_scope_bounds_world() {
+        let bounds = MapScope::World.bounds();
+        assert_eq!(bounds.min_lon, -180.0);
+        assert_eq!(bounds.min_lat, -60.0);
+        assert_eq!(bounds.max_lon, 180.0);
+        assert_eq!(bounds.max_lat, 85.0);
+    }
+
+    // ── Projection tests ────────────────────────────────────────────
+
+    #[test]
+    fn default_projection_kind_is_mercator() {
+        assert_eq!(ProjectionKind::default(), ProjectionKind::Mercator);
+    }
+
+    #[test]
+    fn mercator_origin_at_center() {
+        let bounds = GeoBounds::new(-180.0, -85.0, 180.0, 85.0);
+        let proj = Projection::mercator().fit_size(800.0, 600.0, bounds);
+        let (x, y) = proj.project(0.0, 0.0);
+        assert!((x - 400.0).abs() < 1.0, "x={x}, expected ~400");
+        assert!((y - 300.0).abs() < 1.0, "y={y}, expected ~300");
+    }
+
+    #[test]
+    fn equirect_origin_at_center() {
+        let bounds = GeoBounds::new(-180.0, -90.0, 180.0, 90.0);
+        let proj = Projection::equirectangular().fit_size(800.0, 600.0, bounds);
+        let (x, y) = proj.project(0.0, 0.0);
+        assert!((x - 400.0).abs() < 1.0, "x={x}, expected ~400");
+        assert!((y - 300.0).abs() < 1.0, "y={y}, expected ~300");
+    }
+
+    #[test]
+    fn equal_area_origin_at_center() {
+        let bounds = GeoBounds::new(-180.0, -90.0, 180.0, 90.0);
+        let proj = Projection::equal_area().fit_size(800.0, 600.0, bounds);
+        let (x, y) = proj.project(0.0, 0.0);
+        assert!((x - 400.0).abs() < 1.0, "x={x}, expected ~400");
+        assert!((y - 300.0).abs() < 1.0, "y={y}, expected ~300");
+    }
+
+    #[test]
+    fn us_bounds_nyc_quadrant() {
+        let us = MapScope::UnitedStates.bounds();
+        let proj = Projection::mercator().fit_size(800.0, 600.0, us);
+        let (x, y) = proj.project(-74.0, 40.7);
+        // NYC is east (right half) and north (upper half) of US center
+        assert!(x > 400.0, "NYC x={x} should be >400");
+        assert!(y < 300.0, "NYC y={y} should be <300");
+        assert!(x > 0.0 && x < 800.0, "NYC x={x} out of viewport");
+        assert!(y > 0.0 && y < 600.0, "NYC y={y} out of viewport");
+    }
+
+    #[test]
+    fn aspect_ratio_preserved() {
+        let bounds = MapScope::UnitedStates.bounds();
+        let proj_wide = Projection::mercator().fit_size(1600.0, 600.0, bounds);
+        let proj_square = Projection::mercator().fit_size(800.0, 800.0, bounds);
+
+        let ratio = |proj: &Projection| -> f32 {
+            let (x0, y0) = proj.project(bounds.min_lon, bounds.max_lat);
+            let (x1, y1) = proj.project(bounds.max_lon, bounds.min_lat);
+            (x1 - x0).abs() / (y1 - y0).abs()
+        };
+
+        let r_wide = ratio(&proj_wide);
+        let r_square = ratio(&proj_square);
+        assert!(
+            (r_wide - r_square).abs() < 0.01,
+            "ratios differ: wide={r_wide}, square={r_square}"
+        );
+    }
+
+    #[test]
+    fn mercator_clamps_poles() {
+        let proj = Projection::mercator().fit_size(800.0, 600.0, GeoBounds::new(-180.0, -90.0, 180.0, 90.0));
+        let (x_n, y_n) = proj.project(0.0, 90.0);
+        let (x_s, y_s) = proj.project(0.0, -90.0);
+        assert!(x_n.is_finite() && y_n.is_finite());
+        assert!(x_s.is_finite() && y_s.is_finite());
+    }
+
+    #[test]
+    fn fit_size_fills_viewport() {
+        let bounds = MapScope::UnitedStates.bounds();
+        let proj = Projection::mercator().fit_size(800.0, 600.0, bounds);
+
+        let (x_tl, y_tl) = proj.project(bounds.min_lon, bounds.max_lat);
+        let (x_tr, y_tr) = proj.project(bounds.max_lon, bounds.max_lat);
+        let (x_bl, y_bl) = proj.project(bounds.min_lon, bounds.min_lat);
+        let (x_br, y_br) = proj.project(bounds.max_lon, bounds.min_lat);
+
+        let proj_w = x_tr.max(x_br) - x_tl.min(x_bl);
+        let proj_h = y_bl.max(y_br) - y_tl.min(y_tr);
+
+        // One dimension fills exactly, the other is smaller.
+        let fills_width = (proj_w - 800.0).abs() < 1.0;
+        let fills_height = (proj_h - 600.0).abs() < 1.0;
+        assert!(
+            fills_width || fills_height,
+            "neither fills viewport: w={proj_w}, h={proj_h}"
+        );
+        assert!(proj_w <= 800.5, "width {proj_w} exceeds viewport");
+        assert!(proj_h <= 600.5, "height {proj_h} exceeds viewport");
+    }
+
+    #[test]
+    fn scope_bounds_are_valid() {
+        let scopes = [
+            MapScope::World,
+            MapScope::NorthAmerica,
+            MapScope::UnitedStates,
+            MapScope::Europe,
+            MapScope::LatinAmerica,
+            MapScope::Asia,
+            MapScope::Africa,
+        ];
+        for scope in scopes {
+            let b = scope.bounds();
+            assert!(b.min_lon < b.max_lon, "{scope:?}: min_lon >= max_lon");
+            assert!(b.min_lat < b.max_lat, "{scope:?}: min_lat >= max_lat");
+            assert!(b.min_lon >= -180.0 && b.max_lon <= 180.0);
+            assert!(b.min_lat >= -90.0 && b.max_lat <= 90.0);
+        }
+    }
+
+    #[test]
+    fn custom_scope_bounds() {
+        let custom = GeoBounds::new(10.0, 20.0, 30.0, 40.0);
+        assert_eq!(MapScope::Custom(custom).bounds(), custom);
+    }
+
+    #[cfg(feature = "geojson")]
+    mod geojson_tests {
+        use super::super::*;
+
+        #[test]
+        fn parse_minimal_geojson() {
+            let json = r#"{
+                "type": "FeatureCollection",
+                "features": [{
+                    "type": "Feature",
+                    "properties": {
+                        "NAME": "Testland",
+                        "ISO_A3": "TST"
+                    },
+                    "geometry": {
+                        "type": "Polygon",
+                        "coordinates": [
+                            [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0], [0.0, 0.0]]
+                        ]
+                    }
+                }]
+            }"#;
+
+            let data = parse_geojson(json).unwrap();
+            assert_eq!(data.len(), 1);
+            let feat = data.get("TST").unwrap();
+            assert_eq!(feat.name, "Testland");
+            assert_eq!(feat.polygons.len(), 1);
+            assert_eq!(feat.polygons[0].len(), 5);
+        }
+
+        #[test]
+        fn parse_multipolygon() {
+            let json = r#"{
+                "type": "FeatureCollection",
+                "features": [{
+                    "type": "Feature",
+                    "properties": {
+                        "NAME": "Archipelago",
+                        "ISO_A3": "ARC"
+                    },
+                    "geometry": {
+                        "type": "MultiPolygon",
+                        "coordinates": [
+                            [[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 0.0]]],
+                            [[[5.0, 5.0], [6.0, 5.0], [6.0, 6.0], [5.0, 5.0]]]
+                        ]
+                    }
+                }]
+            }"#;
+
+            let data = parse_geojson(json).unwrap();
+            assert_eq!(data.len(), 1);
+            let feat = data.get("ARC").unwrap();
+            assert_eq!(feat.polygons.len(), 2);
+        }
+
+        #[test]
+        fn null_geometry_skipped() {
+            let json = r#"{
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "properties": { "NAME": "Ghost" },
+                        "geometry": null
+                    },
+                    {
+                        "type": "Feature",
+                        "properties": { "NAME": "Real", "ISO_A3": "REA" },
+                        "geometry": {
+                            "type": "Polygon",
+                            "coordinates": [
+                                [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 0.0]]
+                            ]
+                        }
+                    }
+                ]
+            }"#;
+
+            let data = parse_geojson(json).unwrap();
+            assert_eq!(data.len(), 1);
+            assert!(data.get("REA").is_some());
+        }
+
+        #[test]
+        fn invalid_json_returns_error() {
+            let result = parse_geojson("not json at all");
+            assert!(result.is_err());
+            match result.unwrap_err() {
+                GeoError::InvalidJson(_) => {}
+                other => panic!("expected InvalidJson, got: {other}"),
+            }
+        }
+
+        #[test]
+        fn id_falls_back_to_postal_then_name() {
+            let json = r#"{
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "properties": { "NAME": "California", "postal": "CA" },
+                        "geometry": {
+                            "type": "Polygon",
+                            "coordinates": [
+                                [[-120.0, 35.0], [-115.0, 35.0], [-115.0, 40.0], [-120.0, 35.0]]
+                            ]
+                        }
+                    },
+                    {
+                        "type": "Feature",
+                        "properties": { "NAME": "NoCode" },
+                        "geometry": {
+                            "type": "Polygon",
+                            "coordinates": [
+                                [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 0.0]]
+                            ]
+                        }
+                    }
+                ]
+            }"#;
+
+            let data = parse_geojson(json).unwrap();
+            // postal takes precedence when ISO_A3 is absent
+            assert!(data.get("CA").is_some());
+            assert_eq!(data.get("CA").unwrap().name, "California");
+            // NAME is last resort
+            assert!(data.get("NoCode").is_some());
+        }
+
+        #[test]
+        fn antimeridian_splitting() {
+            // A ring that crosses the antimeridian.
+            let json = r#"{
+                "type": "FeatureCollection",
+                "features": [{
+                    "type": "Feature",
+                    "properties": { "NAME": "Crosser", "ISO_A3": "CRS" },
+                    "geometry": {
+                        "type": "Polygon",
+                        "coordinates": [
+                            [[170.0, 50.0], [175.0, 55.0], [-175.0, 55.0], [-170.0, 50.0], [170.0, 50.0]]
+                        ]
+                    }
+                }]
+            }"#;
+
+            let data = parse_geojson(json).unwrap();
+            let feat = data.get("CRS").unwrap();
+            // Should have been split into at least 2 polygon rings.
+            assert!(
+                feat.polygons.len() >= 2,
+                "expected >= 2 polygons after antimeridian split, got {}",
+                feat.polygons.len()
+            );
+        }
+
+        #[test]
+        fn parse_ne_110m_countries() {
+            let path = "/tmp/ne_110m_countries.geojson";
+            let Ok(contents) = std::fs::read_to_string(path) else {
+                eprintln!("skipping integration test: {path} not found");
+                return;
+            };
+
+            let data = parse_geojson(&contents).unwrap();
+
+            // ~177 features in Natural Earth 110m countries
+            assert!(data.len() >= 170, "expected >= 170 features, got {}", data.len());
+
+            // USA should exist.
+            assert!(data.get("USA").is_some(), "USA not found");
+
+            // Russia should be split at the antimeridian.
+            let russia = data.get("RUS").expect("Russia not found");
+            assert!(
+                russia.polygons.len() >= 2,
+                "expected Russia to have >= 2 polygons (antimeridian split), got {}",
+                russia.polygons.len()
+            );
+
+            // Africa filter should yield ~50+ countries.
+            let africa = data.filter_by_property("CONTINENT", "Africa");
+            assert!(
+                africa.len() >= 50,
+                "expected >= 50 African countries, got {}",
+                africa.len()
+            );
+
+            // Europe scope filter should yield ~30+ countries.
+            let europe = data.filter_by_scope(MapScope::Europe);
+            assert!(
+                europe.len() >= 30,
+                "expected >= 30 countries in Europe scope, got {}",
+                europe.len()
+            );
+        }
+
+        #[test]
+        fn parse_ne_110m_states() {
+            let path = "/tmp/ne_110m_states.geojson";
+            let Ok(contents) = std::fs::read_to_string(path) else {
+                eprintln!("skipping integration test: {path} not found");
+                return;
+            };
+
+            let data = parse_geojson(&contents).unwrap();
+
+            // ~50+ features in US states
+            assert!(data.len() >= 50, "expected >= 50 state features, got {}", data.len());
+        }
+    }
+}

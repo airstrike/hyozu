@@ -1,4 +1,7 @@
+use std::sync::Arc;
+
 use crate::color::Color;
+use crate::geo::{GeoData, MapScope, ProjectionKind};
 
 /// A single point on a bubble map.
 #[derive(Debug, Clone)]
@@ -86,6 +89,14 @@ pub struct BubbleMap {
     pub(crate) max_radius: f32,
     /// Bubble opacity (0.0–1.0).
     pub(crate) opacity: f32,
+    /// Runtime-loaded geographic data for the base map.
+    pub(crate) geo: Option<Arc<GeoData>>,
+    /// Which region of the world to show.
+    pub(crate) scope: MapScope,
+    /// Whether to draw land polygons.
+    pub(crate) show_basemap: bool,
+    /// Projection algorithm.
+    pub(crate) projection: ProjectionKind,
 }
 
 /// Creates a bubble map from a collection of map points.
@@ -117,6 +128,10 @@ impl<const N: usize> IntoBubbleMap for [MapPoint; N] {
             min_radius: 4.0,
             max_radius: 30.0,
             opacity: 0.7,
+            geo: None,
+            scope: MapScope::World,
+            show_basemap: true,
+            projection: ProjectionKind::default(),
         }
     }
 }
@@ -128,11 +143,39 @@ impl IntoBubbleMap for Vec<MapPoint> {
             min_radius: 4.0,
             max_radius: 30.0,
             opacity: 0.7,
+            geo: None,
+            scope: MapScope::World,
+            show_basemap: true,
+            projection: ProjectionKind::default(),
         }
     }
 }
 
 impl BubbleMap {
+    /// Sets the geographic data for the base map background.
+    pub fn geo(mut self, geo: Arc<GeoData>) -> Self {
+        self.geo = Some(geo);
+        self
+    }
+
+    /// Sets the map scope (which region to show).
+    pub fn scope(mut self, scope: MapScope) -> Self {
+        self.scope = scope;
+        self
+    }
+
+    /// Disables drawing the land polygon basemap.
+    pub fn no_basemap(mut self) -> Self {
+        self.show_basemap = false;
+        self
+    }
+
+    /// Sets the projection kind (default: Mercator).
+    pub fn projection(mut self, kind: ProjectionKind) -> Self {
+        self.projection = kind;
+        self
+    }
+
     /// Sets the minimum bubble radius in pixels.
     pub fn min_radius(mut self, r: f32) -> Self {
         self.min_radius = r.max(1.0);

@@ -3,6 +3,7 @@ pub mod area;
 pub mod bar;
 pub mod boxplot;
 pub mod bubble_map;
+pub mod choropleth;
 pub mod gauge;
 pub mod heatmap;
 pub mod line;
@@ -18,6 +19,7 @@ pub use area::{Area, IntoAreas, area, areas};
 pub use bar::{Bars, IntoBars, bar, bars};
 pub use boxplot::{BoxPlot, boxplot, entry, entry_from_data};
 pub use bubble_map::{BubbleMap, MapPoint, bubble_map, map_point};
+pub use choropleth::{Choropleth, ChoroplethEntry, IntoChoropleth, Normalization, choropleth, choropleth_entry};
 pub use gauge::{Gauge, gauge};
 pub use heatmap::{Heatmap, heatmap};
 pub use line::{IntoLines, Line, line};
@@ -45,6 +47,7 @@ pub enum Mark {
     Bars(Bars),
     BoxPlot(BoxPlot),
     BubbleMap(BubbleMap),
+    Choropleth(Choropleth),
     Line(Line),
     Pie(Pie),
     Gauge(Gauge),
@@ -152,8 +155,13 @@ impl Mark {
                     })
                 })
                 .collect(),
-            // Rule, Tick, Gauge, Heatmap don't contribute to legend
-            Mark::Rule(_) | Mark::Tick(_) | Mark::Gauge(_) | Mark::Waterfall(_) | Mark::Heatmap(_) => Vec::new(),
+            // Rule, Tick, Gauge, Heatmap, Choropleth don't contribute to legend
+            Mark::Rule(_)
+            | Mark::Tick(_)
+            | Mark::Gauge(_)
+            | Mark::Waterfall(_)
+            | Mark::Heatmap(_)
+            | Mark::Choropleth(_) => Vec::new(),
         }
     }
 }
@@ -239,5 +247,11 @@ impl From<Violin> for Mark {
 impl From<BubbleMap> for Mark {
     fn from(bm: BubbleMap) -> Self {
         Mark::BubbleMap(bm)
+    }
+}
+
+impl From<Choropleth> for Mark {
+    fn from(c: Choropleth) -> Self {
+        Mark::Choropleth(c)
     }
 }
