@@ -467,7 +467,8 @@ where
                     | crate::Mark::Pie(_)
                     | crate::Mark::Gauge(_)
                     | crate::Mark::Treemap(_)
-                    | crate::Mark::BubbleMap(_) => {}
+                    | crate::Mark::BubbleMap(_)
+                    | crate::Mark::Choropleth(_) => {}
                 }
             }
 
@@ -824,7 +825,11 @@ where
                         }
                     }
                 },
-                crate::Mark::Pie(_) | crate::Mark::Gauge(_) | crate::Mark::Treemap(_) | crate::Mark::BubbleMap(_) => {}
+                crate::Mark::Pie(_)
+                | crate::Mark::Gauge(_)
+                | crate::Mark::Treemap(_)
+                | crate::Mark::BubbleMap(_)
+                | crate::Mark::Choropleth(_) => {}
             }
         }
 

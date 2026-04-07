@@ -6,31 +6,9 @@ use crate::data::Datum;
 use crate::widget::canvas::{Frame, Path, Text as CanvasText};
 use crate::widget::renderer::geometry;
 
-/// Interpolate between color stops in linear RGB at parameter `t` in 0..1.
+/// Interpolate between color stops in OKLch at parameter `t` in 0..1.
 fn interpolate_stops(stops: &[crate::core::Color], t: f32) -> crate::core::Color {
-    if stops.is_empty() {
-        return crate::core::Color::BLACK;
-    }
-    if stops.len() == 1 || t <= 0.0 {
-        return stops[0];
-    }
-    if t >= 1.0 {
-        return stops[stops.len() - 1];
-    }
-
-    let segment_t = t * (stops.len() - 1) as f32;
-    let seg_idx = (segment_t.floor() as usize).min(stops.len() - 2);
-    let local_t = segment_t - seg_idx as f32;
-
-    let a = stops[seg_idx].into_linear();
-    let b = stops[seg_idx + 1].into_linear();
-
-    crate::core::Color::from_linear_rgba(
-        a[0] + (b[0] - a[0]) * local_t,
-        a[1] + (b[1] - a[1]) * local_t,
-        a[2] + (b[2] - a[2]) * local_t,
-        a[3] + (b[3] - a[3]) * local_t,
-    )
+    crate::palette::sample_gradient(stops, t)
 }
 
 /// State for Heatmap - stores positioned cell rectangles.

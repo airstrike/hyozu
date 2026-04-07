@@ -94,6 +94,7 @@ impl Palette {
                 }
                 Mark::Treemap(_) => Palette::Categorical,
                 Mark::BubbleMap(_) => Palette::Categorical,
+                Mark::Choropleth(_) => Palette::Sequential,
                 Mark::Line(_) | Mark::Xy(_) => Palette::Sequential,
                 Mark::Heatmap(_) => Palette::Sequential,
                 Mark::Violin(v) => {
@@ -129,6 +130,7 @@ pub fn count_color_slots(marks: &[Mark]) -> usize {
             Mark::Waterfall(_) => 3,
             Mark::Heatmap(_) => 0, // heatmap uses its own color_stops
             Mark::BubbleMap(bm) => bm.points.len(),
+            Mark::Choropleth(_) => 0,
             Mark::Violin(v) => v.entries.len(),
             Mark::Tick(_) => 0,
             Mark::Rule(_) => 0,
@@ -273,6 +275,37 @@ fn generate_sequential(primary: crate::core::Color, background: crate::core::Col
         .collect()
 }
 
+/// Sample a color from a gradient defined by stops at parameter `t` in [0.0, 1.0].
+///
+/// Interpolates in OKLch color space for perceptually uniform results.
+pub(crate) fn sample_gradient(stops: &[crate::core::Color], t: f32) -> crate::core::Color {
+    if stops.is_empty() {
+        return crate::core::Color::BLACK;
+    }
+    if stops.len() == 1 || t <= 0.0 {
+        return stops[0];
+    }
+    if t >= 1.0 {
+        return stops[stops.len() - 1];
+    }
+
+    let oklch_stops: Vec<Oklch> = stops.iter().map(|c| to_oklch(*c)).collect();
+
+    let segment_t = t * (oklch_stops.len() - 1) as f32;
+    let seg_idx = (segment_t.floor() as usize).min(oklch_stops.len() - 2);
+    let local_t = segment_t - seg_idx as f32;
+
+    let a = &oklch_stops[seg_idx];
+    let b = &oklch_stops[seg_idx + 1];
+
+    let l = a.l + (b.l - a.l) * local_t;
+    let c = a.c + (b.c - a.c) * local_t;
+    let h = interpolate_hue(a.h, b.h, local_t);
+    let alpha = a.a + (b.a - a.a) * local_t;
+
+    from_oklch(Oklch { l, c, h, a: alpha })
+}
+
 /// Generate gradient colors: interpolate between stops in OKLch.
 fn generate_gradient(stops: &[crate::core::Color], n: usize) -> Vec<Color> {
     if stops.is_empty() {
@@ -282,30 +315,10 @@ fn generate_gradient(stops: &[crate::core::Color], n: usize) -> Vec<Color> {
         return vec![Color::Fixed(stops[0]); n];
     }
 
-    let oklch_stops: Vec<Oklch> = stops.iter().map(|c| to_oklch(*c)).collect();
-
     (0..n)
         .map(|i| {
             let t = i as f32 / (n - 1).max(1) as f32;
-            // Map t to segment
-            let segment_t = t * (oklch_stops.len() - 1) as f32;
-            let seg_idx = (segment_t.floor() as usize).min(oklch_stops.len() - 2);
-            let local_t = segment_t - seg_idx as f32;
-
-            let a = &oklch_stops[seg_idx];
-            let b = &oklch_stops[seg_idx + 1];
-
-            // Interpolate L and C linearly
-            let l = a.l + (b.l - a.l) * local_t;
-            let c = a.c + (b.c - a.c) * local_t;
-
-            // Interpolate H via shortest arc
-            let h = interpolate_hue(a.h, b.h, local_t);
-
-            // Interpolate alpha
-            let alpha = a.a + (b.a - a.a) * local_t;
-
-            Color::Fixed(from_oklch(Oklch { l, c, h, a: alpha }))
+            Color::Fixed(sample_gradient(stops, t))
         })
         .collect()
 }

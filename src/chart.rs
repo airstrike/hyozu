@@ -238,6 +238,7 @@ where
                     let bars_tag = tree::Tag::of::<plot_area::bars::State>();
                     let pie_tag = tree::Tag::of::<plot_area::pie::State>();
                     let treemap_tag = tree::Tag::of::<plot_area::treemap::State>();
+                    let choropleth_tag = tree::Tag::of::<plot_area::choropleth::State>();
 
                     // First pass: hit-test labels (labels win when overlapping shapes)
                     for (mark_idx, mark_tree) in plot_area_tree.children.iter().enumerate() {
@@ -328,6 +329,38 @@ where
                                         mark: mark_idx,
                                         series: 0,
                                         index: item_idx,
+                                    })));
+                                    return;
+                                }
+                            }
+                        } else if mark_tree.tag == choropleth_tag {
+                            let choro_state = mark_tree.state.downcast_ref::<plot_area::choropleth::State>();
+
+                            // Bbox pre-filter then ray-cast point-in-polygon
+                            for (feat_idx, bbox) in choro_state.feature_bboxes.iter().enumerate() {
+                                if !bbox.contains(local) {
+                                    continue;
+                                }
+                                // Ray-casting: count crossings of a horizontal ray to the right
+                                let mut inside = false;
+                                for ring in &choro_state.projected_polygons[feat_idx] {
+                                    let n = ring.len();
+                                    let mut j = n.wrapping_sub(1);
+                                    for i in 0..n {
+                                        let (xi, yi) = ring[i];
+                                        let (xj, yj) = ring[j];
+                                        if ((yi > local.y) != (yj > local.y))
+                                            && (local.x < (xj - xi) * (local.y - yi) / (yj - yi) + xi)
+                                        {
+                                            inside = !inside;
+                                        }
+                                        j = i;
+                                    }
+                                }
+                                if inside && let Some(id) = choro_state.filtered_ids.get(feat_idx) {
+                                    shell.publish(on_action(Action::Clicked(crate::target::Target::Feature {
+                                        mark: mark_idx,
+                                        id: id.clone(),
                                     })));
                                     return;
                                 }

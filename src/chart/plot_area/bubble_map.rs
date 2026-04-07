@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::core::Size;
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
@@ -8,13 +10,65 @@ use crate::widget::renderer::geometry;
 
 use super::Plane;
 
-/// State for BubbleMap — stores projected bubble positions for hit-testing.
+// ── State ──────────────────────────────────────────────────────────
+
+/// Cached projection data for the bubble map renderer.
 pub struct State {
     /// Pixel center and radius for each bubble (in local coordinates).
     pub bubble_circles: Vec<(crate::core::Point, f32)>,
+    /// Projected polygon rings per feature, in pixel coordinates.
+    pub projected_polygons: Vec<Vec<Vec<(f32, f32)>>>,
+    /// Axis-aligned bounding box per feature (for future culling / hit-testing).
+    pub feature_bboxes: Vec<crate::core::Rectangle>,
+    /// The projection used for the current frame.
+    pub projection: Option<crate::geo::Projection>,
+    // Dirty-check fields
+    prev_size: (f32, f32),
+    prev_scope: crate::geo::MapScope,
+    prev_geo: Option<Arc<crate::geo::GeoData>>,
 }
 
-/// A BubbleMap series that renders a world map with sized bubbles.
+impl Default for State {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl State {
+    pub fn new() -> Self {
+        Self {
+            bubble_circles: Vec::new(),
+            projected_polygons: Vec::new(),
+            feature_bboxes: Vec::new(),
+            projection: None,
+            prev_size: (0.0, 0.0),
+            prev_scope: crate::geo::MapScope::World,
+            prev_geo: None,
+        }
+    }
+
+    /// Returns `true` when the cached polygon data needs recomputation.
+    fn is_dirty(&self, size: (f32, f32), scope: crate::geo::MapScope, geo: &Option<Arc<crate::geo::GeoData>>) -> bool {
+        if self.prev_size != size || self.prev_scope != scope {
+            return true;
+        }
+        match (&self.prev_geo, geo) {
+            (Some(a), Some(b)) => !Arc::ptr_eq(a, b),
+            (None, None) => false,
+            _ => true,
+        }
+    }
+
+    fn mark_clean(&mut self, size: (f32, f32), scope: crate::geo::MapScope, geo: &Option<Arc<crate::geo::GeoData>>) {
+        self.prev_size = size;
+        self.prev_scope = scope;
+        self.prev_geo = geo.clone();
+    }
+}
+
+// ── Widget ─────────────────────────────────────────────────────────
+
+/// A BubbleMap series that renders a geographic basemap with sized bubbles.
 pub struct BubbleMap<'a, Message, Renderer>
 where
     Message: 'a,
@@ -39,28 +93,77 @@ where
     pub(super) fn state(&self) -> Tree {
         Tree {
             tag: tree::Tag::of::<State>(),
-            state: tree::State::new(State {
-                bubble_circles: Vec::new(),
-            }),
+            state: tree::State::new(State::new()),
             children: Vec::new(),
         }
     }
 
     pub(super) fn diff(&self, _tree: &mut Tree) {}
 
+    // ── Layout ─────────────────────────────────────────────────────
+
     pub fn layout(&self, tree: &mut Tree, _renderer: &Renderer, limits: &Limits, _plane: &Plane) -> Node {
         let state = tree.state.downcast_mut::<State>();
         let size = limits.max();
+        let scope = self.data.scope;
 
-        // Compute projected positions for each point.
+        // Build projection for this viewport + scope.
+        let projection =
+            crate::geo::Projection::new(self.data.projection).fit_size(size.width, size.height, scope.bounds());
+        state.projection = Some(projection);
+
+        // Reproject basemap polygons only when inputs change.
+        let size_key = (size.width, size.height);
+        if state.is_dirty(size_key, scope, &self.data.geo) {
+            state.projected_polygons.clear();
+            state.feature_bboxes.clear();
+
+            if let Some(geo) = &self.data.geo {
+                let filtered = geo.filter_by_scope(scope);
+
+                for feature in &filtered.features {
+                    let mut projected_rings: Vec<Vec<(f32, f32)>> = Vec::new();
+                    let mut bbox_min_x = f32::INFINITY;
+                    let mut bbox_min_y = f32::INFINITY;
+                    let mut bbox_max_x = f32::NEG_INFINITY;
+                    let mut bbox_max_y = f32::NEG_INFINITY;
+
+                    for ring in &feature.polygons {
+                        let projected: Vec<(f32, f32)> = ring
+                            .iter()
+                            .map(|&(lon, lat)| {
+                                let (px, py) = projection.project(lon, lat);
+                                bbox_min_x = bbox_min_x.min(px);
+                                bbox_min_y = bbox_min_y.min(py);
+                                bbox_max_x = bbox_max_x.max(px);
+                                bbox_max_y = bbox_max_y.max(py);
+                                (px, py)
+                            })
+                            .collect();
+                        projected_rings.push(projected);
+                    }
+
+                    state.feature_bboxes.push(crate::core::Rectangle {
+                        x: bbox_min_x,
+                        y: bbox_min_y,
+                        width: (bbox_max_x - bbox_min_x).max(0.0),
+                        height: (bbox_max_y - bbox_min_y).max(0.0),
+                    });
+                    state.projected_polygons.push(projected_rings);
+                }
+            }
+
+            state.mark_clean(size_key, scope, &self.data.geo);
+        }
+
+        // Always recompute bubble positions (cheap).
         state.bubble_circles = self
             .data
             .points
             .iter()
             .map(|pt| {
-                let pos = project(pt.lat as f32, pt.lon as f32, size.width, size.height);
-                let radius = 0.0; // computed during draw when value range is known
-                (pos, radius)
+                let (px, py) = projection.project(pt.lon as f32, pt.lat as f32);
+                (crate::core::Point::new(px, py), 0.0)
             })
             .collect();
 
@@ -79,6 +182,8 @@ where
 
         Node::new(Size::ZERO)
     }
+
+    // ── Draw ───────────────────────────────────────────────────────
 
     #[allow(clippy::too_many_arguments)]
     pub fn draw<Theme>(
@@ -99,41 +204,39 @@ where
         let background = theme.background_color();
         let text_pair = theme.text_pair();
         let layout_bounds = layout.bounds();
-        let w = layout_bounds.width;
-        let h = layout_bounds.height;
 
         // ── Land polygons ──────────────────────────────────────────
         let mut land_frame = Frame::new(renderer, layout_bounds.size());
 
-        let land_fill = crate::core::Color {
-            r: background.r * 0.92 + 0.08 * 0.7,
-            g: background.g * 0.92 + 0.08 * 0.72,
-            b: background.b * 0.92 + 0.08 * 0.74,
-            a: 1.0,
-        };
-        let land_stroke_color = crate::core::Color {
-            r: land_fill.r * 0.85,
-            g: land_fill.g * 0.85,
-            b: land_fill.b * 0.85,
-            a: 0.6,
-        };
+        if self.data.show_basemap && !state.projected_polygons.is_empty() {
+            let land_fill = crate::core::Color {
+                r: background.r * 0.92 + 0.08 * 0.7,
+                g: background.g * 0.92 + 0.08 * 0.72,
+                b: background.b * 0.92 + 0.08 * 0.74,
+                a: 1.0,
+            };
+            let border_color = theme.divider_color().resolve(background, text_pair, None);
+            let border_stroke = Stroke::default().with_color(border_color).with_width(0.5);
 
-        for polygon in crate::geo::world_polygons() {
-            if polygon.len() < 3 {
-                continue;
-            }
+            for rings in &state.projected_polygons {
+                for ring in rings {
+                    if ring.len() < 3 {
+                        continue;
+                    }
 
-            let path = Path::new(|builder| {
-                let first = project(polygon[0].1, polygon[0].0, w, h);
-                builder.move_to(first);
-                for &(lon, lat) in &polygon[1..] {
-                    builder.line_to(project(lat, lon, w, h));
+                    let path = Path::new(|builder| {
+                        let (x0, y0) = ring[0];
+                        builder.move_to(crate::core::Point::new(x0, y0));
+                        for &(x, y) in &ring[1..] {
+                            builder.line_to(crate::core::Point::new(x, y));
+                        }
+                        builder.close();
+                    });
+
+                    land_frame.fill(&path, land_fill);
+                    land_frame.stroke(&path, border_stroke);
                 }
-                builder.close();
-            });
-
-            land_frame.fill(&path, land_fill);
-            land_frame.stroke(&path, Stroke::default().with_color(land_stroke_color).with_width(0.5));
+            }
         }
 
         // ── Bubbles ────────────────────────────────────────────────
@@ -159,7 +262,6 @@ where
                 ..base_color
             };
 
-            // Filled circle
             let circle = Path::new(|builder| {
                 trace_circle(builder, center.x, center.y, radius);
             });
@@ -179,7 +281,6 @@ where
             };
 
             let (center, radius) = state.bubble_circles[i];
-
             let label_color = text_pair.resolve(background, None);
 
             label_frame.fill_text(CanvasText {
@@ -211,21 +312,7 @@ where
     }
 }
 
-// ── Projection helpers ─────────────────────────────────────────────
-
-/// Equirectangular projection: (lat, lon) → pixel (x, y).
-fn project(lat: f32, lon: f32, width: f32, height: f32) -> crate::core::Point {
-    // Slight padding so polygons don't touch edges
-    let padding = 0.02;
-    let usable_w = width * (1.0 - 2.0 * padding);
-    let usable_h = height * (1.0 - 2.0 * padding);
-    let x_off = width * padding;
-    let y_off = height * padding;
-
-    let x = x_off + ((lon + 180.0) / 360.0) * usable_w;
-    let y = y_off + ((90.0 - lat) / 180.0) * usable_h;
-    crate::core::Point::new(x, y)
-}
+// ── Helpers ────────────────────────────────────────────────────────
 
 /// Compute (min, max) of point values, clamping min to 0.
 fn value_range(points: &[crate::mark::bubble_map::MapPoint]) -> (f32, f32) {

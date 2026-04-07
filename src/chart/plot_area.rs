@@ -10,6 +10,7 @@ pub mod area;
 pub mod bars;
 pub mod boxplot;
 pub mod bubble_map;
+pub mod choropleth;
 pub mod gauge;
 pub mod heatmap;
 pub mod line;
@@ -24,6 +25,7 @@ pub mod xy;
 pub use bars::Bars;
 pub use boxplot::BoxPlot;
 pub use bubble_map::BubbleMap;
+pub use choropleth::Choropleth;
 pub use gauge::Gauge;
 pub use heatmap::Heatmap;
 pub use line::Line;
@@ -101,6 +103,7 @@ where
     Bars(Bars<'a, Message, Renderer>),
     BoxPlot(BoxPlot<'a, Message, Renderer>),
     BubbleMap(BubbleMap<'a, Message, Renderer>),
+    Choropleth(Choropleth<'a, Message, Renderer>),
     Pie(Pie<'a, Message, Renderer>),
     Gauge(Gauge<'a, Message, Renderer>),
     Waterfall(Waterfall<'a, Message, Renderer>),
@@ -147,6 +150,7 @@ where
                 crate::Mark::Bars(bars) => Series::Bars(Bars::new(bars)),
                 crate::Mark::BoxPlot(bp) => Series::BoxPlot(BoxPlot::new(bp)),
                 crate::Mark::BubbleMap(bm) => Series::BubbleMap(BubbleMap::new(bm)),
+                crate::Mark::Choropleth(c) => Series::Choropleth(Choropleth::new(c)),
                 crate::Mark::Pie(pie) => Series::Pie(Pie::new(pie)),
                 crate::Mark::Gauge(gauge) => Series::Gauge(Gauge::new(gauge)),
                 crate::Mark::Waterfall(wf) => Series::Waterfall(Waterfall::new(wf)),
@@ -174,6 +178,7 @@ where
                 Series::Bars(bars) => bars.state(),
                 Series::BoxPlot(bp) => bp.state(),
                 Series::BubbleMap(bm) => bm.state(),
+                Series::Choropleth(c) => c.state(),
                 Series::Pie(pie) => pie.state(),
                 Series::Gauge(gauge) => gauge.state(),
                 Series::Waterfall(wf) => wf.state(),
@@ -208,6 +213,7 @@ where
                     Series::Bars(_) => tree::Tag::of::<bars::State>(),
                     Series::BoxPlot(_) => tree::Tag::of::<boxplot::State>(),
                     Series::BubbleMap(_) => tree::Tag::of::<bubble_map::State>(),
+                    Series::Choropleth(_) => tree::Tag::of::<choropleth::State>(),
                     Series::Pie(_) => tree::Tag::of::<pie::State>(),
                     Series::Gauge(_) => tree::Tag::of::<gauge::State>(),
                     Series::Waterfall(_) => tree::Tag::of::<waterfall::State>(),
@@ -226,6 +232,7 @@ where
                         Series::Bars(bars) => bars.state(),
                         Series::BoxPlot(bp) => bp.state(),
                         Series::BubbleMap(bm) => bm.state(),
+                        Series::Choropleth(c) => c.state(),
                         Series::Pie(pie) => pie.state(),
                         Series::Gauge(gauge) => gauge.state(),
                         Series::Waterfall(wf) => wf.state(),
@@ -243,6 +250,7 @@ where
                         Series::Bars(bars) => bars.diff(tree),
                         Series::BoxPlot(bp) => bp.diff(tree),
                         Series::BubbleMap(bm) => bm.diff(tree),
+                        Series::Choropleth(c) => c.diff(tree),
                         Series::Pie(pie) => pie.diff(tree),
                         Series::Gauge(gauge) => gauge.diff(tree),
                         Series::Waterfall(wf) => wf.diff(tree),
@@ -261,6 +269,7 @@ where
                 Series::Bars(bars) => bars.state(),
                 Series::BoxPlot(bp) => bp.state(),
                 Series::BubbleMap(bm) => bm.state(),
+                Series::Choropleth(c) => c.state(),
                 Series::Pie(pie) => pie.state(),
                 Series::Gauge(gauge) => gauge.state(),
                 Series::Waterfall(wf) => wf.state(),
@@ -491,7 +500,11 @@ where
                     }
                 },
                 // Non-Cartesian marks don't use Cartesian bounds
-                Series::Pie(_) | Series::Gauge(_) | Series::Treemap(_) | Series::BubbleMap(_) => {}
+                Series::Pie(_)
+                | Series::Gauge(_)
+                | Series::Treemap(_)
+                | Series::BubbleMap(_)
+                | Series::Choropleth(_) => {}
             }
         }
 
@@ -640,6 +653,9 @@ where
                 Series::BubbleMap(bm) => {
                     bm.layout(series_tree, renderer, limits, &plane);
                 }
+                Series::Choropleth(c) => {
+                    c.layout(series_tree, renderer, limits, &plane);
+                }
                 Series::Pie(pie) => {
                     pie.layout(series_tree, renderer, limits, &plane);
                 }
@@ -770,6 +786,19 @@ where
                         palette,
                     );
                     color_offset += bm.data.points.len();
+                }
+                Series::Choropleth(c) => {
+                    c.draw(
+                        series_tree,
+                        renderer,
+                        design,
+                        style,
+                        layout,
+                        cursor,
+                        viewport,
+                        color_offset,
+                        palette,
+                    );
                 }
                 Series::Pie(pie) => {
                     pie.draw(
