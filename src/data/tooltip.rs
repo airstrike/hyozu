@@ -21,10 +21,35 @@ pub struct TooltipEntry {
 ///
 /// Controls how hover tooltips are displayed, including the format
 /// function, tracking line, and point markers.
+///
+/// # Examples
+///
+/// ```ignore
+/// use hyozu::{data, line, Tooltip, Swatch, ColoredText};
+///
+/// // Default: colored swatch circle + label
+/// data(line([10, 20, 30])).tooltip(Tooltip::default())
+///
+/// // Colored text (no swatch)
+/// data(line([10, 20, 30])).tooltip(ColoredText)
+///
+/// // Swatch + colored text
+/// data(line([10, 20, 30])).tooltip(Swatch + ColoredText)
+///
+/// // Custom format with swatch
+/// data(line([10, 20, 30])).tooltip(Swatch + |e: &TooltipEntry| format!("${:.2}", e.y))
+///
+/// // Custom format with colored text
+/// data(line([10, 20, 30])).tooltip(ColoredText + |e: &TooltipEntry| format!("${:.2}", e.y))
+/// ```
 #[derive(Clone)]
 pub struct Tooltip {
     /// Format function that produces the tooltip text for an entry.
     pub(crate) format: Arc<dyn Fn(&TooltipEntry) -> String + Send + Sync>,
+    /// Whether to show a colored swatch circle before each entry.
+    pub(crate) swatch: bool,
+    /// Whether to render each entry's text in the series color.
+    pub(crate) colored_text: bool,
     /// Whether to show a vertical tracking line at the cursor x position.
     pub(crate) tracking_line: bool,
     /// Whether to show markers on the hovered data points.
@@ -35,6 +60,8 @@ impl std::fmt::Debug for Tooltip {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Tooltip")
             .field("format", &"<function>")
+            .field("swatch", &self.swatch)
+            .field("colored_text", &self.colored_text)
             .field("tracking_line", &self.tracking_line)
             .field("markers", &self.markers)
             .finish()
@@ -42,9 +69,6 @@ impl std::fmt::Debug for Tooltip {
 }
 
 /// Default tooltip formatter: shows "name: value" or just "value".
-///
-/// Numbers are formatted as integers when they have no fractional part,
-/// otherwise with one decimal place.
 fn default_format(entry: &TooltipEntry) -> String {
     let value = if entry.y.fract().abs() < 0.001 {
         format!("{}", entry.y as i64)
@@ -62,6 +86,8 @@ impl Default for Tooltip {
     fn default() -> Self {
         Self {
             format: Arc::new(default_format),
+            swatch: true,
+            colored_text: false,
             tracking_line: true,
             markers: true,
         }
@@ -72,6 +98,18 @@ impl Tooltip {
     /// Set a custom format function for tooltip text.
     pub fn format(mut self, f: impl Fn(&TooltipEntry) -> String + Send + Sync + 'static) -> Self {
         self.format = Arc::new(f);
+        self
+    }
+
+    /// Set whether to show a colored swatch circle before each entry.
+    pub fn swatch(mut self, show: bool) -> Self {
+        self.swatch = show;
+        self
+    }
+
+    /// Set whether to render text in the series color.
+    pub fn colored_text(mut self, colored: bool) -> Self {
+        self.colored_text = colored;
         self
     }
 
@@ -88,11 +126,124 @@ impl Tooltip {
     }
 }
 
+// --- Atom types for composable tooltip construction ---
+
+/// Show a colored swatch circle before each tooltip entry.
+///
+/// Can be used directly or combined with other atoms via `+`.
+///
+/// ```ignore
+/// data(line([1, 2, 3])).tooltip(Swatch)
+/// data(line([1, 2, 3])).tooltip(Swatch + ColoredText)
+/// data(line([1, 2, 3])).tooltip(Swatch + |e: &TooltipEntry| format!("${}", e.y))
+/// ```
+#[derive(Debug, Clone, Copy)]
+pub struct Swatch;
+
+/// Render each tooltip entry's text in the series color.
+///
+/// Can be used directly or combined with other atoms via `+`.
+///
+/// ```ignore
+/// data(line([1, 2, 3])).tooltip(ColoredText)
+/// data(line([1, 2, 3])).tooltip(ColoredText + Swatch)
+/// ```
+#[derive(Debug, Clone, Copy)]
+pub struct ColoredText;
+
+// --- From impls: atoms → Tooltip ---
+
+impl From<Swatch> for Tooltip {
+    fn from(_: Swatch) -> Self {
+        Tooltip {
+            swatch: true,
+            colored_text: false,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<ColoredText> for Tooltip {
+    fn from(_: ColoredText) -> Self {
+        Tooltip {
+            swatch: false,
+            colored_text: true,
+            ..Default::default()
+        }
+    }
+}
+
+/// A closure producing text gets swatch styling by default.
 impl<F> From<F> for Tooltip
 where
     F: Fn(&TooltipEntry) -> String + Send + Sync + 'static,
 {
     fn from(f: F) -> Self {
         Tooltip::default().format(f)
+    }
+}
+
+// --- Add impls: composing atoms ---
+
+impl std::ops::Add<ColoredText> for Swatch {
+    type Output = Tooltip;
+    fn add(self, _rhs: ColoredText) -> Tooltip {
+        Tooltip {
+            swatch: true,
+            colored_text: true,
+            ..Default::default()
+        }
+    }
+}
+
+impl std::ops::Add<Swatch> for ColoredText {
+    type Output = Tooltip;
+    fn add(self, _rhs: Swatch) -> Tooltip {
+        Tooltip {
+            swatch: true,
+            colored_text: true,
+            ..Default::default()
+        }
+    }
+}
+
+// Atom + format closure
+
+impl<F: Fn(&TooltipEntry) -> String + Send + Sync + 'static> std::ops::Add<F> for Swatch {
+    type Output = Tooltip;
+    fn add(self, format: F) -> Tooltip {
+        Tooltip::from(Swatch).format(format)
+    }
+}
+
+impl<F: Fn(&TooltipEntry) -> String + Send + Sync + 'static> std::ops::Add<F> for ColoredText {
+    type Output = Tooltip;
+    fn add(self, format: F) -> Tooltip {
+        Tooltip::from(ColoredText).format(format)
+    }
+}
+
+// Tooltip + atoms (for chaining after initial construction)
+
+impl std::ops::Add<Swatch> for Tooltip {
+    type Output = Tooltip;
+    fn add(mut self, _rhs: Swatch) -> Tooltip {
+        self.swatch = true;
+        self
+    }
+}
+
+impl std::ops::Add<ColoredText> for Tooltip {
+    type Output = Tooltip;
+    fn add(mut self, _rhs: ColoredText) -> Tooltip {
+        self.colored_text = true;
+        self
+    }
+}
+
+impl<F: Fn(&TooltipEntry) -> String + Send + Sync + 'static> std::ops::Add<F> for Tooltip {
+    type Output = Tooltip;
+    fn add(self, format: F) -> Tooltip {
+        self.format(format)
     }
 }

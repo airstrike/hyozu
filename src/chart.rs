@@ -857,7 +857,12 @@ fn draw_tooltip_overlay<Message>(
             .map(|s| s.len() as f32 * char_width)
             .fold(0.0f32, f32::max);
 
-        let box_width = box_padding * 2.0 + swatch_size + swatch_gap + max_text_width;
+        let swatch_space = if tooltip_config.swatch {
+            swatch_size + swatch_gap
+        } else {
+            0.0
+        };
+        let box_width = box_padding * 2.0 + swatch_space + max_text_width;
         let box_height = box_padding * 2.0 + entries.len() as f32 * line_height_px;
 
         // Position tooltip box: right of tracking line if in left half, else left
@@ -901,28 +906,37 @@ fn draw_tooltip_overlay<Message>(
         // Draw each entry line
         for (i, ((_entry, _pixel, series_color), text)) in entries.iter().zip(formatted.iter()).enumerate() {
             let row_y = box_y + box_padding + i as f32 * line_height_px;
+            let mut text_x = box_x + box_padding;
 
-            // Colored swatch circle
-            let swatch_y = row_y + (line_height_px - swatch_size) / 2.0;
-            renderer.fill_quad(
-                crate::core::renderer::Quad {
-                    bounds: Rectangle {
-                        x: box_x + box_padding,
-                        y: swatch_y,
-                        width: swatch_size,
-                        height: swatch_size,
-                    },
-                    border: crate::core::Border {
-                        radius: (swatch_size / 2.0).into(),
+            // Colored swatch circle (if enabled)
+            if tooltip_config.swatch {
+                let swatch_y = row_y + (line_height_px - swatch_size) / 2.0;
+                renderer.fill_quad(
+                    crate::core::renderer::Quad {
+                        bounds: Rectangle {
+                            x: text_x,
+                            y: swatch_y,
+                            width: swatch_size,
+                            height: swatch_size,
+                        },
+                        border: crate::core::Border {
+                            radius: (swatch_size / 2.0).into(),
+                            ..Default::default()
+                        },
                         ..Default::default()
                     },
-                    ..Default::default()
-                },
-                *series_color,
-            );
+                    *series_color,
+                );
+                text_x += swatch_size + swatch_gap;
+            }
 
-            // Text label
-            let text_x = box_x + box_padding + swatch_size + swatch_gap;
+            // Text label — optionally colored to match series
+            let label_color = if tooltip_config.colored_text {
+                *series_color
+            } else {
+                text_color
+            };
+
             renderer.fill_text(
                 crate::core::text::Text {
                     content: text.clone(),
@@ -942,7 +956,7 @@ fn draw_tooltip_overlay<Message>(
                     weight: None,
                 },
                 Point::new(text_x, row_y + (line_height_px - font_size) / 2.0),
-                text_color,
+                label_color,
                 *viewport,
             );
         }
