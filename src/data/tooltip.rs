@@ -52,7 +52,8 @@ pub struct Tooltip {
     pub(crate) colored_text: bool,
     /// Whether to show a vertical tracking line at the cursor x position.
     pub(crate) tracking_line: bool,
-    /// Whether to show markers on the hovered data points.
+    /// Whether to show hover annotations at matched data points
+    /// (e.g. circle markers on lines).
     pub(crate) markers: bool,
 }
 

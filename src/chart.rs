@@ -1,4 +1,5 @@
 pub mod guide;
+pub(crate) mod hover;
 pub mod legend;
 pub mod plot_area;
 mod scene;
@@ -36,15 +37,7 @@ where
 #[derive(Default)]
 struct State {
     is_pressed: bool,
-    hover: Option<HoverState>,
-}
-
-/// Hover state holding the snapped data-x and the matching entries.
-struct HoverState {
-    /// Snapped data-space x coordinate.
-    data_x: f64,
-    /// Matching entries: (mark_index, series_index, point_index).
-    entries: Vec<(usize, usize, usize)>,
+    hover: Option<hover::State>,
 }
 
 /// Creates a chart widget from data.
@@ -149,7 +142,7 @@ fn compute_plot_bounds(
 /// Scan the plot area tree for the nearest pixel x, then collect all entries
 /// at that x. Returns `None` if no hoverable points exist or the cursor is
 /// too far from any point.
-fn find_nearest_hover(local: Point, plot_area_tree: &Tree, plane: &plot_area::Plane) -> Option<HoverState> {
+fn find_nearest_hover(local: Point, plot_area_tree: &Tree, plane: &plot_area::Plane) -> Option<hover::State> {
     let line_tag = tree::Tag::of::<plot_area::line::State>();
     let area_tag = tree::Tag::of::<plot_area::area::State>();
     let xy_tag = tree::Tag::of::<plot_area::xy::State>();
@@ -265,7 +258,7 @@ fn find_nearest_hover(local: Point, plot_area_tree: &Tree, plane: &plot_area::Pl
     if entries.is_empty() {
         return None;
     }
-    Some(HoverState { data_x, entries })
+    Some(hover::State { data_x, entries })
 }
 
 impl<'a, Message, Design, Theme> Widget<Message, Theme, Renderer> for Chart<'a, Message, Design, Theme>
@@ -673,7 +666,7 @@ fn draw_tooltip_overlay<Message>(
     padding: Padding,
     plot_area_offset: Point,
     plane: &plot_area::Plane,
-    hover: &HoverState,
+    hover: &hover::State,
     tooltip_config: &crate::data::tooltip::Tooltip,
     scene: &scene::Scene<'_, Message, Renderer>,
     scene_tree: &Tree,
@@ -709,19 +702,21 @@ fn draw_tooltip_overlay<Message>(
     let xy_tag = tree::Tag::of::<plot_area::xy::State>();
     let bars_tag = tree::Tag::of::<plot_area::bars::State>();
 
-    let mut entries: Vec<(TooltipEntry, Point, crate::core::Color)> = Vec::new();
+    let mut entries: Vec<hover::Entry> = Vec::new();
 
     for &(mark_idx, series_idx, pt_idx) in &hover.entries {
         let series = &plot_area.series[mark_idx];
         let child = &plot_area_tree.children[mark_idx];
 
-        let (datum, name, explicit_color) = if child.tag == line_tag {
+        let (datum, name, explicit_color, annotation) = if child.tag == line_tag {
             if let plot_area::Series::Line(line) = series {
                 let pt = &line.data.points[pt_idx];
+                let pixel = plane.to_pixel(crate::data::Datum { x: pt.x, y: pt.y });
                 (
                     crate::data::Datum { x: pt.x, y: pt.y },
                     line.data.name().map(|s| s.to_string()),
                     line.data.color,
+                    hover::Annotation::PointMarker { pixel, radius: 4.0 },
                 )
             } else {
                 continue;
@@ -730,10 +725,12 @@ fn draw_tooltip_overlay<Message>(
             if let plot_area::Series::Area(area) = series {
                 let ser = &area.data.series[series_idx];
                 let pt = &ser.points[pt_idx];
+                let pixel = plane.to_pixel(crate::data::Datum { x: pt.x, y: pt.y });
                 (
                     crate::data::Datum { x: pt.x, y: pt.y },
                     ser.name().map(|s| s.to_string()),
                     ser.color,
+                    hover::Annotation::PointMarker { pixel, radius: 4.0 },
                 )
             } else {
                 continue;
@@ -741,10 +738,12 @@ fn draw_tooltip_overlay<Message>(
         } else if child.tag == xy_tag {
             if let plot_area::Series::Xy(xy) = series {
                 let pt = &xy.data.points[pt_idx];
+                let pixel = plane.to_pixel(crate::data::Datum { x: pt.x, y: pt.y });
                 (
                     crate::data::Datum { x: pt.x, y: pt.y },
                     xy.data.name.as_deref().map(|s| s.to_string()),
                     None,
+                    hover::Annotation::PointMarker { pixel, radius: 4.0 },
                 )
             } else {
                 continue;
@@ -757,6 +756,7 @@ fn draw_tooltip_overlay<Message>(
                     crate::data::Datum { x: pt.x, y: pt.y },
                     bar_series.name().map(|s| s.to_string()),
                     bar_series.color().cloned(),
+                    hover::Annotation::None,
                 )
             } else {
                 continue;
@@ -765,7 +765,7 @@ fn draw_tooltip_overlay<Message>(
             continue;
         };
 
-        let pixel = plane.to_pixel(datum);
+        let anchor = plane.to_pixel(datum);
 
         // Resolve series color: use explicit mark color if set, else palette
         let series_color = if let Some(c) = explicit_color {
@@ -775,8 +775,8 @@ fn draw_tooltip_overlay<Message>(
             palette.get(color_idx).resolve(background, text_pair, None)
         };
 
-        entries.push((
-            TooltipEntry {
+        entries.push(hover::Entry {
+            tooltip: TooltipEntry {
                 x: datum.x,
                 y: datum.y,
                 series_name: name,
@@ -784,9 +784,10 @@ fn draw_tooltip_overlay<Message>(
                 mark_index: mark_idx,
                 color: series_color,
             },
-            pixel,
-            series_color,
-        ));
+            anchor,
+            color: series_color,
+            annotation,
+        });
     }
 
     if entries.is_empty() {
@@ -799,8 +800,11 @@ fn draw_tooltip_overlay<Message>(
         let frame_size = crate::core::Size::new(plane.bounds.width, plane.bounds.height);
         let mut frame = Frame::new(renderer, frame_size);
 
-        // Tracking line — muted and dashed
-        if tooltip_config.tracking_line {
+        // Tracking line — only for continuous marks (line/area/xy), not discrete (bars)
+        let has_continuous = entries
+            .iter()
+            .any(|re| matches!(re.annotation, hover::Annotation::PointMarker { .. }));
+        if tooltip_config.tracking_line && has_continuous {
             let line_x = tracking_pixel_x - plane.bounds.x;
             let tracking_color = crate::core::Color { a: 0.18, ..text_color };
             let path = Path::line(Point::new(line_x, 0.0), Point::new(line_x, plane.bounds.height));
@@ -815,21 +819,25 @@ fn draw_tooltip_overlay<Message>(
             frame.stroke(&path, stroke);
         }
 
-        // Markers
+        // Hover annotations — each mark type declares its own visual
         if tooltip_config.markers {
-            for (_, pixel, series_color) in &entries {
-                let cx = pixel.x - plane.bounds.x;
-                let cy = pixel.y - plane.bounds.y;
-                let radius = 4.0;
+            for re in &entries {
+                match &re.annotation {
+                    hover::Annotation::PointMarker { pixel, radius } => {
+                        let cx = pixel.x - plane.bounds.x;
+                        let cy = pixel.y - plane.bounds.y;
 
-                let circle = Path::circle(Point::new(cx, cy), radius);
-                frame.fill(&circle, *series_color);
+                        let circle = Path::circle(Point::new(cx, cy), *radius);
+                        frame.fill(&circle, re.color);
 
-                let ring = Path::circle(Point::new(cx, cy), radius);
-                frame.stroke(
-                    &ring,
-                    Stroke::default().with_width(1.5).with_color(crate::core::Color::WHITE),
-                );
+                        let ring = Path::circle(Point::new(cx, cy), *radius);
+                        frame.stroke(
+                            &ring,
+                            Stroke::default().with_width(1.5).with_color(crate::core::Color::WHITE),
+                        );
+                    }
+                    hover::Annotation::None => {}
+                }
             }
         }
 
@@ -846,10 +854,7 @@ fn draw_tooltip_overlay<Message>(
         let box_padding: f32 = 8.0;
         let box_gap: f32 = 8.0;
 
-        let formatted: Vec<String> = entries
-            .iter()
-            .map(|(entry, _, _)| (tooltip_config.format)(entry))
-            .collect();
+        let formatted: Vec<String> = entries.iter().map(|re| (tooltip_config.format)(&re.tooltip)).collect();
 
         let char_width = font_size * 0.58;
         let max_text_width: f32 = formatted
@@ -875,7 +880,7 @@ fn draw_tooltip_overlay<Message>(
         };
 
         // Vertically center on mean y of entries, clamped within chart bounds
-        let mean_y: f32 = entries.iter().map(|(_, pt, _)| pt.y).sum::<f32>() / entries.len() as f32;
+        let mean_y: f32 = entries.iter().map(|re| re.anchor.y).sum::<f32>() / entries.len() as f32;
         let abs_mean_y = plot_bounds.y + mean_y - plane.bounds.y;
         let box_y = (abs_mean_y - box_height / 2.0)
             .max(chart_bounds.y + 2.0)
@@ -904,7 +909,7 @@ fn draw_tooltip_overlay<Message>(
         );
 
         // Draw each entry line
-        for (i, ((_entry, _pixel, series_color), text)) in entries.iter().zip(formatted.iter()).enumerate() {
+        for (i, (re, text)) in entries.iter().zip(formatted.iter()).enumerate() {
             let row_y = box_y + box_padding + i as f32 * line_height_px;
             let mut text_x = box_x + box_padding;
 
@@ -925,14 +930,14 @@ fn draw_tooltip_overlay<Message>(
                         },
                         ..Default::default()
                     },
-                    *series_color,
+                    re.color,
                 );
                 text_x += swatch_size + swatch_gap;
             }
 
             // Text label — optionally colored to match series
             let label_color = if tooltip_config.colored_text {
-                *series_color
+                re.color
             } else {
                 text_color
             };
