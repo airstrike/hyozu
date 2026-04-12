@@ -20,7 +20,8 @@ impl App {
     fn new() -> Self {
         Self {
             sales: data(bars([1200, 1900, 1500, 2200, 1800, 2400]))
-                .x_axis_labels(["Jan", "Feb", "Mar", "Apr", "May", "Jun"]),
+                .x_axis_labels(["Jan", "Feb", "Mar", "Apr", "May", "Jun"])
+                .y_axis(|a| a.show_grid(true).show_minor_grid(true)),
         }
     }
 

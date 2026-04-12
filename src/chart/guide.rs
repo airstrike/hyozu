@@ -394,6 +394,11 @@ where
         }
     }
 
+    /// Returns a reference to the underlying axis.
+    pub fn axis(&self) -> &'a Axis {
+        self.axis
+    }
+
     /// Compute the axis bounds (visual range) for this axis.
     ///
     /// Uses `Kind::bounds()` to apply kind-appropriate normalization (padding,

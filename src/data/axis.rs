@@ -210,11 +210,13 @@ pub struct Axis {
     show_line: bool,
     show_labels: bool,
     show_grid: bool,
+    show_minor_grid: bool,
 
     // Style overrides
     axis_color: Option<Color>,
     label_color: Option<Color>,
     grid_color: Option<Color>,
+    minor_grid_color: Option<Color>,
     font: Option<Font>,
     label_size: Option<Pixels>,
 }
@@ -230,6 +232,7 @@ impl Axis {
         self.show_line = false;
         self.show_labels = false;
         self.show_grid = false;
+        self.show_minor_grid = false;
         self.ticks = tick::Style::None.into();
         self
     }
@@ -249,9 +252,11 @@ impl Axis {
             show_line: true,
             show_labels: true,
             show_grid: true,
+            show_minor_grid: false,
             axis_color: None,
             label_color: None,
             grid_color: None,
+            minor_grid_color: None,
             font: None,
             label_size: None,
         }
@@ -341,6 +346,12 @@ impl Axis {
         self
     }
 
+    /// Set the minor grid line color (overrides design system).
+    pub fn with_minor_grid_color(mut self, color: impl Into<Color>) -> Self {
+        self.minor_grid_color = Some(color.into());
+        self
+    }
+
     /// Set the font (overrides design system).
     pub fn with_font(mut self, font: Font) -> Self {
         self.font = Some(font);
@@ -373,6 +384,12 @@ impl Axis {
     /// Show or hide grid lines.
     pub fn show_grid(mut self, show: bool) -> Self {
         self.show_grid = show;
+        self
+    }
+
+    /// Show or hide minor grid lines (subdivisions between major ticks).
+    pub fn show_minor_grid(mut self, show: bool) -> Self {
+        self.show_minor_grid = show;
         self
     }
 
@@ -440,6 +457,21 @@ impl Axis {
     /// Returns whether grid lines are shown.
     pub fn shows_grid(&self) -> bool {
         self.show_grid
+    }
+
+    /// Returns whether minor grid lines are shown.
+    pub fn shows_minor_grid(&self) -> bool {
+        self.show_minor_grid
+    }
+
+    /// Get the grid color override, if any.
+    pub(crate) fn grid_color(&self) -> Option<Color> {
+        self.grid_color
+    }
+
+    /// Get the minor grid color override, if any.
+    pub(crate) fn minor_grid_color(&self) -> Option<Color> {
+        self.minor_grid_color
     }
 
     /// Returns a mutable reference to the tick configuration.

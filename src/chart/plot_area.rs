@@ -730,6 +730,163 @@ where
         Node::new(size)
     }
 
+    /// Draws major and minor gridlines into the plot area using the stored plane.
+    ///
+    /// Called before `draw()` so marks render on top of gridlines. The tick
+    /// positions (in data coordinates) come from the axis guides; they are
+    /// converted to pixel positions via the plane.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_gridlines<D>(
+        &self,
+        tree: &crate::core::widget::Tree,
+        renderer: &mut Renderer,
+        design: &D,
+        layout: crate::core::Layout<'_>,
+        x_axis: Option<&crate::data::Axis>,
+        y_axis: Option<&crate::data::Axis>,
+        x_ticks: &[f64],
+        y_ticks: &[f64],
+    ) where
+        D: crate::design::Design + ?Sized,
+    {
+        use crate::widget::canvas::{Frame, Path, Stroke};
+
+        let state = tree.state.downcast_ref::<State>();
+        let Some(plane) = state.plane.as_ref() else {
+            return;
+        };
+
+        let layout_bounds = layout.bounds();
+        let size = layout_bounds.size();
+        if size.width <= 0.0 || size.height <= 0.0 {
+            return;
+        }
+
+        let bg = design.background_color();
+        let text_pair = design.text_pair();
+        let divider = design.divider_color().resolve(bg, text_pair, None);
+        // Default alphas when no override is set.
+        let major_alpha = 0.6_f32;
+        let minor_alpha = 0.25_f32;
+
+        let shows_major_x = x_axis.map(|a| a.shows_grid()).unwrap_or(false);
+        let shows_major_y = y_axis.map(|a| a.shows_grid()).unwrap_or(false);
+        let shows_minor_x = x_axis.map(|a| a.shows_minor_grid()).unwrap_or(false);
+        let shows_minor_y = y_axis.map(|a| a.shows_minor_grid()).unwrap_or(false);
+
+        if !(shows_major_x || shows_major_y || shows_minor_x || shows_minor_y) {
+            return;
+        }
+
+        let mut frame = Frame::new(renderer, size);
+
+        // Plane bounds are the data-mapping region inside the plot area,
+        // expressed in plot-area-local pixel coordinates.
+        let top = plane.bounds.y;
+        let bottom = plane.bounds.y + plane.bounds.height;
+        let left = plane.bounds.x;
+        let right = plane.bounds.x + plane.bounds.width;
+
+        let minor_subdivs: usize = 4;
+
+        // --- Minor gridlines (drawn first, so majors render on top) ---
+        if shows_minor_x && x_ticks.len() >= 2 {
+            let color = x_axis
+                .and_then(|a| a.minor_grid_color())
+                .map(|c| c.resolve(bg, text_pair, None))
+                .unwrap_or(crate::core::Color {
+                    a: minor_alpha,
+                    ..divider
+                });
+            let path = Path::new(|b| {
+                for w in x_ticks.windows(2) {
+                    let (t0, t1) = (w[0], w[1]);
+                    let step = (t1 - t0) / minor_subdivs as f64;
+                    for k in 1..minor_subdivs {
+                        let t = t0 + step * k as f64;
+                        let px = plane.to_pixel(crate::data::Datum::new(t, 0.0)).x;
+                        if px >= left && px <= right {
+                            b.move_to(crate::core::Point::new(px, top));
+                            b.line_to(crate::core::Point::new(px, bottom));
+                        }
+                    }
+                }
+            });
+            frame.stroke(&path, Stroke::default().with_width(1.0).with_color(color));
+        }
+
+        if shows_minor_y && y_ticks.len() >= 2 {
+            let color = y_axis
+                .and_then(|a| a.minor_grid_color())
+                .map(|c| c.resolve(bg, text_pair, None))
+                .unwrap_or(crate::core::Color {
+                    a: minor_alpha,
+                    ..divider
+                });
+            let path = Path::new(|b| {
+                for w in y_ticks.windows(2) {
+                    let (t0, t1) = (w[0], w[1]);
+                    let step = (t1 - t0) / minor_subdivs as f64;
+                    for k in 1..minor_subdivs {
+                        let t = t0 + step * k as f64;
+                        let py = plane.to_pixel(crate::data::Datum::new(0.0, t)).y;
+                        if py >= top && py <= bottom {
+                            b.move_to(crate::core::Point::new(left, py));
+                            b.line_to(crate::core::Point::new(right, py));
+                        }
+                    }
+                }
+            });
+            frame.stroke(&path, Stroke::default().with_width(1.0).with_color(color));
+        }
+
+        // --- Major gridlines ---
+        if shows_major_x {
+            let color = x_axis
+                .and_then(|a| a.grid_color())
+                .map(|c| c.resolve(bg, text_pair, None))
+                .unwrap_or(crate::core::Color {
+                    a: major_alpha,
+                    ..divider
+                });
+            let path = Path::new(|b| {
+                for &t in x_ticks {
+                    let px = plane.to_pixel(crate::data::Datum::new(t, 0.0)).x;
+                    if px >= left && px <= right {
+                        b.move_to(crate::core::Point::new(px, top));
+                        b.line_to(crate::core::Point::new(px, bottom));
+                    }
+                }
+            });
+            frame.stroke(&path, Stroke::default().with_width(1.0).with_color(color));
+        }
+
+        if shows_major_y {
+            let color = y_axis
+                .and_then(|a| a.grid_color())
+                .map(|c| c.resolve(bg, text_pair, None))
+                .unwrap_or(crate::core::Color {
+                    a: major_alpha,
+                    ..divider
+                });
+            let path = Path::new(|b| {
+                for &t in y_ticks {
+                    let py = plane.to_pixel(crate::data::Datum::new(0.0, t)).y;
+                    if py >= top && py <= bottom {
+                        b.move_to(crate::core::Point::new(left, py));
+                        b.line_to(crate::core::Point::new(right, py));
+                    }
+                }
+            });
+            frame.stroke(&path, Stroke::default().with_width(1.0).with_color(color));
+        }
+
+        let geometry = frame.into_geometry();
+        renderer.with_translation(crate::core::Vector::new(layout_bounds.x, layout_bounds.y), |renderer| {
+            renderer.draw_geometry(geometry);
+        });
+    }
+
     /// Draws the plot area by delegating to each series
     #[allow(clippy::too_many_arguments)]
     pub fn draw<D>(

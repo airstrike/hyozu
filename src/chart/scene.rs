@@ -588,6 +588,47 @@ where
 
         // Plot area
         let plot_layout = children_layouts.next().expect("plot layout must exist");
+
+        // Draw gridlines before marks so marks render on top.
+        // Tick positions come from guide state (data coordinates); the plot
+        // area converts them to pixels via its own plane.
+        {
+            use crate::chart::guide;
+            let x_ticks: Vec<f64> = self
+                .bottom_axis
+                .as_ref()
+                .map(|_| {
+                    tree.children[4]
+                        .state
+                        .downcast_ref::<guide::State<Renderer::Paragraph>>()
+                        .tick_positions
+                        .clone()
+                })
+                .unwrap_or_default();
+            let y_ticks: Vec<f64> = self
+                .left_axis
+                .as_ref()
+                .map(|_| {
+                    tree.children[5]
+                        .state
+                        .downcast_ref::<guide::State<Renderer::Paragraph>>()
+                        .tick_positions
+                        .clone()
+                })
+                .unwrap_or_default();
+
+            self.plot_area.draw_gridlines(
+                &tree.children[6],
+                renderer,
+                design,
+                plot_layout,
+                self.bottom_axis.as_ref().map(|g| g.axis()),
+                self.left_axis.as_ref().map(|g| g.axis()),
+                &x_ticks,
+                &y_ticks,
+            );
+        }
+
         self.plot_area.draw(
             &tree.children[6],
             renderer,
