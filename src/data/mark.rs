@@ -22,7 +22,7 @@ pub use bubble_map::{BubbleMap, MapPoint, bubble_map, map_point};
 pub use choropleth::{Choropleth, ChoroplethEntry, IntoChoropleth, Normalization, choropleth, choropleth_entry};
 pub use gauge::{Gauge, gauge};
 pub use heatmap::{Heatmap, heatmap};
-pub use line::{IntoLines, Line, line};
+pub use line::{IntoLines, Line, LineStyle, line};
 pub use pie::{Pie, pie};
 pub use rule::{Rule, rule};
 pub use tick::{Tick, tick};

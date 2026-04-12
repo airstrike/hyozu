@@ -35,10 +35,10 @@ pub use geo::{GeoData, MapScope, ProjectionKind};
 pub use data::axis::{self, Axis, Orientation};
 pub use data::legend::{Legend as LegendConfig, Position as LegendPosition};
 pub use data::mark::{
-    self, Area, Bars, BoxPlot, BubbleMap, Choropleth, ChoroplethEntry, Gauge, Heatmap, LegendEntry, Line, MapPoint,
-    Mark, Normalization, Pie, Rule, Tick, Treemap, Violin, Waterfall, Xy, area, areas, bar, bars, boxplot, bubble_map,
-    choropleth, choropleth_entry, entry, entry_from_data, gauge, heatmap, line, map_point, pie, rule, tick, treemap,
-    violin, violin_entry, violin_from_data, waterfall, xy,
+    self, Area, Bars, BoxPlot, BubbleMap, Choropleth, ChoroplethEntry, Gauge, Heatmap, LegendEntry, Line, LineStyle,
+    MapPoint, Mark, Normalization, Pie, Rule, Tick, Treemap, Violin, Waterfall, Xy, area, areas, bar, bars, boxplot,
+    bubble_map, choropleth, choropleth_entry, entry, entry_from_data, gauge, heatmap, line, map_point, pie, rule, tick,
+    treemap, violin, violin_entry, violin_from_data, waterfall, xy,
 };
 pub use data::tooltip::{ColoredText, Swatch, Tooltip, TooltipEntry};
 

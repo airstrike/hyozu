@@ -2,7 +2,8 @@ use super::Plane;
 use crate::core::Size;
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
-use crate::widget::canvas::{Frame, Path, Stroke};
+use crate::line::LineStyle;
+use crate::widget::canvas::{Frame, LineCap, LineDash, Path, Stroke};
 
 use crate::core::text;
 use crate::widget::renderer::geometry;
@@ -232,8 +233,27 @@ where
             }
         });
 
-        // Stroke the path
-        frame.stroke(&path, Stroke::default().with_width(thickness).with_color(color));
+        // Build the stroke with the configured dash pattern.
+        // The `LineDash::segments` field borrows `&[f32]` for the duration of
+        // the `frame.stroke()` call only, so we can point it at either a stack
+        // slice or the `Custom` vec via a local binding.
+        let dash_stack: &[f32] = match &self.data.style {
+            LineStyle::Solid => &[],
+            LineStyle::Dashed => &[8.0, 4.0],
+            LineStyle::Dotted => &[1.0, 3.0],
+            LineStyle::Custom { segments } => segments.as_slice(),
+        };
+
+        let mut stroke = Stroke::default().with_width(thickness).with_color(color);
+        stroke.line_dash = LineDash {
+            segments: dash_stack,
+            offset: 0,
+        };
+        if matches!(self.data.style, LineStyle::Dotted) {
+            stroke = stroke.with_line_cap(LineCap::Round);
+        }
+
+        frame.stroke(&path, stroke);
 
         // Draw the geometry at the layout position
         let geometry = frame.into_geometry();
