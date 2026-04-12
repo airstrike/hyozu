@@ -69,6 +69,10 @@ impl<T: IntoDatums> From<T> for Series {
 pub struct Area {
     pub(crate) series: Vec<Series>,
     pub(crate) layout: Layout,
+    /// When true, each series' fill is rendered as a vertical linear gradient
+    /// (fill color at the top, transparent at the baseline) instead of a flat
+    /// translucent color.
+    pub(crate) gradient: bool,
 }
 
 /// Creates a single area series.
@@ -90,6 +94,7 @@ impl IntoAreas for Series {
         Area {
             series: vec![self],
             layout: Layout::default(),
+            gradient: false,
         }
     }
 }
@@ -99,6 +104,7 @@ impl<const N: usize> IntoAreas for [Series; N] {
         Area {
             series: self.into(),
             layout: Layout::default(),
+            gradient: false,
         }
     }
 }
@@ -108,6 +114,7 @@ impl IntoAreas for Vec<Series> {
         Area {
             series: self,
             layout: Layout::default(),
+            gradient: false,
         }
     }
 }
@@ -117,7 +124,18 @@ impl Area {
         Self {
             series,
             layout: Layout::default(),
+            gradient: false,
         }
+    }
+
+    /// Enable or disable a vertical linear gradient fill.
+    ///
+    /// When enabled, each series is filled with a gradient from the series
+    /// color at the top to fully transparent at the baseline. Falls back to
+    /// the default translucent solid fill when `false`.
+    pub fn gradient(mut self, enabled: bool) -> Self {
+        self.gradient = enabled;
+        self
     }
 
     pub fn stacked(mut self) -> Self {

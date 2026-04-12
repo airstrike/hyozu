@@ -3,7 +3,8 @@ use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
 use crate::core::{Point, Size};
 use crate::data::Datum;
-use crate::widget::canvas::{Frame, Path, Stroke};
+use crate::widget::canvas::gradient::Linear;
+use crate::widget::canvas::{Fill, Frame, Path, Stroke};
 use crate::widget::renderer::geometry;
 
 pub struct State {
@@ -168,7 +169,21 @@ where
                 builder.close();
             });
 
-            fill_frame.fill(&fill_path, fill_color);
+            if self.data.gradient {
+                // Vertical linear gradient: series color at the top of the
+                // upper envelope, fully transparent at the baseline. Uses
+                // absolute start/end points in frame-local pixel coordinates.
+                let top_y = upper.iter().map(|p| p.y).fold(f32::INFINITY, f32::min);
+                let bottom_y = baseline.iter().map(|p| p.y).fold(f32::NEG_INFINITY, f32::max);
+
+                let gradient = Linear::new(Point::new(0.0, top_y), Point::new(0.0, bottom_y))
+                    .add_stop(0.0, fill_color)
+                    .add_stop(1.0, crate::core::Color { a: 0.0, ..base_color });
+
+                fill_frame.fill(&fill_path, Fill::from(gradient));
+            } else {
+                fill_frame.fill(&fill_path, fill_color);
+            }
 
             if let Some(stroke_width) = series.stroke {
                 let stroke_path = Path::new(|builder| {
