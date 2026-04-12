@@ -1,11 +1,60 @@
 use super::{Plane, PlotInsets};
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
-use crate::core::{Rectangle, Size};
+use crate::core::{Point, Rectangle, Size};
 use crate::data::Datum;
 use crate::mark::bar::label::Position;
 use crate::widget::canvas::{Frame, Path, Text as CanvasText};
 use crate::widget::renderer::geometry;
+
+/// Builds a rectangle path with optionally rounded "end" corners.
+///
+/// For vertical bars, the top two corners are rounded; for horizontal bars,
+/// the right two corners are rounded. A `radius` of `0.0` produces a plain
+/// rectangle. The radius is clamped so it can never exceed `min(w, h) / 2`.
+fn push_bar_path(
+    builder: &mut crate::widget::canvas::path::Builder,
+    rect: &Rectangle,
+    radius: f32,
+    is_horizontal: bool,
+) {
+    let w = rect.width;
+    let h = rect.height;
+    if w <= 0.0 || h <= 0.0 {
+        return;
+    }
+    let r = radius.min(w * 0.5).min(h * 0.5);
+    if r <= 0.0 {
+        builder.rectangle(Point::new(rect.x, rect.y), Size::new(w, h));
+        return;
+    }
+
+    // Corners: TL, TR, BR, BL.
+    let tl = Point::new(rect.x, rect.y);
+    let tr = Point::new(rect.x + w, rect.y);
+    let br = Point::new(rect.x + w, rect.y + h);
+    let bl = Point::new(rect.x, rect.y + h);
+
+    if is_horizontal {
+        // Round TR and BR (right edge).
+        builder.move_to(tl);
+        builder.line_to(Point::new(tr.x - r, tr.y));
+        builder.arc_to(tr, Point::new(tr.x, tr.y + r), r);
+        builder.line_to(Point::new(br.x, br.y - r));
+        builder.arc_to(br, Point::new(br.x - r, br.y), r);
+        builder.line_to(bl);
+        builder.close();
+    } else {
+        // Round TL and TR (top edge).
+        builder.move_to(Point::new(tl.x, tl.y + r));
+        builder.arc_to(tl, Point::new(tl.x + r, tl.y), r);
+        builder.line_to(Point::new(tr.x - r, tr.y));
+        builder.arc_to(tr, Point::new(tr.x, tr.y + r), r);
+        builder.line_to(br);
+        builder.line_to(bl);
+        builder.close();
+    }
+}
 /// State for Bars - stores positioned bar rectangles
 pub struct State {
     /// Pixel rectangles for each series, outer vec is series, inner vec is bars
@@ -551,8 +600,16 @@ where
         // Resolve all bar colors: per-point override → series color → palette
         let mut all_bar_colors: Vec<Vec<crate::core::Color>> = Vec::new();
 
+        let is_horizontal = self.data.direction == crate::mark::bar::Direction::Horizontal;
+        let radius = self.data.corner_radius;
+        // For stacked layout, only the topmost segment of each stack should
+        // round its end corners, so middle segments meet without gaps.
+        let total_series = self.data.series.len();
+        let is_stacked = self.data.layout == crate::mark::bar::Layout::Stacked;
+
         // Draw each series
         for (series_idx, (series, rects)) in self.data.series.iter().zip(state.series_rects.iter()).enumerate() {
+            let round_this_series = radius > 0.0 && (!is_stacked || series_idx + 1 == total_series);
             // Determine base color for this series
             let base_color = if let Some(series_color) = series.color {
                 series_color.resolve(background, text_pair, None)
@@ -575,24 +632,20 @@ where
                 })
                 .collect();
 
+            let active_radius = if round_this_series { radius } else { 0.0 };
+
             // Draw bars: batch if all same color, otherwise draw individually
             if series.has_point_colors() {
                 for (rect, &color) in rects.iter().zip(bar_colors.iter()) {
                     let path = Path::new(|builder| {
-                        builder.rectangle(
-                            crate::core::Point::new(rect.x, rect.y),
-                            crate::core::Size::new(rect.width, rect.height),
-                        );
+                        push_bar_path(builder, rect, active_radius, is_horizontal);
                     });
                     bar_frame.fill(&path, color);
                 }
             } else {
                 let path = Path::new(|builder| {
                     for rect in rects {
-                        builder.rectangle(
-                            crate::core::Point::new(rect.x, rect.y),
-                            crate::core::Size::new(rect.width, rect.height),
-                        );
+                        push_bar_path(builder, rect, active_radius, is_horizontal);
                     }
                 });
                 bar_frame.fill(&path, base_color);
