@@ -36,6 +36,9 @@ pub struct Legend {
     pub(crate) text_color: Option<Color>,
     /// Whether legend entries wrap to multiple rows (default true).
     pub(crate) wrap: bool,
+    /// Whether clicking a legend entry toggles its series visibility.
+    /// Defaults to `false` so existing charts are unaffected.
+    pub(crate) interactive: bool,
 }
 
 impl Default for Legend {
@@ -45,6 +48,7 @@ impl Default for Legend {
             font_size: None,
             text_color: None,
             wrap: true,
+            interactive: false,
         }
     }
 }
@@ -97,6 +101,16 @@ impl Legend {
     /// Whether legend entries wrap to multiple rows/columns (default true).
     pub fn wrap(mut self, wrap: bool) -> Self {
         self.wrap = wrap;
+        self
+    }
+
+    /// Enable or disable click-to-toggle on legend entries.
+    ///
+    /// When enabled, clicking a legend entry hides or shows its corresponding
+    /// series. Visibility state lives inside the chart widget and is reset
+    /// when the widget is destroyed.
+    pub fn interactive(mut self, enabled: bool) -> Self {
+        self.interactive = enabled;
         self
     }
 }

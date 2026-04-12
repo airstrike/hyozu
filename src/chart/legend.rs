@@ -1,7 +1,9 @@
+use std::collections::HashSet;
+
 use crate::core::layout::{Limits, Node};
 use crate::core::text::paragraph;
 use crate::core::widget::{Tree, tree};
-use crate::core::{Size, text};
+use crate::core::{Rectangle, Size, text};
 use crate::data::legend::Position;
 use crate::data::mark::LegendEntry;
 
@@ -29,6 +31,9 @@ where
     pub rows: Vec<Vec<(usize, f32)>>,
     /// Row widths (total content width per row, for centering).
     pub row_widths: Vec<f32>,
+    /// Absolute-pixel bounding rect for each entry (indexed by entry index),
+    /// cached on the last `draw()` call. Used for legend click hit-testing.
+    pub entry_rects: Vec<Option<Rectangle>>,
 }
 
 /// A Legend displays a key for the chart's data series.
@@ -40,6 +45,7 @@ where
     position: Position,
     font_size: f32,
     wrap: bool,
+    interactive: bool,
     _marker: std::marker::PhantomData<(Message, &'a Renderer)>,
 }
 
@@ -48,12 +54,19 @@ where
     Renderer: text::Renderer<Font = crate::core::Font>,
 {
     /// Create a new Legend from entries and configuration.
-    pub fn new(entries: Vec<LegendEntry>, position: Position, font_size: Option<f32>, wrap: bool) -> Self {
+    pub fn new(
+        entries: Vec<LegendEntry>,
+        position: Position,
+        font_size: Option<f32>,
+        wrap: bool,
+        interactive: bool,
+    ) -> Self {
         Self {
             entries,
             position,
             font_size: font_size.unwrap_or(DEFAULT_FONT_SIZE),
             wrap,
+            interactive,
             _marker: std::marker::PhantomData,
         }
     }
@@ -61,6 +74,16 @@ where
     /// Returns the position of this legend.
     pub fn position(&self) -> Position {
         self.position
+    }
+
+    /// Returns whether this legend is click-interactive.
+    pub fn interactive(&self) -> bool {
+        self.interactive
+    }
+
+    /// Returns the entries on this legend.
+    pub fn entries(&self) -> &[LegendEntry] {
+        &self.entries
     }
 
     /// Returns true if this legend is horizontal (Above/Below).
@@ -77,6 +100,7 @@ where
                 paragraph: paragraph::Plain::default(),
                 rows: Vec::new(),
                 row_widths: Vec::new(),
+                entry_rects: Vec::new(),
             }),
             children: Vec::new(),
         }
@@ -88,6 +112,10 @@ where
     /// Layout the legend.
     pub fn layout(&self, tree: &mut Tree, renderer: &Renderer, limits: &Limits) -> Node {
         if self.entries.is_empty() {
+            {
+                let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
+                state.entry_rects.clear();
+            }
             return Node::new(Size::ZERO);
         }
 
@@ -127,7 +155,7 @@ where
 
         let row_height = font_size + PADDING_V * 2.0;
 
-        if self.is_horizontal() {
+        let (node, box_width) = if self.is_horizontal() {
             // Horizontal wrapping layout
             let available_width = limits.max().width;
             state.rows.clear();
@@ -159,7 +187,7 @@ where
             let num_rows = state.rows.len().max(1);
             let total_height = num_rows as f32 * row_height;
 
-            Node::new(Size::new(available_width, total_height))
+            (Node::new(Size::new(available_width, total_height)), available_width)
         } else {
             // Vertical stacked layout (Left/Right)
             state.rows.clear();
@@ -173,8 +201,36 @@ where
             let max_width = entry_widths.iter().copied().fold(0.0_f32, f32::max);
             let total_height = self.entries.len() as f32 * row_height;
 
-            Node::new(Size::new(max_width + ENTRY_GAP, total_height))
+            (
+                Node::new(Size::new(max_width + ENTRY_GAP, total_height)),
+                max_width + ENTRY_GAP,
+            )
+        };
+
+        // Compute entry bounds relative to the legend's own origin (0, 0).
+        // The widget adds the legend's final layout position at hit-test time.
+        let mut entry_rects: Vec<Option<Rectangle>> = vec![None; self.entries.len()];
+        for (row_idx, row) in state.rows.iter().enumerate() {
+            let row_width = state.row_widths.get(row_idx).copied().unwrap_or(0.0);
+            let row_y = row_idx as f32 * row_height + PADDING_V;
+            let row_start_x = if self.is_horizontal() {
+                (box_width - row_width).max(0.0) / 2.0
+            } else {
+                0.0
+            };
+            for &(entry_idx, x_offset) in row {
+                let text_width = state.widths.get(entry_idx).copied().unwrap_or(0.0);
+                entry_rects[entry_idx] = Some(Rectangle {
+                    x: row_start_x + x_offset,
+                    y: row_y,
+                    width: swatch_size + SWATCH_TEXT_GAP + text_width,
+                    height: font_size,
+                });
+            }
         }
+        state.entry_rects = entry_rects;
+
+        node
     }
 
     /// Draws the legend.
@@ -189,6 +245,7 @@ where
         _cursor: crate::core::mouse::Cursor,
         viewport: &crate::core::Rectangle,
         palette: &crate::palette::Resolved,
+        hidden_series: &HashSet<String>,
     ) where
         Theme: crate::design::Design + ?Sized,
         Renderer: crate::core::Renderer,
@@ -222,12 +279,22 @@ where
                 let entry = &self.entries[entry_idx];
                 let x = row_start_x + x_offset;
 
+                let is_hidden = hidden_series.contains(&entry.name);
+                let dim = |c: crate::core::Color| {
+                    if is_hidden {
+                        crate::core::Color { a: c.a * 0.35, ..c }
+                    } else {
+                        c
+                    }
+                };
+
                 // Resolve swatch color
-                let swatch_color = if let Some(entry_color) = entry.color {
+                let raw_swatch = if let Some(entry_color) = entry.color {
                     entry_color.resolve(background, text_pair, None)
                 } else {
                     palette.get(entry_idx).resolve(background, text_pair, None)
                 };
+                let swatch_color = dim(raw_swatch);
 
                 // Draw swatch
                 renderer.fill_quad(
@@ -267,9 +334,11 @@ where
                         weight: None,
                     },
                     crate::core::Point::new(x + swatch_size + SWATCH_TEXT_GAP, row_y),
-                    text_color,
+                    dim(text_color),
                     *viewport,
                 );
+
+                let _ = (entry_idx, x);
             }
         }
     }

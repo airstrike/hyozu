@@ -38,6 +38,9 @@ where
 struct State {
     is_pressed: bool,
     hover: Option<hover::State>,
+    /// Names of series hidden via legend click toggles. Lives with the
+    /// widget state and is reset when the tree is dropped.
+    hidden_series: std::collections::HashSet<String>,
 }
 
 /// Creates a chart widget from data.
@@ -332,6 +335,52 @@ where
         let state = tree.state.downcast_mut::<State>();
         let has_tooltip = self.scene.has_tooltip();
         let has_action = self.on_action.is_some();
+        let legend_interactive = self.scene.legend().map(|l| l.interactive()).unwrap_or(false);
+
+        // --- Interactive legend click-to-toggle ---
+        // Handled before plot-area actions so legend clicks take priority
+        // even if an action handler is attached.
+        if legend_interactive
+            && let Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) = event
+            && let Some(legend) = self.scene.legend()
+            && let Some(legend_rect) = self.scene.legend_bounds()
+        {
+            let chart_bounds = layout.bounds();
+            let abs_legend = Rectangle {
+                x: chart_bounds.x + self.padding.left + legend_rect.x,
+                y: chart_bounds.y + self.padding.top + legend_rect.y,
+                width: legend_rect.width,
+                height: legend_rect.height,
+            };
+            if let Some(local) = cursor.position_in(abs_legend) {
+                let scene_tree = &tree.children[0];
+                let legend_tree = &scene_tree.children[1];
+                // Downcast to the concrete State<Paragraph> stored by Legend.
+                let legend_state = legend_tree
+                    .state
+                    .downcast_ref::<legend::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
+                let hit = legend_state.entry_rects.iter().enumerate().find_map(|(i, maybe_rect)| {
+                    maybe_rect.and_then(|r| {
+                        if r.contains(Point::new(local.x, local.y)) {
+                            Some(i)
+                        } else {
+                            None
+                        }
+                    })
+                });
+                if let Some(idx) = hit {
+                    let entry = &legend.entries()[idx];
+                    if state.hidden_series.contains(&entry.name) {
+                        state.hidden_series.remove(&entry.name);
+                    } else {
+                        state.hidden_series.insert(entry.name.clone());
+                    }
+                    shell.capture_event();
+                    shell.request_redraw();
+                    return;
+                }
+            }
+        }
 
         if !has_tooltip && !has_action {
             return;
@@ -568,6 +617,8 @@ where
         // Draw scene contents (use child layout which accounts for padding)
         let scene_layout = layout.children().next().unwrap();
 
+        let state = tree.state.downcast_ref::<State>();
+
         self.scene.draw(
             &tree.children[0],
             renderer,
@@ -576,10 +627,10 @@ where
             scene_layout,
             cursor,
             viewport,
+            &state.hidden_series,
         );
 
         // Draw tooltip overlay
-        let state = tree.state.downcast_ref::<State>();
         if let Some(hover) = &state.hover
             && let Some(tooltip_config) = self.scene.tooltip()
         {

@@ -28,6 +28,9 @@ where
     color_slots: usize,
     /// Plot area offset within the scene, computed during layout.
     plot_area_offset: crate::core::Point,
+    /// Legend bounds (position + size) within the scene, computed during layout.
+    /// Only set when a legend is configured.
+    legend_bounds: Option<crate::core::Rectangle>,
     /// Current selection (borrowed from Data).
     selection: &'a Option<crate::target::Target>,
     /// Optional tooltip configuration (borrowed from Data).
@@ -171,9 +174,13 @@ where
             data.primary.marks().iter().flat_map(|m| m.legend_entries()).collect();
 
         let legend = match data.legend.as_ref() {
-            Some(config) if !entries.is_empty() => {
-                Some(Legend::new(entries, config.position, config.font_size, config.wrap))
-            }
+            Some(config) if !entries.is_empty() => Some(Legend::new(
+                entries,
+                config.position,
+                config.font_size,
+                config.wrap,
+                config.interactive,
+            )),
             _ => None,
         };
 
@@ -212,6 +219,7 @@ where
             palette: palette_strategy,
             color_slots,
             plot_area_offset: crate::core::Point::ORIGIN,
+            legend_bounds: None,
             selection: &data.selection,
             tooltip: data.tooltip.as_ref(),
         }
@@ -220,6 +228,11 @@ where
     /// Returns the plot area offset within the scene (stored during layout).
     pub(crate) fn plot_area_offset(&self) -> crate::core::Point {
         self.plot_area_offset
+    }
+
+    /// Returns the legend bounds within the scene, if a legend is configured.
+    pub(crate) fn legend_bounds(&self) -> Option<crate::core::Rectangle> {
+        self.legend_bounds
     }
 
     /// Returns whether a tooltip is configured.
@@ -235,6 +248,11 @@ where
     /// Returns a reference to the plot area.
     pub(crate) fn plot_area(&self) -> &PlotArea<'a, Message, Renderer> {
         &self.plot_area
+    }
+
+    /// Returns a reference to the legend, if one is configured.
+    pub(crate) fn legend(&self) -> Option<&Legend<'a, Message, Renderer>> {
+        self.legend.as_ref()
     }
 
     /// Resolves the palette using the given design.
@@ -572,7 +590,16 @@ where
                 LPos::Left => Point::new(0.0, plot_top),
                 LPos::Right => Point::new(content_left + plot_width, plot_top),
             };
+            let size = node.size();
+            self.legend_bounds = Some(crate::core::Rectangle {
+                x: pos.x,
+                y: pos.y,
+                width: size.width,
+                height: size.height,
+            });
             layout_children.push(node.move_to(pos));
+        } else {
+            self.legend_bounds = None;
         }
 
         // Top axis — above plot area
@@ -617,6 +644,7 @@ where
         layout: crate::core::Layout<'_>,
         cursor: crate::core::mouse::Cursor,
         viewport: &crate::core::Rectangle,
+        hidden_series: &std::collections::HashSet<String>,
     ) where
         D: design::Design + ?Sized,
     {
@@ -658,6 +686,7 @@ where
                 cursor,
                 viewport,
                 &resolved,
+                hidden_series,
             );
         }
 
@@ -734,6 +763,7 @@ where
             viewport,
             &resolved,
             self.selection,
+            hidden_series,
         );
 
         // Bottom axis (labels and ticks)

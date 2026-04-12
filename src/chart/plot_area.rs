@@ -975,6 +975,7 @@ where
         viewport: &crate::core::Rectangle,
         palette: &crate::palette::Resolved,
         selection: &Option<crate::target::Target>,
+        hidden_series: &std::collections::HashSet<String>,
     ) where
         D: crate::design::Design + ?Sized,
     {
@@ -1000,17 +1001,20 @@ where
                     color_offset += a.data.series.len();
                 }
                 Series::Line(line) => {
-                    line.draw(
-                        series_tree,
-                        renderer,
-                        design,
-                        style,
-                        layout,
-                        cursor,
-                        viewport,
-                        color_offset,
-                        palette,
-                    );
+                    let hidden = line.data.name().map(|n| hidden_series.contains(n)).unwrap_or(false);
+                    if !hidden {
+                        line.draw(
+                            series_tree,
+                            renderer,
+                            design,
+                            style,
+                            layout,
+                            cursor,
+                            viewport,
+                            color_offset,
+                            palette,
+                        );
+                    }
                     color_offset += 1;
                 }
                 Series::Bars(bars) => {
@@ -1105,17 +1109,20 @@ where
                     color_offset += 3;
                 }
                 Series::Xy(xy) => {
-                    xy.draw(
-                        series_tree,
-                        renderer,
-                        design,
-                        style,
-                        layout,
-                        cursor,
-                        viewport,
-                        color_offset,
-                        palette,
-                    );
+                    let hidden = xy.data.name().map(|n| hidden_series.contains(n)).unwrap_or(false);
+                    if !hidden {
+                        xy.draw(
+                            series_tree,
+                            renderer,
+                            design,
+                            style,
+                            layout,
+                            cursor,
+                            viewport,
+                            color_offset,
+                            palette,
+                        );
+                    }
                     color_offset += 1;
                 }
                 Series::Rule(rule) => {
