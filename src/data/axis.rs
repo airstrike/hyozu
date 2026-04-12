@@ -268,6 +268,13 @@ impl Axis {
         self
     }
 
+    /// Override the axis orientation (e.g. to flip a default bottom axis to
+    /// the top for use as a secondary axis).
+    pub fn with_orientation(mut self, orientation: Orientation) -> Self {
+        self.orientation = orientation;
+        self
+    }
+
     /// Returns the kind of this axis.
     pub fn kind(&self) -> Kind {
         self.kind

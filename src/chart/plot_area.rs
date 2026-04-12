@@ -129,10 +129,21 @@ where
     Violin(Violin<'a, Message, Renderer>),
 }
 
-/// State for a PlotArea - stores the coordinate plane for rendering
+/// Which axis pair a mark is plotted against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AxisSide {
+    /// Primary (bottom + left) axis pair.
+    Primary,
+    /// Secondary (top + right) axis pair.
+    Secondary,
+}
+
+/// State for a PlotArea - stores the coordinate planes for rendering
 pub struct State {
-    /// The coordinate plane for transforming data to pixels
+    /// The coordinate plane for the primary (bottom/left) axes.
     pub plane: Option<Plane>,
+    /// The coordinate plane for the secondary (top/right) axes, if any.
+    pub secondary_plane: Option<Plane>,
 }
 
 /// A PlotArea renders the data series within the chart.
@@ -146,6 +157,8 @@ where
     Renderer: text::Renderer + geometry::Renderer,
 {
     pub(crate) series: Vec<Series<'a, Message, Renderer>>,
+    /// Which axis pair each series in `series` is plotted against.
+    pub(crate) axis_side: Vec<AxisSide>,
 }
 
 impl<'a, Message, Renderer> PlotArea<'a, Message, Renderer>
@@ -153,32 +166,41 @@ where
     Message: 'a,
     Renderer: text::Renderer + geometry::Renderer,
 {
-    /// Create a new PlotArea from mark data
+    /// Create a new PlotArea from mark data (primary axis).
     pub fn new(marks: &'a [crate::Mark]) -> Self {
-        // Convert marks to series
-        let series = marks
-            .iter()
-            .map(|mark| match mark {
-                crate::Mark::Area(a) => Series::Area(area::Area::new(a)),
-                crate::Mark::Line(line) => Series::Line(Line::new(line)),
-                crate::Mark::Bars(bars) => Series::Bars(Bars::new(bars)),
-                crate::Mark::BoxPlot(bp) => Series::BoxPlot(BoxPlot::new(bp)),
-                crate::Mark::BubbleMap(bm) => Series::BubbleMap(BubbleMap::new(bm)),
-                crate::Mark::Choropleth(c) => Series::Choropleth(Choropleth::new(c)),
-                crate::Mark::Pie(pie) => Series::Pie(Pie::new(pie)),
-                crate::Mark::Gauge(gauge) => Series::Gauge(Gauge::new(gauge)),
-                crate::Mark::Waterfall(wf) => Series::Waterfall(Waterfall::new(wf)),
-                crate::Mark::Xy(xy) => Series::Xy(Xy::new(xy)),
-                crate::Mark::Rule(rule) => Series::Rule(Rule::new(rule)),
-                crate::Mark::Band(band) => Series::Band(Band::new(band)),
-                crate::Mark::Tick(tick) => Series::Tick(Tick::new(tick)),
-                crate::Mark::Heatmap(hm) => Series::Heatmap(Heatmap::new(hm)),
-                crate::Mark::Treemap(tm) => Series::Treemap(Treemap::new(tm)),
-                crate::Mark::Violin(v) => Series::Violin(Violin::new(v)),
-            })
-            .collect();
+        let series: Vec<Series<'a, Message, Renderer>> = marks.iter().map(Self::to_series).collect();
+        let axis_side = vec![AxisSide::Primary; series.len()];
+        Self { series, axis_side }
+    }
 
-        Self { series }
+    /// Appends marks plotted against the secondary (top/right) axis pair.
+    pub fn with_secondary(mut self, marks: &'a [crate::Mark]) -> Self {
+        for mark in marks {
+            self.series.push(Self::to_series(mark));
+            self.axis_side.push(AxisSide::Secondary);
+        }
+        self
+    }
+
+    fn to_series(mark: &'a crate::Mark) -> Series<'a, Message, Renderer> {
+        match mark {
+            crate::Mark::Area(a) => Series::Area(area::Area::new(a)),
+            crate::Mark::Line(line) => Series::Line(Line::new(line)),
+            crate::Mark::Bars(bars) => Series::Bars(Bars::new(bars)),
+            crate::Mark::BoxPlot(bp) => Series::BoxPlot(BoxPlot::new(bp)),
+            crate::Mark::BubbleMap(bm) => Series::BubbleMap(BubbleMap::new(bm)),
+            crate::Mark::Choropleth(c) => Series::Choropleth(Choropleth::new(c)),
+            crate::Mark::Pie(pie) => Series::Pie(Pie::new(pie)),
+            crate::Mark::Gauge(gauge) => Series::Gauge(Gauge::new(gauge)),
+            crate::Mark::Waterfall(wf) => Series::Waterfall(Waterfall::new(wf)),
+            crate::Mark::Xy(xy) => Series::Xy(Xy::new(xy)),
+            crate::Mark::Rule(rule) => Series::Rule(Rule::new(rule)),
+            crate::Mark::Band(band) => Series::Band(Band::new(band)),
+            crate::Mark::Tick(tick) => Series::Tick(Tick::new(tick)),
+            crate::Mark::Heatmap(hm) => Series::Heatmap(Heatmap::new(hm)),
+            crate::Mark::Treemap(tm) => Series::Treemap(Treemap::new(tm)),
+            crate::Mark::Violin(v) => Series::Violin(Violin::new(v)),
+        }
     }
 
     /// Computes the cumulative palette index for a specific series within
@@ -237,7 +259,10 @@ where
 
         Tree {
             tag: tree::Tag::of::<State>(),
-            state: tree::State::new(State { plane: None }),
+            state: tree::State::new(State {
+                plane: None,
+                secondary_plane: None,
+            }),
             children,
         }
     }
@@ -619,12 +644,14 @@ where
     }
 
     /// Layout the plot area - creates plane and delegates to each series
+    #[allow(clippy::too_many_arguments)]
     pub fn layout(
         &self,
         tree: &mut Tree,
         renderer: &Renderer,
         limits: &Limits,
-        axis_bounds: Option<(f64, f64, f64, f64)>, // (x_min, x_max, y_min, y_max) from axes
+        axis_bounds: Option<(f64, f64, f64, f64)>, // (x_min, x_max, y_min, y_max) from primary axes
+        secondary_axis_bounds: Option<(f64, f64, f64, f64)>, // bounds from secondary axes
         axis_layout: AxisLayout,                   // Physical dimensions of axes
     ) -> Node {
         let state = tree.state.downcast_mut::<State>();
@@ -678,77 +705,102 @@ where
         }
 
         let insets = &axis_layout.insets;
+        let plot_rect = Rectangle {
+            x: insets.left,
+            y: insets.top,
+            width: (size.width - insets.left - insets.right).max(0.0),
+            height: (size.height - insets.top - insets.bottom).max(0.0),
+        };
+
         let plane = Plane {
             x_min,
             x_max,
             y_min,
             y_max,
-            bounds: Rectangle {
-                x: insets.left,
-                y: insets.top,
-                width: (size.width - insets.left - insets.right).max(0.0),
-                height: (size.height - insets.top - insets.bottom).max(0.0),
-            },
-            obstacles,
+            bounds: plot_rect,
+            obstacles: obstacles.clone(),
         };
 
-        // Layout each series with the plane
+        // Build a secondary plane when the scene provides secondary axis
+        // bounds. If not provided but secondary marks exist, fall back to
+        // primary bounds so marks still render.
+        let has_secondary_marks = self.axis_side.contains(&AxisSide::Secondary);
+        let secondary_plane = if has_secondary_marks {
+            let (sx_min, sx_max, sy_min, sy_max) = secondary_axis_bounds.unwrap_or((x_min, x_max, y_min, y_max));
+            Some(Plane {
+                x_min: sx_min,
+                x_max: sx_max,
+                y_min: sy_min,
+                y_max: sy_max,
+                bounds: plot_rect,
+                obstacles,
+            })
+        } else {
+            None
+        };
+
+        // Layout each series with its assigned plane
         for (i, series) in self.series.iter().enumerate() {
             let series_tree = &mut tree.children[i];
+            let use_plane: &Plane = match self.axis_side[i] {
+                AxisSide::Primary => &plane,
+                AxisSide::Secondary => secondary_plane.as_ref().unwrap_or(&plane),
+            };
             match series {
                 Series::Area(a) => {
-                    a.layout(series_tree, renderer, limits, &plane);
+                    a.layout(series_tree, renderer, limits, use_plane);
                 }
                 Series::Line(line) => {
-                    line.layout(series_tree, renderer, limits, &plane);
+                    line.layout(series_tree, renderer, limits, use_plane);
                 }
                 Series::Bars(bars) => {
-                    bars.layout(series_tree, renderer, limits, &plane);
+                    bars.layout(series_tree, renderer, limits, use_plane);
                 }
                 Series::BoxPlot(bp) => {
-                    bp.layout(series_tree, renderer, limits, &plane);
+                    bp.layout(series_tree, renderer, limits, use_plane);
                 }
                 Series::BubbleMap(bm) => {
-                    bm.layout(series_tree, renderer, limits, &plane);
+                    bm.layout(series_tree, renderer, limits, use_plane);
                 }
                 Series::Choropleth(c) => {
-                    c.layout(series_tree, renderer, limits, &plane);
+                    c.layout(series_tree, renderer, limits, use_plane);
                 }
                 Series::Pie(pie) => {
-                    pie.layout(series_tree, renderer, limits, &plane);
+                    pie.layout(series_tree, renderer, limits, use_plane);
                 }
                 Series::Gauge(gauge) => {
-                    gauge.layout(series_tree, renderer, limits, &plane);
+                    gauge.layout(series_tree, renderer, limits, use_plane);
                 }
                 Series::Waterfall(wf) => {
-                    wf.layout(series_tree, renderer, limits, &plane);
+                    wf.layout(series_tree, renderer, limits, use_plane);
                 }
                 Series::Xy(xy) => {
-                    xy.layout(series_tree, renderer, limits, &plane);
+                    xy.layout(series_tree, renderer, limits, use_plane);
                 }
                 Series::Rule(rule) => {
-                    rule.layout(series_tree, renderer, limits, &plane);
+                    rule.layout(series_tree, renderer, limits, use_plane);
                 }
                 Series::Band(band) => {
-                    band.layout(series_tree, renderer, limits, &plane);
+                    band.layout(series_tree, renderer, limits, use_plane);
                 }
                 Series::Tick(tick) => {
-                    tick.layout(series_tree, renderer, limits, &plane);
+                    tick.layout(series_tree, renderer, limits, use_plane);
                 }
                 Series::Heatmap(hm) => {
-                    hm.layout(series_tree, renderer, limits, &plane);
+                    hm.layout(series_tree, renderer, limits, use_plane);
                 }
                 Series::Treemap(tm) => {
-                    tm.layout(series_tree, renderer, limits, &plane);
+                    tm.layout(series_tree, renderer, limits, use_plane);
                 }
                 Series::Violin(v) => {
-                    v.layout(series_tree, renderer, limits, &plane);
+                    v.layout(series_tree, renderer, limits, use_plane);
                 }
             }
         }
 
-        // Store the plane for draw()
+        // Store the planes for draw()
         state.plane = Some(plane);
+        state.secondary_plane = secondary_plane;
 
         Node::new(size)
     }

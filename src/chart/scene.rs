@@ -204,7 +204,11 @@ where
                 .y_axis
                 .as_ref()
                 .map(|axis| Guide::new(axis, data.primary.marks())),
-            plot_area: PlotArea::new(marks),
+            plot_area: if data.secondary.is_empty() {
+                PlotArea::new(marks)
+            } else {
+                PlotArea::new(marks).with_secondary(data.secondary.marks())
+            },
             palette: palette_strategy,
             color_slots,
             plot_area_offset: crate::core::Point::ORIGIN,
@@ -287,8 +291,38 @@ where
             (0.0, None)
         };
 
-        let top_height = 0.0; // TODO: top axis
-        let right_width = 0.0; // TODO: right axis
+        // --- Phase 3a: Measure secondary axes (top and right) ---
+        let (top_height, right_width) = {
+            let remaining_h = available.height - title_height;
+            let top_tree = &mut tree.children[2];
+            let top_height = if let Some(guide) = &self.top_axis {
+                let node = guide.layout(
+                    top_tree,
+                    renderer,
+                    &lim(available.width, remaining_h),
+                    (0.0, 0.0),
+                    (0.0, 0.0),
+                );
+                node.size().height
+            } else {
+                0.0
+            };
+            let right_tree = &mut tree.children[3];
+            let vertical = remaining_h - top_height;
+            let right_width = if let Some(guide) = &self.right_axis {
+                let node = guide.layout(
+                    right_tree,
+                    renderer,
+                    &lim(available.width, vertical),
+                    (0.0, 0.0),
+                    (0.0, 0.0),
+                );
+                node.size().width
+            } else {
+                0.0
+            };
+            (top_height, right_width)
+        };
 
         // --- Phase 3: Measure axes ---
         let (bottom_height, left_width) = {
@@ -417,8 +451,29 @@ where
             )
         });
 
+        // Secondary axes — share X/Y overflow with their siblings.
+        let top_axis_node = self.top_axis.as_ref().map(|guide| {
+            guide.layout(
+                &mut first_children[2],
+                renderer,
+                &lim(plot_width, remaining_height),
+                bottom_overflow,
+                bottom_min_inset,
+            )
+        });
+
+        let right_axis_node = self.right_axis.as_ref().map(|guide| {
+            guide.layout(
+                &mut first_children[3],
+                renderer,
+                &lim(available.width, plot_height),
+                left_overflow,
+                left_min_inset,
+            )
+        });
+
         // Axis bounds for plot area coordinate sync
-        let (axis_bounds, plot_insets) = {
+        let (axis_bounds, secondary_bounds, plot_insets) = {
             use crate::chart::guide;
             use crate::chart::plot_area::PlotInsets;
 
@@ -442,13 +497,36 @@ where
                 (Some(x), Some(y)) => Some((x.min(), x.max(), y.min(), y.max())),
                 _ => None,
             };
+
+            // Secondary axes: share primary X when top_axis is absent.
+            let sec_x = if self.top_axis.is_some() {
+                let st = first_children[2]
+                    .state
+                    .downcast_ref::<guide::State<Renderer::Paragraph>>();
+                Some(st.bounds)
+            } else {
+                x_bounds
+            };
+            let sec_y = if self.right_axis.is_some() {
+                let st = first_children[3]
+                    .state
+                    .downcast_ref::<guide::State<Renderer::Paragraph>>();
+                Some(st.bounds)
+            } else {
+                None
+            };
+            let secondary_bounds = match (sec_x, sec_y) {
+                (Some(x), Some(y)) => Some((x.min(), x.max(), y.min(), y.max())),
+                _ => None,
+            };
+
             let insets = PlotInsets {
                 left: h_insets.0,
                 right: h_insets.1,
                 top: v_insets.0,
                 bottom: v_insets.1,
             };
-            (bounds, insets)
+            (bounds, secondary_bounds, insets)
         };
 
         let axis_layout = crate::chart::plot_area::AxisLayout {
@@ -464,6 +542,7 @@ where
             renderer,
             &lim(plot_width, plot_height),
             axis_bounds,
+            secondary_bounds,
             axis_layout,
         );
 
@@ -496,6 +575,11 @@ where
             layout_children.push(node.move_to(pos));
         }
 
+        // Top axis — above plot area
+        if let Some(node) = top_axis_node {
+            layout_children.push(node.move_to(Point::new(content_left, plot_top - top_height)));
+        }
+
         // Left axis — widen by 1px for clean corner join
         if let Some(node) = left_axis_node {
             let size = node.size();
@@ -511,6 +595,11 @@ where
         // Bottom axis
         if let Some(node) = bottom_axis_node {
             layout_children.push(node.move_to(Point::new(content_left, plot_top + plot_height)));
+        }
+
+        // Right axis — to the right of plot area
+        if let Some(node) = right_axis_node {
+            layout_children.push(node.move_to(Point::new(content_left + plot_width, plot_top)));
         }
 
         Node::with_children(available, layout_children)
@@ -570,6 +659,12 @@ where
                 viewport,
                 &resolved,
             );
+        }
+
+        // Top axis (secondary X)
+        if let Some(guide) = &self.top_axis {
+            let top_layout = children_layouts.next().expect("top axis layout must exist");
+            guide.draw(&tree.children[2], renderer, design, style, top_layout, cursor, viewport);
         }
 
         // Left axis
@@ -655,6 +750,20 @@ where
             );
         }
 
+        // Right axis (secondary Y)
+        if let Some(guide) = &self.right_axis {
+            let right_layout = children_layouts.next().expect("right axis layout must exist");
+            guide.draw(
+                &tree.children[3],
+                renderer,
+                design,
+                style,
+                right_layout,
+                cursor,
+                viewport,
+            );
+        }
+
         // Axis lines drawn last so they render on top of marks
         // Re-iterate layout children to find axis layouts for axis line drawing
         let mut line_layouts = layout.children();
@@ -665,6 +774,11 @@ where
         }
         // Skip legend
         if self.legend.is_some() {
+            line_layouts.next();
+        }
+
+        // Skip top axis (lines are drawn with guide.draw earlier)
+        if self.top_axis.is_some() {
             line_layouts.next();
         }
 
@@ -681,6 +795,12 @@ where
         if let Some(guide) = &self.bottom_axis {
             let bottom_layout = line_layouts.next().expect("bottom axis layout must exist");
             guide.draw_axis_line(&tree.children[4], renderer, design, bottom_layout);
+        }
+
+        // Right axis line
+        if let Some(guide) = &self.right_axis {
+            let right_layout = line_layouts.next().expect("right axis layout must exist");
+            guide.draw_axis_line(&tree.children[3], renderer, design, right_layout);
         }
     }
 }

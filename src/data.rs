@@ -396,6 +396,68 @@ impl Data {
         &self.primary
     }
 
+    /// Returns a reference to the secondary plotting area.
+    pub fn secondary_area(&self) -> &Area {
+        &self.secondary
+    }
+
+    /// Appends marks to the secondary (top/right) axis area.
+    ///
+    /// By default the secondary area has no axes; call [`Data::right_axis`]
+    /// or [`Data::top_axis`] to configure them. Any marks whose default axis
+    /// pair is numeric (e.g. lines, areas, bars) will work out of the box
+    /// with a default right axis.
+    pub fn secondary(mut self, marks: impl Into<Vec<Mark>>) -> Self {
+        let mut new_marks = marks.into();
+        // Auto-configure axes if not yet set, based on the first Cartesian
+        // mark we encounter.
+        if self.secondary.x_axis.is_none() || self.secondary.y_axis.is_none() {
+            let (auto_x, auto_y) = new_marks
+                .iter()
+                .find(|m| !matches!(m, Mark::Rule(_) | Mark::Band(_) | Mark::Tick(_)))
+                .or(new_marks.first())
+                .map(axes_for_mark)
+                .unwrap_or((None, None));
+            if self.secondary.x_axis.is_none() {
+                // Flip the default bottom axis to a top-oriented one.
+                self.secondary.x_axis = auto_x.map(|a| a.with_orientation(Orientation::Top));
+            }
+            if self.secondary.y_axis.is_none() {
+                self.secondary.y_axis = auto_y.map(|a| a.with_orientation(Orientation::Right));
+            }
+        }
+        self.secondary.marks.append(&mut new_marks);
+        self
+    }
+
+    /// Configure the right (secondary Y) axis.
+    ///
+    /// Initializes the axis to a default `Kind::Scalar` oriented on the right
+    /// side if it hasn't been set yet, then applies `f` to it.
+    pub fn right_axis(mut self, f: impl FnOnce(Axis) -> Axis) -> Self {
+        let base = self
+            .secondary
+            .y_axis
+            .take()
+            .unwrap_or_else(|| Axis::new(Orientation::Right).with_kind(axis::Kind::Scalar));
+        self.secondary.y_axis = Some(f(base));
+        self
+    }
+
+    /// Configure the top (secondary X) axis.
+    ///
+    /// Initializes the axis to a default `Kind::Scalar` oriented on the top
+    /// edge if it hasn't been set yet, then applies `f` to it.
+    pub fn top_axis(mut self, f: impl FnOnce(Axis) -> Axis) -> Self {
+        let base = self
+            .secondary
+            .x_axis
+            .take()
+            .unwrap_or_else(|| Axis::new(Orientation::Top).with_kind(axis::Kind::Scalar));
+        self.secondary.x_axis = Some(f(base));
+        self
+    }
+
     /// Returns a reference to the title.
     pub fn get_title(&self) -> Option<&str> {
         self.title.as_deref()
