@@ -1,5 +1,6 @@
 pub mod annotation;
 pub mod area;
+pub mod band;
 pub mod bar;
 pub mod boxplot;
 pub mod bubble_map;
@@ -16,6 +17,7 @@ pub mod waterfall;
 pub mod xy;
 
 pub use area::{Area, IntoAreas, area, areas};
+pub use band::{Band, BandOrientation, band};
 pub use bar::{Bars, IntoBars, bar, bars};
 pub use boxplot::{BoxPlot, boxplot, entry, entry_from_data};
 pub use bubble_map::{BubbleMap, MapPoint, bubble_map, map_point};
@@ -44,6 +46,7 @@ pub struct LegendEntry {
 #[derive(Debug, Clone)]
 pub enum Mark {
     Area(Area),
+    Band(Band),
     Bars(Bars),
     BoxPlot(BoxPlot),
     BubbleMap(BubbleMap),
@@ -155,8 +158,9 @@ impl Mark {
                     })
                 })
                 .collect(),
-            // Rule, Tick, Gauge, Heatmap, Choropleth don't contribute to legend
+            // Rule, Band, Tick, Gauge, Heatmap, Choropleth don't contribute to legend
             Mark::Rule(_)
+            | Mark::Band(_)
             | Mark::Tick(_)
             | Mark::Gauge(_)
             | Mark::Waterfall(_)
@@ -217,6 +221,12 @@ impl From<Xy> for Mark {
 impl From<Rule> for Mark {
     fn from(rule: Rule) -> Self {
         Mark::Rule(rule)
+    }
+}
+
+impl From<Band> for Mark {
+    fn from(band: Band) -> Self {
+        Mark::Band(band)
     }
 }
 

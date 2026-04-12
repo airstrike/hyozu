@@ -7,6 +7,7 @@ use crate::core::text;
 use crate::widget::renderer::geometry;
 
 pub mod area;
+pub mod band;
 pub mod bars;
 pub mod boxplot;
 pub mod bubble_map;
@@ -22,6 +23,7 @@ pub mod violin;
 pub mod waterfall;
 pub mod xy;
 
+pub use band::Band;
 pub use bars::Bars;
 pub use boxplot::BoxPlot;
 pub use bubble_map::BubbleMap;
@@ -120,6 +122,7 @@ where
     Waterfall(Waterfall<'a, Message, Renderer>),
     Xy(Xy<'a, Message, Renderer>),
     Rule(Rule<'a, Message, Renderer>),
+    Band(Band<'a, Message, Renderer>),
     Tick(Tick<'a, Message, Renderer>),
     Heatmap(Heatmap<'a, Message, Renderer>),
     Treemap(Treemap<'a, Message, Renderer>),
@@ -167,6 +170,7 @@ where
                 crate::Mark::Waterfall(wf) => Series::Waterfall(Waterfall::new(wf)),
                 crate::Mark::Xy(xy) => Series::Xy(Xy::new(xy)),
                 crate::Mark::Rule(rule) => Series::Rule(Rule::new(rule)),
+                crate::Mark::Band(band) => Series::Band(Band::new(band)),
                 crate::Mark::Tick(tick) => Series::Tick(Tick::new(tick)),
                 crate::Mark::Heatmap(hm) => Series::Heatmap(Heatmap::new(hm)),
                 crate::Mark::Treemap(tm) => Series::Treemap(Treemap::new(tm)),
@@ -199,6 +203,7 @@ where
                 Series::Violin(v) => v.data.entries.len(),
                 Series::Tick(_) => 0,
                 Series::Rule(_) => 0,
+                Series::Band(_) => 0,
             };
         }
         offset + series_idx
@@ -222,6 +227,7 @@ where
                 Series::Waterfall(wf) => wf.state(),
                 Series::Xy(xy) => xy.state(),
                 Series::Rule(rule) => rule.state(),
+                Series::Band(band) => band.state(),
                 Series::Tick(tick) => tick.state(),
                 Series::Heatmap(hm) => hm.state(),
                 Series::Treemap(tm) => tm.state(),
@@ -257,6 +263,7 @@ where
                     Series::Waterfall(_) => tree::Tag::of::<waterfall::State>(),
                     Series::Xy(_) => tree::Tag::of::<xy::State>(),
                     Series::Rule(_) => tree::Tag::of::<rule::State>(),
+                    Series::Band(_) => tree::Tag::of::<band::State>(),
                     Series::Tick(_) => tree::Tag::of::<tick::State>(),
                     Series::Heatmap(_) => tree::Tag::of::<heatmap::State>(),
                     Series::Treemap(_) => tree::Tag::of::<treemap::State>(),
@@ -276,6 +283,7 @@ where
                         Series::Waterfall(wf) => wf.state(),
                         Series::Xy(xy) => xy.state(),
                         Series::Rule(rule) => rule.state(),
+                        Series::Band(band) => band.state(),
                         Series::Tick(tick) => tick.state(),
                         Series::Heatmap(hm) => hm.state(),
                         Series::Treemap(tm) => tm.state(),
@@ -294,6 +302,7 @@ where
                         Series::Waterfall(wf) => wf.diff(tree),
                         Series::Xy(xy) => xy.diff(tree),
                         Series::Rule(rule) => rule.diff(tree),
+                        Series::Band(band) => band.diff(tree),
                         Series::Tick(tick) => tick.diff(tree),
                         Series::Heatmap(hm) => hm.diff(tree),
                         Series::Treemap(tm) => tm.diff(tree),
@@ -313,6 +322,7 @@ where
                 Series::Waterfall(wf) => wf.state(),
                 Series::Xy(xy) => xy.state(),
                 Series::Rule(rule) => rule.state(),
+                Series::Band(band) => band.state(),
                 Series::Tick(tick) => tick.state(),
                 Series::Heatmap(hm) => hm.state(),
                 Series::Treemap(tm) => tm.state(),
@@ -487,6 +497,16 @@ where
                     crate::mark::rule::RuleOrientation::Vertical => {
                         x_min = x_min.min(rule.data.value());
                         x_max = x_max.max(rule.data.value());
+                    }
+                },
+                Series::Band(band) => match band.data.orientation() {
+                    crate::mark::band::BandOrientation::Horizontal => {
+                        y_min = y_min.min(band.data.lower());
+                        y_max = y_max.max(band.data.upper());
+                    }
+                    crate::mark::band::BandOrientation::Vertical => {
+                        x_min = x_min.min(band.data.lower());
+                        x_max = x_max.max(band.data.upper());
                     }
                 },
                 Series::Tick(tick) => {
@@ -708,6 +728,9 @@ where
                 }
                 Series::Rule(rule) => {
                     rule.layout(series_tree, renderer, limits, &plane);
+                }
+                Series::Band(band) => {
+                    band.layout(series_tree, renderer, limits, &plane);
                 }
                 Series::Tick(tick) => {
                     tick.layout(series_tree, renderer, limits, &plane);
@@ -1046,6 +1069,10 @@ where
                 Series::Rule(rule) => {
                     rule.draw(series_tree, renderer, design, style, layout, cursor, viewport);
                     // Rules don't consume color slots
+                }
+                Series::Band(band) => {
+                    band.draw(series_tree, renderer, design, style, layout, cursor, viewport);
+                    // Bands don't consume color slots
                 }
                 Series::Tick(tick) => {
                     tick.draw(series_tree, renderer, design, style, layout, cursor, viewport);

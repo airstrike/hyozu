@@ -9,10 +9,10 @@ pub use area::Area;
 pub use axis::{Axis, Orientation};
 pub use datum::{Datum, IntoDatums};
 pub use mark::{
-    Bars, BoxPlot, BubbleMap, Choropleth, ChoroplethEntry, Gauge, Heatmap, LegendEntry, Line, MapPoint, Mark, Pie,
-    Rule, Treemap, Violin, Waterfall, Xy, areas, bar, bars, boxplot, bubble_map, choropleth, choropleth_entry, entry,
-    entry_from_data, gauge, heatmap, line, map_point, pie, rule, treemap, violin, violin_entry, violin_from_data,
-    waterfall, xy,
+    Band, Bars, BoxPlot, BubbleMap, Choropleth, ChoroplethEntry, Gauge, Heatmap, LegendEntry, Line, MapPoint, Mark,
+    Pie, Rule, Treemap, Violin, Waterfall, Xy, areas, band, bar, bars, boxplot, bubble_map, choropleth,
+    choropleth_entry, entry, entry_from_data, gauge, heatmap, line, map_point, pie, rule, treemap, violin,
+    violin_entry, violin_from_data, waterfall, xy,
 };
 
 /// Trait for types that can be converted into chart Data.
@@ -75,6 +75,7 @@ fn axes_for_mark(mark: &Mark) -> (Option<Axis>, Option<Axis>) {
         Mark::Xy(_) => (Some(Xy::x_axis()), Some(Xy::y_axis())),
         Mark::Violin(v) => (Some(v.x_axis()), Some(v.y_axis())),
         Mark::Rule(_) => (Rule::x_axis(), Rule::y_axis()),
+        Mark::Band(_) => (mark::band::Band::x_axis(), mark::band::Band::y_axis()),
         Mark::Tick(_) => (mark::tick::Tick::x_axis(), mark::tick::Tick::y_axis()),
         Mark::Heatmap(hm) => (Some(hm.x_axis()), Some(hm.y_axis())),
     }
@@ -101,7 +102,7 @@ impl From<Vec<Mark>> for Area {
         // Configure axes based on first non-Rule mark (rules inherit axes)
         let (x_axis, y_axis) = marks
             .iter()
-            .find(|m| !matches!(m, Mark::Rule(_) | Mark::Tick(_)))
+            .find(|m| !matches!(m, Mark::Rule(_) | Mark::Band(_) | Mark::Tick(_)))
             .or(marks.first())
             .map(axes_for_mark)
             .unwrap_or((None, None));

@@ -106,6 +106,7 @@ impl Palette {
                 }
                 Mark::Tick(_) => Palette::Sequential,
                 Mark::Rule(_) => Palette::Sequential,
+                Mark::Band(_) => Palette::Sequential,
             };
         }
 
@@ -134,6 +135,7 @@ pub fn count_color_slots(marks: &[Mark]) -> usize {
             Mark::Violin(v) => v.entries.len(),
             Mark::Tick(_) => 0,
             Mark::Rule(_) => 0,
+            Mark::Band(_) => 0,
         })
         .sum::<usize>()
         .max(1)

@@ -287,6 +287,16 @@ impl Area {
                         x_max = x_max.max(rule.value);
                     }
                 },
+                Mark::Band(band) => match band.orientation {
+                    crate::mark::band::BandOrientation::Horizontal => {
+                        y_min = y_min.min(band.lower);
+                        y_max = y_max.max(band.upper);
+                    }
+                    crate::mark::band::BandOrientation::Vertical => {
+                        x_min = x_min.min(band.lower);
+                        x_max = x_max.max(band.upper);
+                    }
+                },
                 Mark::Tick(tick) => {
                     for point in &tick.points {
                         match tick.orientation {

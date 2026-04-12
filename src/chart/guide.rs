@@ -487,6 +487,7 @@ where
                         }
                     }
                     crate::Mark::Rule(_)
+                    | crate::Mark::Band(_)
                     | crate::Mark::Tick(_)
                     | crate::Mark::Pie(_)
                     | crate::Mark::Gauge(_)
@@ -746,6 +747,17 @@ where
                     crate::mark::rule::RuleOrientation::Vertical if is_x_axis => {
                         min = min.min(rule.value);
                         max = max.max(rule.value);
+                    }
+                    _ => {}
+                },
+                crate::Mark::Band(band) => match band.orientation {
+                    crate::mark::band::BandOrientation::Horizontal if !is_x_axis => {
+                        min = min.min(band.lower);
+                        max = max.max(band.upper);
+                    }
+                    crate::mark::band::BandOrientation::Vertical if is_x_axis => {
+                        min = min.min(band.lower);
+                        max = max.max(band.upper);
                     }
                     _ => {}
                 },
