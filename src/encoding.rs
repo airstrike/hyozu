@@ -166,7 +166,6 @@ impl Encoding<Fill> {
     /// main resolved palette; single-series bar charts default to
     /// `Palette::Sequential` of length 1, which would collapse every bar to a
     /// single color.
-    #[allow(dead_code)] // wired into bars.rs + chart.rs tooltip path in Phase 2
     pub(crate) fn resolve_fill(&self, points: &[Datum], seed: &PaletteSeed) -> Vec<Option<Color>> {
         let keys: Vec<String> = points.iter().enumerate().map(|(i, d)| (self.extractor)(i, d)).collect();
 

@@ -597,7 +597,9 @@ where
         // Single frame for all labels
         let mut label_frame = Frame::new(renderer, layout_bounds.size());
 
-        // Resolve all bar colors: per-point override → series color → palette
+        // Resolve all bar colors via the full priority chain:
+        // point_colors > color_by encoding > series.color > palette fallback.
+        // See GOG.md § 7.
         let mut all_bar_colors: Vec<Vec<crate::core::Color>> = Vec::new();
 
         let is_horizontal = self.data.direction == crate::mark::bar::Direction::Horizontal;
@@ -606,6 +608,11 @@ where
         // round its end corners, so middle segments meet without gaps.
         let total_series = self.data.series.len();
         let is_stacked = self.data.layout == crate::mark::bar::Layout::Stacked;
+
+        // The design's palette seed is used by fill encodings to build a
+        // categorical sub-palette sized to the distinct-key count. Theme is
+        // invariant across series, so compute the seed once per draw.
+        let seed = theme.palette_seed();
 
         // Draw each series
         for (series_idx, (series, rects)) in self.data.series.iter().zip(state.series_rects.iter()).enumerate() {
@@ -619,23 +626,37 @@ where
                     .resolve(background, text_pair, None)
             };
 
-            // Resolve per-bar colors
+            // Resolve the optional fill-channel encoding once per series.
+            // See GOG.md § 7 for priority and § 8a for the integration contract.
+            let fill_colors = series
+                .color_by
+                .as_ref()
+                .map(|enc| enc.resolve_fill(&series.points, &seed));
+
+            // Resolve per-bar colors following the priority chain:
+            // point_colors > color_by > series.color > palette fallback.
             let bar_colors: Vec<crate::core::Color> = rects
                 .iter()
                 .enumerate()
                 .map(|(i, _)| {
-                    if let Some(pc) = series.point_color(i) {
-                        pc.resolve(background, text_pair, None)
+                    let resolved = if let Some(pc) = series.point_color(i) {
+                        *pc
+                    } else if let Some(c) = fill_colors.as_ref().and_then(|v| v[i]) {
+                        c
+                    } else if let Some(sc) = series.color {
+                        sc
                     } else {
-                        base_color
-                    }
+                        palette.get(color_offset + series_idx)
+                    };
+                    resolved.resolve(background, text_pair, None)
                 })
                 .collect();
 
             let active_radius = if round_this_series { radius } else { 0.0 };
 
-            // Draw bars: batch if all same color, otherwise draw individually
-            if series.has_point_colors() {
+            // Draw bars: per-bar fill if any per-point override OR any fill
+            // encoding is present; otherwise batch into a single Path.
+            if series.has_point_colors() || series.color_by.is_some() {
                 for (rect, &color) in rects.iter().zip(bar_colors.iter()) {
                     let path = Path::new(|builder| {
                         push_bar_path(builder, rect, active_radius, is_horizontal);

@@ -787,6 +787,12 @@ fn draw_tooltip_overlay<Message>(
         let series = &plot_area.series[mark_idx];
         let child = &plot_area_tree.children[mark_idx];
 
+        // Bars resolve their color through the full priority chain
+        // (point_colors > color_by > series.color > palette). When this is
+        // `Some`, the generic explicit_color/palette-fallback logic below is
+        // bypassed. See GOG.md § 8b.
+        let mut bars_resolved_color: Option<crate::core::Color> = None;
+
         let (datum, name, explicit_color, annotation) = if child.tag == line_tag {
             if let plot_area::Series::Line(line) = series {
                 let pt = &line.data.points[pt_idx];
@@ -831,10 +837,20 @@ fn draw_tooltip_overlay<Message>(
             if let plot_area::Series::Bars(bars) = series {
                 let bar_series = &bars.data.series[series_idx];
                 let pt = &bar_series.points[pt_idx];
+
+                // Resolve the bar's displayed color via the full priority
+                // chain (point_colors > color_by > series.color > palette)
+                // so the tooltip swatch matches the actual bar color.
+                let seed = design.palette_seed();
+                let color_idx = plot_area.color_offset_for(mark_idx, series_idx);
+                let fallback = palette.get(color_idx);
+                let resolved = bar_series.resolved_color_at(pt_idx, &seed, fallback);
+                bars_resolved_color = Some(resolved.resolve(background, text_pair, None));
+
                 (
                     crate::data::Datum { x: pt.x, y: pt.y },
                     bar_series.name().map(|s| s.to_string()),
-                    bar_series.color().cloned(),
+                    None,
                     hover::Annotation::None,
                 )
             } else {
@@ -846,8 +862,11 @@ fn draw_tooltip_overlay<Message>(
 
         let anchor = plane.to_pixel(datum);
 
-        // Resolve series color: use explicit mark color if set, else palette
-        let series_color = if let Some(c) = explicit_color {
+        // Resolve series color: bars pre-compute through the priority chain;
+        // other marks use explicit mark color if set, else palette fallback.
+        let series_color = if let Some(c) = bars_resolved_color {
+            c
+        } else if let Some(c) = explicit_color {
             c.resolve(background, text_pair, None)
         } else {
             let color_idx = plot_area.color_offset_for(mark_idx, series_idx);

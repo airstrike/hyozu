@@ -3,6 +3,8 @@ use crate::color::Color;
 use crate::core::Pixels;
 use crate::core::font::{Style, Weight};
 use crate::data::{Datum, IntoDatums};
+use crate::encoding::{Encoding, channel};
+use crate::palette::PaletteSeed;
 
 /// A single series of bars within a bar chart.
 #[derive(Debug, Clone)]
@@ -14,6 +16,9 @@ pub struct Series {
     /// Per-point color overrides. Empty = no overrides.
     /// When `point_colors[i]` is `Some(color)`, that bar uses it instead of the series color.
     pub(crate) point_colors: Vec<Option<Color>>,
+    /// Optional fill-channel encoding: binds each bar's color to a closure over
+    /// its datum. See [`crate::encoding`] and `GOG.md` § 7 for priority.
+    pub(crate) color_by: Option<Encoding<channel::Fill>>,
     /// Per-point label overrides. Empty = no overrides.
     pub(crate) point_labels: Vec<Option<Label>>,
     /// Optional data labels for this series.
@@ -29,6 +34,7 @@ impl Series {
             points: data.into_datums(),
             color: None,
             point_colors: Vec::new(),
+            color_by: None,
             point_labels: Vec::new(),
             label: Some(Label::default()),
             name: None,
@@ -39,6 +45,50 @@ impl Series {
     pub fn with_color(mut self, color: impl Into<Color>) -> Self {
         self.color = Some(color.into());
         self
+    }
+
+    /// Encode the color channel: compute each bar's color from its datum via
+    /// the given [`Encoding`]. Replaces any previous encoding.
+    ///
+    /// See `GOG.md` § 7 for how this interacts with [`with_color`](Self::with_color),
+    /// [`set_point_color`](Self::set_point_color), and the theme palette.
+    pub fn color_by(mut self, encoding: Encoding<channel::Fill>) -> Self {
+        self.color_by = Some(encoding);
+        self
+    }
+
+    /// Resolve the displayed color for a single bar, following the priority
+    /// chain in `GOG.md` § 7:
+    ///
+    /// 1. `point_colors[i]` override (imperative)
+    /// 2. `color_by` encoding
+    /// 3. `series.color`
+    /// 4. caller-provided fallback (typically the chart's palette slot)
+    ///
+    /// Used by both the bar-rendering path and the tooltip path so they agree
+    /// on what color a given bar shows. Single-shot: re-resolves the whole
+    /// encoding on each call — N is small in practice and this is intentionally
+    /// not optimized for v1.
+    pub fn resolved_color_at(&self, i: usize, seed: &PaletteSeed, fallback: Color) -> Color {
+        // 1. point_colors override
+        if let Some(pc) = self.point_color(i) {
+            return *pc;
+        }
+
+        // 2. fill encoding
+        if let Some(enc) = &self.color_by
+            && let Some(Some(c)) = enc.resolve_fill(&self.points, seed).get(i).copied()
+        {
+            return c;
+        }
+
+        // 3. series color
+        if let Some(c) = self.color {
+            return c;
+        }
+
+        // 4. caller-provided fallback (chart palette slot)
+        fallback
     }
 
     /// Configure data labels for this series.
