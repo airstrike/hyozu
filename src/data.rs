@@ -409,22 +409,26 @@ impl Data {
     /// with a default right axis.
     pub fn secondary(mut self, marks: impl Into<Vec<Mark>>) -> Self {
         let mut new_marks = marks.into();
-        // Auto-configure axes if not yet set, based on the first Cartesian
-        // mark we encounter.
-        if self.secondary.x_axis.is_none() || self.secondary.y_axis.is_none() {
-            let (auto_x, auto_y) = new_marks
+        // Auto-configure only the right (secondary Y) axis. We do *not*
+        // auto-create a top X axis: in the Excel-style dual-axis case
+        // the x dimension is shared between primary and secondary, so
+        // the bottom x axis is enough and a duplicate top axis would
+        // just add noise. If a caller genuinely wants a separate top x
+        // axis (different x dimension for the secondary marks), they
+        // opt in explicitly via `.top_axis(|a| ...)` and take
+        // responsibility for its labels.
+        //
+        // When `top_axis` is `None`, `Scene::layout` falls back to the
+        // primary x bounds for the secondary plane, so secondary marks
+        // still plot against the same x range as the primary marks.
+        if self.secondary.y_axis.is_none() {
+            let (_, auto_y) = new_marks
                 .iter()
                 .find(|m| !matches!(m, Mark::Rule(_) | Mark::Band(_) | Mark::Tick(_)))
                 .or(new_marks.first())
                 .map(axes_for_mark)
                 .unwrap_or((None, None));
-            if self.secondary.x_axis.is_none() {
-                // Flip the default bottom axis to a top-oriented one.
-                self.secondary.x_axis = auto_x.map(|a| a.with_orientation(Orientation::Top));
-            }
-            if self.secondary.y_axis.is_none() {
-                self.secondary.y_axis = auto_y.map(|a| a.with_orientation(Orientation::Right));
-            }
+            self.secondary.y_axis = auto_y.map(|a| a.with_orientation(Orientation::Right));
         }
         self.secondary.marks.append(&mut new_marks);
         self

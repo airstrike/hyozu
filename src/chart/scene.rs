@@ -46,8 +46,8 @@ where
         let children = vec![
             self.title.as_ref().map_or(Tree::empty(), |title| title.state()),
             self.legend.as_ref().map_or(Tree::empty(), |legend| legend.state()),
-            Tree::empty(), // top_axis (optional, not used yet)
-            Tree::empty(), // right_axis (optional, not used yet)
+            self.top_axis.as_ref().map_or(Tree::empty(), |guide| guide.state()),
+            self.right_axis.as_ref().map_or(Tree::empty(), |guide| guide.state()),
             self.bottom_axis.as_ref().map_or(Tree::empty(), |guide| guide.state()),
             self.left_axis.as_ref().map_or(Tree::empty(), |guide| guide.state()),
             self.plot_area.state(),
@@ -184,9 +184,27 @@ where
             _ => None,
         };
 
-        let marks = data.primary.marks();
-        let palette_strategy = data.palette.clone().unwrap_or_else(|| Palette::default_for(marks));
-        let color_slots = palette::count_color_slots(marks);
+        // Cycle the palette across *all* marks in one shared sequence —
+        // primary first, then secondary — so series on different axes
+        // don't both resolve to slot 0 and collide. This matches the
+        // convention in ggplot / plotly / matplotlib / vega / d3: one
+        // global categorical color cycle, indexed in draw order,
+        // regardless of which axis a series belongs to.
+        let primary_marks = data.primary.marks();
+        let secondary_marks = data.secondary.marks();
+        let color_slots = palette::count_color_slots(primary_marks) + palette::count_color_slots(secondary_marks);
+        let palette_strategy = data.palette.clone().unwrap_or_else(|| {
+            let total_marks = primary_marks.len() + secondary_marks.len();
+            if total_marks >= 2 {
+                // Two or more marks → categorical, same rule the
+                // multi-mark branch of `Palette::default_for` applies.
+                Palette::Categorical
+            } else if primary_marks.is_empty() {
+                Palette::default_for(secondary_marks)
+            } else {
+                Palette::default_for(primary_marks)
+            }
+        });
 
         Self {
             title: data.title.as_deref().map(Title::new),
@@ -212,9 +230,9 @@ where
                 .as_ref()
                 .map(|axis| Guide::new(axis, data.primary.marks())),
             plot_area: if data.secondary.is_empty() {
-                PlotArea::new(marks)
+                PlotArea::new(primary_marks)
             } else {
-                PlotArea::new(marks).with_secondary(data.secondary.marks())
+                PlotArea::new(primary_marks).with_secondary(secondary_marks)
             },
             palette: palette_strategy,
             color_slots,
@@ -607,12 +625,12 @@ where
             layout_children.push(node.move_to(Point::new(content_left, plot_top - top_height)));
         }
 
-        // Left axis — widen by 1px for clean corner join
+        // Left axis. The axis border line itself is drawn inside the plot
+        // area frame by `plot_area::draw_axis_borders`, so the left axis
+        // frame contains only the labels and tick marks — no +1 width
+        // hack needed to bridge the gap to the plot area.
         if let Some(node) = left_axis_node {
-            let size = node.size();
-            let children: Vec<_> = node.children().to_vec();
-            let wider = Node::with_children(Size::new(size.width + 1.0, size.height), children);
-            layout_children.push(wider.move_to(Point::new(legend_left_x, plot_top)));
+            layout_children.push(node.move_to(Point::new(legend_left_x, plot_top)));
         }
 
         // Plot area
@@ -794,43 +812,20 @@ where
             );
         }
 
-        // Axis lines drawn last so they render on top of marks
-        // Re-iterate layout children to find axis layouts for axis line drawing
-        let mut line_layouts = layout.children();
-
-        // Skip title
-        if self.title.is_some() {
-            line_layouts.next();
-        }
-        // Skip legend
-        if self.legend.is_some() {
-            line_layouts.next();
-        }
-
-        // Skip top axis (lines are drawn with guide.draw earlier)
-        if self.top_axis.is_some() {
-            line_layouts.next();
-        }
-
-        // Left axis line
-        if let Some(guide) = &self.left_axis {
-            let left_layout = line_layouts.next().expect("left axis layout must exist");
-            guide.draw_axis_line(&tree.children[5], renderer, design, left_layout);
-        }
-
-        // Skip plot area
-        line_layouts.next();
-
-        // Bottom axis line
-        if let Some(guide) = &self.bottom_axis {
-            let bottom_layout = line_layouts.next().expect("bottom axis layout must exist");
-            guide.draw_axis_line(&tree.children[4], renderer, design, bottom_layout);
-        }
-
-        // Right axis line
-        if let Some(guide) = &self.right_axis {
-            let right_layout = line_layouts.next().expect("right axis layout must exist");
-            guide.draw_axis_line(&tree.children[3], renderer, design, right_layout);
-        }
+        // Axis border lines drawn last so they render on top of marks.
+        // Drawn inside the plot area frame using the same pixel-snap as
+        // gridlines, so they coincide structurally with the extreme
+        // gridlines (no per-frame "+1 px" hacks needed). Each side is
+        // gated by its axis's `shows_line()` flag.
+        self.plot_area.draw_axis_borders(
+            &tree.children[6],
+            renderer,
+            design,
+            plot_layout,
+            self.bottom_axis.as_ref().map(|g| g.axis()),
+            self.left_axis.as_ref().map(|g| g.axis()),
+            self.top_axis.as_ref().map(|g| g.axis()),
+            self.right_axis.as_ref().map(|g| g.axis()),
+        );
     }
 }

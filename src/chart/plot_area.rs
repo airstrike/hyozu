@@ -839,10 +839,6 @@ where
 
         let bg = design.background_color();
         let text_pair = design.text_pair();
-        let divider = design.divider_color().resolve(bg, text_pair, None);
-        // Default alphas when no override is set.
-        let major_alpha = 0.6_f32;
-        let minor_alpha = 0.25_f32;
 
         let shows_major_x = x_axis.map(|a| a.shows_grid()).unwrap_or(false);
         let shows_major_y = y_axis.map(|a| a.shows_grid()).unwrap_or(false);
@@ -862,17 +858,31 @@ where
         let left = plane.bounds.x;
         let right = plane.bounds.x + plane.bounds.width;
 
+        // Pixel-snap a coordinate to the nearest half-pixel row so a 1 px
+        // stroke covers exactly one physical pixel (crisp line) and lands
+        // 0.5 px inside the frame edges. This is shared with
+        // `draw_axis_borders` so the extreme gridlines and the axis border
+        // lines render at *exactly* the same pixel coordinates. Guarded
+        // against degenerate frames (`size < 1.0`) so `clamp` never panics.
+        let snap_h = |x: f32| {
+            let hi = (size.width - 0.5).max(0.5);
+            (x.round() + 0.5).clamp(0.5, hi)
+        };
+        let snap_v = |y: f32| {
+            let hi = (size.height - 0.5).max(0.5);
+            (y.round() + 0.5).clamp(0.5, hi)
+        };
+
         let minor_subdivs: usize = 4;
 
         // --- Minor gridlines (drawn first, so majors render on top) ---
         if shows_minor_x && x_ticks.len() >= 2 {
             let color = x_axis
                 .and_then(|a| a.minor_grid_color())
-                .map(|c| c.resolve(bg, text_pair, None))
-                .unwrap_or(crate::core::Color {
-                    a: minor_alpha,
-                    ..divider
-                });
+                .unwrap_or_else(|| design.minor_grid_color())
+                .resolve(bg, text_pair, None);
+            let y0 = snap_v(top);
+            let y1 = snap_v(bottom);
             let path = Path::new(|b| {
                 for w in x_ticks.windows(2) {
                     let (t0, t1) = (w[0], w[1]);
@@ -881,8 +891,9 @@ where
                         let t = t0 + step * k as f64;
                         let px = plane.to_pixel(crate::data::Datum::new(t, 0.0)).x;
                         if px >= left && px <= right {
-                            b.move_to(crate::core::Point::new(px, top));
-                            b.line_to(crate::core::Point::new(px, bottom));
+                            let px = snap_h(px);
+                            b.move_to(crate::core::Point::new(px, y0));
+                            b.line_to(crate::core::Point::new(px, y1));
                         }
                     }
                 }
@@ -893,11 +904,10 @@ where
         if shows_minor_y && y_ticks.len() >= 2 {
             let color = y_axis
                 .and_then(|a| a.minor_grid_color())
-                .map(|c| c.resolve(bg, text_pair, None))
-                .unwrap_or(crate::core::Color {
-                    a: minor_alpha,
-                    ..divider
-                });
+                .unwrap_or_else(|| design.minor_grid_color())
+                .resolve(bg, text_pair, None);
+            let x0 = snap_h(left);
+            let x1 = snap_h(right);
             let path = Path::new(|b| {
                 for w in y_ticks.windows(2) {
                     let (t0, t1) = (w[0], w[1]);
@@ -906,8 +916,9 @@ where
                         let t = t0 + step * k as f64;
                         let py = plane.to_pixel(crate::data::Datum::new(0.0, t)).y;
                         if py >= top && py <= bottom {
-                            b.move_to(crate::core::Point::new(left, py));
-                            b.line_to(crate::core::Point::new(right, py));
+                            let py = snap_v(py);
+                            b.move_to(crate::core::Point::new(x0, py));
+                            b.line_to(crate::core::Point::new(x1, py));
                         }
                     }
                 }
@@ -919,17 +930,17 @@ where
         if shows_major_x {
             let color = x_axis
                 .and_then(|a| a.grid_color())
-                .map(|c| c.resolve(bg, text_pair, None))
-                .unwrap_or(crate::core::Color {
-                    a: major_alpha,
-                    ..divider
-                });
+                .unwrap_or_else(|| design.grid_color())
+                .resolve(bg, text_pair, None);
+            let y0 = snap_v(top);
+            let y1 = snap_v(bottom);
             let path = Path::new(|b| {
                 for &t in x_ticks {
                     let px = plane.to_pixel(crate::data::Datum::new(t, 0.0)).x;
                     if px >= left && px <= right {
-                        b.move_to(crate::core::Point::new(px, top));
-                        b.line_to(crate::core::Point::new(px, bottom));
+                        let px = snap_h(px);
+                        b.move_to(crate::core::Point::new(px, y0));
+                        b.line_to(crate::core::Point::new(px, y1));
                     }
                 }
             });
@@ -939,21 +950,146 @@ where
         if shows_major_y {
             let color = y_axis
                 .and_then(|a| a.grid_color())
-                .map(|c| c.resolve(bg, text_pair, None))
-                .unwrap_or(crate::core::Color {
-                    a: major_alpha,
-                    ..divider
-                });
+                .unwrap_or_else(|| design.grid_color())
+                .resolve(bg, text_pair, None);
+            let x0 = snap_h(left);
+            let x1 = snap_h(right);
             let path = Path::new(|b| {
                 for &t in y_ticks {
                     let py = plane.to_pixel(crate::data::Datum::new(0.0, t)).y;
                     if py >= top && py <= bottom {
-                        b.move_to(crate::core::Point::new(left, py));
-                        b.line_to(crate::core::Point::new(right, py));
+                        let py = snap_v(py);
+                        b.move_to(crate::core::Point::new(x0, py));
+                        b.line_to(crate::core::Point::new(x1, py));
                     }
                 }
             });
             frame.stroke(&path, Stroke::default().with_width(1.0).with_color(color));
+        }
+
+        let geometry = frame.into_geometry();
+        renderer.with_translation(crate::core::Vector::new(layout_bounds.x, layout_bounds.y), |renderer| {
+            renderer.draw_geometry(geometry);
+        });
+    }
+
+    /// Draws the plot area's axis border lines (all four sides).
+    ///
+    /// The borders are drawn *inside* the plot area frame using the same
+    /// pixel-snap as `draw_gridlines`, so each border lands on the exact
+    /// same row/column as its corresponding extreme gridline. This makes
+    /// the axis frame structurally coincide with the data extent instead
+    /// of relying on per-frame "+1 px" hacks to bridge the gap between
+    /// the plot frame and a sibling axis frame.
+    ///
+    /// Each side is gated by its axis's `shows_line()` flag; if a side
+    /// has no axis configured, no border is drawn there.
+    ///
+    /// Should be called *after* `draw()` so the borders render on top of
+    /// the marks.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_axis_borders<D>(
+        &self,
+        tree: &crate::core::widget::Tree,
+        renderer: &mut Renderer,
+        design: &D,
+        layout: crate::core::Layout<'_>,
+        bottom_axis: Option<&crate::data::Axis>,
+        left_axis: Option<&crate::data::Axis>,
+        top_axis: Option<&crate::data::Axis>,
+        right_axis: Option<&crate::data::Axis>,
+    ) where
+        D: crate::design::Design + ?Sized,
+    {
+        use crate::widget::canvas::{Frame, Path, Stroke};
+
+        let state = tree.state.downcast_ref::<State>();
+        let Some(plane) = state.plane.as_ref() else {
+            return;
+        };
+
+        let layout_bounds = layout.bounds();
+        let size = layout_bounds.size();
+        if size.width <= 0.0 || size.height <= 0.0 {
+            return;
+        }
+
+        let draws_left = left_axis.map(|a| a.shows_line()).unwrap_or(false);
+        let draws_bottom = bottom_axis.map(|a| a.shows_line()).unwrap_or(false);
+        let draws_top = top_axis.map(|a| a.shows_line()).unwrap_or(false);
+        let draws_right = right_axis.map(|a| a.shows_line()).unwrap_or(false);
+        if !(draws_left || draws_bottom || draws_top || draws_right) {
+            return;
+        }
+
+        let bg = design.background_color();
+        let text_pair = design.text_pair();
+
+        // Same snap functions as `draw_gridlines` — this is what makes the
+        // border lines structurally coincide with the extreme gridlines.
+        // Guarded against degenerate frames so `clamp` never panics.
+        let snap_h = |x: f32| {
+            let hi = (size.width - 0.5).max(0.5);
+            (x.round() + 0.5).clamp(0.5, hi)
+        };
+        let snap_v = |y: f32| {
+            let hi = (size.height - 0.5).max(0.5);
+            (y.round() + 0.5).clamp(0.5, hi)
+        };
+
+        let top = plane.bounds.y;
+        let bottom = plane.bounds.y + plane.bounds.height;
+        let left = plane.bounds.x;
+        let right = plane.bounds.x + plane.bounds.width;
+
+        // Resolve each border's color lazily so we only pay for it when
+        // the side is actually drawn. Colors come from the per-axis
+        // override or fall back to `design.axis_color()`.
+        let resolve = |axis: Option<&crate::data::Axis>| {
+            axis.and_then(|a| a.axis_color())
+                .unwrap_or_else(|| design.axis_color())
+                .resolve(bg, text_pair, None)
+        };
+
+        let mut frame = Frame::new(renderer, size);
+        let x_left = snap_h(left);
+        let x_right = snap_h(right);
+        let y_top = snap_v(top);
+        let y_bottom = snap_v(bottom);
+
+        if draws_left {
+            let path = Path::line(
+                crate::core::Point::new(x_left, y_top),
+                crate::core::Point::new(x_left, y_bottom),
+            );
+            frame.stroke(&path, Stroke::default().with_width(1.0).with_color(resolve(left_axis)));
+        }
+
+        if draws_bottom {
+            let path = Path::line(
+                crate::core::Point::new(x_left, y_bottom),
+                crate::core::Point::new(x_right, y_bottom),
+            );
+            frame.stroke(
+                &path,
+                Stroke::default().with_width(1.0).with_color(resolve(bottom_axis)),
+            );
+        }
+
+        if draws_top {
+            let path = Path::line(
+                crate::core::Point::new(x_left, y_top),
+                crate::core::Point::new(x_right, y_top),
+            );
+            frame.stroke(&path, Stroke::default().with_width(1.0).with_color(resolve(top_axis)));
+        }
+
+        if draws_right {
+            let path = Path::line(
+                crate::core::Point::new(x_right, y_top),
+                crate::core::Point::new(x_right, y_bottom),
+            );
+            frame.stroke(&path, Stroke::default().with_width(1.0).with_color(resolve(right_axis)));
         }
 
         let geometry = frame.into_geometry();

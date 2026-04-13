@@ -1219,56 +1219,6 @@ where
         Node::with_children(Size::new(max_size.width, height), children)
     }
 
-    /// Draws the axis line only using canvas geometry so it composites
-    /// in the same pipeline as marks. Call after the plot area to ensure
-    /// axis lines render on top of marks (bars, areas, etc.).
-    pub fn draw_axis_line<D>(
-        &self,
-        tree: &crate::core::widget::Tree,
-        renderer: &mut Renderer,
-        design: &D,
-        layout: crate::core::Layout<'_>,
-    ) where
-        D: crate::design::Design + ?Sized,
-        Renderer: crate::widget::renderer::geometry::Renderer,
-    {
-        use crate::widget::canvas::{Frame, Path, Stroke};
-
-        let bounds = layout.bounds();
-        let state = tree.state.downcast_ref::<State<Renderer::Paragraph>>();
-        let (inset_start, inset_end) = state.label_insets;
-
-        let background = design.background_color();
-        let text_pair = design.text_pair();
-        let axis_color = self
-            .axis
-            .axis_color()
-            .unwrap_or(design.axis_color())
-            .resolve(background, text_pair, None);
-
-        let mut frame = Frame::new(renderer, bounds.size());
-        let path = match self.axis.orientation() {
-            Orientation::Bottom => {
-                let x0 = inset_start;
-                let x1 = bounds.width - inset_end;
-                Path::line(Point::new(x0, 0.0), Point::new(x1, 0.0))
-            }
-            Orientation::Left => {
-                let x = bounds.width;
-                let y0 = inset_start;
-                let y1 = bounds.height - inset_end;
-                Path::line(Point::new(x, y0), Point::new(x, y1))
-            }
-            _ => return, // TODO: Top and Right orientations
-        };
-
-        frame.stroke(&path, Stroke::default().with_width(1.0).with_color(axis_color));
-        let geometry = frame.into_geometry();
-        renderer.with_translation(crate::core::Vector::new(bounds.x, bounds.y), |renderer| {
-            renderer.draw_geometry(geometry);
-        });
-    }
-
     /// Draws tick marks and labels at their laid-out positions.
     /// Call before the plot area so labels appear behind marks.
     #[allow(clippy::too_many_arguments)]
@@ -1316,6 +1266,20 @@ where
         let (inset_start, inset_end) = state.label_insets;
         if !tick_positions.is_empty() {
             let mut frame = Frame::new(renderer, bounds.size());
+            // Pixel-snap perpendicular coordinates to a half-pixel row so a
+            // 1 px stroke renders as one crisp physical pixel (instead of
+            // straddling two rows at 50 % coverage) and clamp 0.5 px inside
+            // the frame. Guard against degenerate frames (`bounds < 1.0`)
+            // by floor-ing `hi` to `lo` so the clamp never panics with
+            // `min > max`.
+            let snap_h = |x: f32| {
+                let hi = (bounds.width - 0.5).max(0.5);
+                (x.round() + 0.5).clamp(0.5, hi)
+            };
+            let snap_v = |y: f32| {
+                let hi = (bounds.height - 0.5).max(0.5);
+                (y.round() + 0.5).clamp(0.5, hi)
+            };
             let path = Path::new(|builder| {
                 for &tick_pos in tick_positions {
                     let normalized = if value_range > 0.0 {
@@ -1327,17 +1291,50 @@ where
                     match self.axis.orientation() {
                         Orientation::Bottom => {
                             let usable = bounds.width - inset_start - inset_end;
-                            let x = inset_start + normalized * usable;
-                            builder.move_to(Point::new(x, 0.0));
-                            builder.line_to(Point::new(x, tick_length));
+                            let x = snap_h(inset_start + normalized * usable);
+                            // The plot area's bottom border is drawn at
+                            // scene y = plot_top + plot_height - 0.5,
+                            // which is `frame y = -0.5` here. Start the
+                            // tick at that border so it visually meets
+                            // it, not 0.5 px below.
+                            builder.move_to(Point::new(x, -0.5));
+                            builder.line_to(Point::new(x, tick_length - 0.5));
+                        }
+                        Orientation::Top => {
+                            let usable = bounds.width - inset_start - inset_end;
+                            let x = snap_h(inset_start + normalized * usable);
+                            // The plot area's top border is drawn at
+                            // scene y = plot_top + 0.5, which is
+                            // `frame y = bounds.height + 0.5` here (just
+                            // past the bottom edge of the top-axis
+                            // frame). The tick extends upward from the
+                            // border into the axis frame, away from the
+                            // plot area.
+                            builder.move_to(Point::new(x, bounds.height + 0.5));
+                            builder.line_to(Point::new(x, bounds.height - tick_length + 0.5));
                         }
                         Orientation::Left => {
                             let usable = bounds.height - inset_start - inset_end;
-                            let y = inset_start + usable - normalized * usable;
-                            builder.move_to(Point::new(bounds.width - tick_length, y));
-                            builder.line_to(Point::new(bounds.width, y));
+                            let y = snap_v(inset_start + usable - normalized * usable);
+                            // The plot area's left border is drawn at
+                            // scene x = content_left + 0.5, which is
+                            // `frame x = bounds.width + 0.5` here. Extend
+                            // the tick to that border so it visually
+                            // meets it, not 0.5 px short.
+                            builder.move_to(Point::new(bounds.width - tick_length + 0.5, y));
+                            builder.line_to(Point::new(bounds.width + 0.5, y));
                         }
-                        _ => {}
+                        Orientation::Right => {
+                            let usable = bounds.height - inset_start - inset_end;
+                            let y = snap_v(inset_start + usable - normalized * usable);
+                            // The plot area's right border is drawn at
+                            // scene x = content_left + plot_width - 0.5,
+                            // which is `frame x = -0.5` here (just past
+                            // the left edge of the right-axis frame).
+                            // Tick extends rightward from the border.
+                            builder.move_to(Point::new(-0.5, y));
+                            builder.line_to(Point::new(tick_length - 0.5, y));
+                        }
                     }
                 }
             });
