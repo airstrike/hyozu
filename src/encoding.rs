@@ -48,13 +48,28 @@ pub struct Encoding<C: Channel> {
 #[derive(Clone)]
 enum Kind {
     /// Assign successive palette slots to keys in order of first appearance.
-    /// `range = None` means "build a categorical palette from the design seed
-    /// at draw time, sized to the number of distinct keys."
-    Ordinal { range: Option<Vec<Color>> },
+    /// The `source` decides whether those slots come from a seed-derived
+    /// palette (theme-driven, default [`Palette::Categorical`]) or from an
+    /// explicit user-provided color list.
+    Ordinal { source: OrdinalSource },
     /// Explicit lookup table. Missing keys fall through the resolution chain.
     Manual { mapping: Vec<(String, Color)> },
     /// Closure-based lookup. `None` from the closure also falls through.
     ManualWith { lookup: Lookup },
+}
+
+/// Private: how an ordinal encoding picks its colors. Mutually exclusive by
+/// construction — calling [`Encoding::range`] replaces any prior palette
+/// choice, and [`Encoding::palette`] replaces any prior range.
+#[derive(Clone, Debug, PartialEq)]
+enum OrdinalSource {
+    /// Build the palette from the design seed at draw time with the given
+    /// flavor. Default is [`Palette::Categorical`]; users can request
+    /// [`Palette::Sequential`] or a custom [`Palette::Gradient`] via
+    /// [`Encoding::palette`].
+    Seed(Palette),
+    /// Use the user-supplied color list verbatim (insertion-order assignment).
+    Range(Vec<Color>),
 }
 
 /// Build a fill-channel encoding from a key-extraction closure.
@@ -81,7 +96,9 @@ where
 {
     Encoding {
         extractor: Arc::new(move |i, d| f(i, d).to_string()),
-        kind: Kind::Ordinal { range: None },
+        kind: Kind::Ordinal {
+            source: OrdinalSource::Seed(Palette::Categorical),
+        },
         _channel: PhantomData,
     }
 }
@@ -116,7 +133,7 @@ impl<C: Channel> PartialEq for Encoding<C> {
 impl PartialEq for Kind {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Kind::Ordinal { range: a }, Kind::Ordinal { range: b }) => a == b,
+            (Kind::Ordinal { source: a }, Kind::Ordinal { source: b }) => a == b,
             (Kind::Manual { mapping: a }, Kind::Manual { mapping: b }) => a == b,
             (Kind::ManualWith { lookup: a }, Kind::ManualWith { lookup: b }) => Arc::ptr_eq(a, b),
             _ => false,
@@ -127,10 +144,7 @@ impl PartialEq for Kind {
 impl std::fmt::Debug for Kind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Kind::Ordinal { range } => f
-                .debug_struct("Ordinal")
-                .field("range_len", &range.as_ref().map(|p| p.len()))
-                .finish(),
+            Kind::Ordinal { source } => f.debug_struct("Ordinal").field("source", source).finish(),
             Kind::Manual { mapping } => f.debug_struct("Manual").field("entries", &mapping.len()).finish(),
             Kind::ManualWith { .. } => f.debug_struct("ManualWith").finish_non_exhaustive(),
         }
@@ -155,7 +169,36 @@ impl Encoding<Fill> {
         Col: Into<Color>,
     {
         self.kind = Kind::Ordinal {
-            range: Some(range.into_iter().map(Into::into).collect()),
+            source: OrdinalSource::Range(range.into_iter().map(Into::into).collect()),
+        };
+        self
+    }
+
+    /// Use a seed-derived palette of the given flavor for ordinal assignment.
+    /// The palette is generated from the design's `PaletteSeed` at draw time,
+    /// so it follows the theme.
+    ///
+    /// Default is [`Palette::Categorical`] (distinct hues). Use
+    /// [`Palette::Sequential`] for shades of the theme's primary color, or
+    /// [`Palette::Gradient`] with explicit stops for a custom interpolated
+    /// gradient.
+    ///
+    /// Mutually exclusive with [`range`](Self::range): calling `.palette(...)`
+    /// replaces any prior `.range(...)` configuration, and vice versa.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use hyozu::encoding;
+    /// use hyozu::palette::Palette;
+    ///
+    /// const MONTHS: [&str; 6] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun"];
+    /// // Each month gets a shade of the theme's primary color.
+    /// let enc = encoding::key(|i, _| MONTHS[i]).palette(Palette::Sequential);
+    /// ```
+    pub fn palette(mut self, flavor: Palette) -> Self {
+        self.kind = Kind::Ordinal {
+            source: OrdinalSource::Seed(flavor),
         };
         self
     }
@@ -222,7 +265,7 @@ impl Encoding<Fill> {
         let keys: Vec<String> = points.iter().enumerate().map(|(i, d)| (self.extractor)(i, d)).collect();
 
         match &self.kind {
-            Kind::Ordinal { range } => {
+            Kind::Ordinal { source } => {
                 // Compute distinct-key insertion order once.
                 let mut seen: Vec<String> = Vec::new();
                 let key_indices: Vec<usize> = keys
@@ -237,15 +280,16 @@ impl Encoding<Fill> {
                     })
                     .collect();
 
-                // Pick a palette: explicit `range`, or build a fresh
-                // categorical palette from the seed sized to the distinct-key
-                // count. The encoding does NOT share the chart's potentially-
-                // Sequential palette.
-                let palette_colors: Vec<Color> = if let Some(explicit) = range {
-                    explicit.clone()
-                } else {
-                    let n = seen.len().max(1);
-                    Resolved::resolve(&Palette::Categorical, seed, n).colors().to_vec()
+                // Pick a palette: explicit `Range`, or build a fresh palette
+                // from the seed at the requested flavor sized to the
+                // distinct-key count. The encoding does NOT share the chart's
+                // potentially-Sequential top-level palette — D15.
+                let palette_colors: Vec<Color> = match source {
+                    OrdinalSource::Range(explicit) => explicit.clone(),
+                    OrdinalSource::Seed(flavor) => {
+                        let n = seen.len().max(1);
+                        Resolved::resolve(flavor, seed, n).colors().to_vec()
+                    }
                 };
 
                 if palette_colors.is_empty() {
@@ -354,6 +398,64 @@ mod tests {
             c0, c1,
             "seed-derived categorical palette must produce distinct colors for distinct keys"
         );
+    }
+
+    #[test]
+    fn ordinal_palette_sequential_produces_varied_shades() {
+        // `.palette(Palette::Sequential)` builds a Sequential palette (shades
+        // of the seed's primary color) at draw time. With four distinct keys
+        // we expect four slot lookups and not-all-identical colors — guards
+        // against the method silently falling back to Categorical or to a
+        // broken one-color Sequential.
+        let labels = ["a", "b", "c", "d"];
+        let enc = key(move |i, _| labels[i]).palette(Palette::Sequential);
+
+        let pts = points(&[1.0, 2.0, 3.0, 4.0]);
+        let got = enc.resolve_fill(&pts, &test_seed());
+
+        assert_eq!(got.len(), 4);
+        let colors: Vec<Color> = got.into_iter().map(|c| c.expect("sequential slot")).collect();
+        let all_same = colors.iter().all(|&c| c == colors[0]);
+        assert!(
+            !all_same,
+            "Sequential palette should produce at least 2 distinct shades"
+        );
+    }
+
+    #[test]
+    fn ordinal_palette_replaces_prior_range_call() {
+        // .palette(...) after .range(...) must reset the source to Seed(p),
+        // not leave the earlier range in place. Last call wins — mutually
+        // exclusive by construction.
+        let labels = ["a", "b"];
+        let sentinel = Color::from_rgb8(123, 45, 67);
+        let enc = key(move |i, _| labels[i])
+            .range([sentinel, sentinel])
+            .palette(Palette::Sequential);
+
+        let pts = points(&[1.0, 2.0]);
+        let got = enc.resolve_fill(&pts, &test_seed());
+
+        // If .palette(...) correctly cleared the range, neither slot is the
+        // sentinel color. The chances of Sequential producing (123,45,67) from
+        // a (50,100,200) primary are astronomically low.
+        assert_ne!(got[0], Some(sentinel));
+        assert_ne!(got[1], Some(sentinel));
+    }
+
+    #[test]
+    fn ordinal_range_replaces_prior_palette_call() {
+        // The mirror of the above: .range(...) after .palette(...) must
+        // install the explicit colors, not still build from the seed.
+        let labels = ["a", "b"];
+        let c0 = Color::from_rgb8(10, 20, 30);
+        let c1 = Color::from_rgb8(40, 50, 60);
+        let enc = key(move |i, _| labels[i]).palette(Palette::Sequential).range([c0, c1]);
+
+        let pts = points(&[1.0, 2.0]);
+        let got = enc.resolve_fill(&pts, &test_seed());
+
+        assert_eq!(got, vec![Some(c0), Some(c1)]);
     }
 
     // Manual lookup
