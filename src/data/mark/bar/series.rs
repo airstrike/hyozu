@@ -279,3 +279,92 @@ impl<T: IntoDatums> From<T> for Series {
         Series::new(data)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::encoding;
+
+    fn test_seed() -> PaletteSeed {
+        PaletteSeed {
+            primary: crate::core::Color::from_rgb8(50, 100, 200),
+            secondary: crate::core::Color::from_rgb8(200, 50, 100),
+            success: crate::core::Color::from_rgb8(100, 200, 50),
+            warning: crate::core::Color::from_rgb8(220, 180, 40),
+            danger: crate::core::Color::from_rgb8(220, 40, 40),
+            background: crate::core::Color::WHITE,
+        }
+    }
+
+    // Concrete test colors — kept distinct so any confusion between slots is
+    // caught by the assertions below.
+    const RED: Color = Color::from_rgb8(255, 0, 0);
+    const GREEN: Color = Color::from_rgb8(0, 255, 0);
+    const BLUE: Color = Color::from_rgb8(0, 0, 255);
+    const YELLOW: Color = Color::from_rgb8(255, 255, 0);
+
+    #[test]
+    fn point_color_wins_over_encoding_series_color_and_fallback() {
+        // Priority 1: explicit per-point override beats every other source.
+        // All four sources are set so that if the priority order were wrong
+        // the test would pick a different color.
+        let mut series = Series::new([1.0, 2.0, 3.0])
+            .with_color(GREEN)
+            .color_by(encoding::key(|_, _| "k").manual([("k", YELLOW)]));
+        series.set_point_color(0, RED);
+
+        let got = series.resolved_color_at(0, &test_seed(), BLUE);
+
+        assert_eq!(got, RED);
+    }
+
+    #[test]
+    fn encoding_wins_over_series_color_and_fallback() {
+        // Priority 2: encoding beats series.color and the caller fallback
+        // when no point_colors override is set.
+        let series = Series::new([1.0, 2.0, 3.0])
+            .with_color(GREEN)
+            .color_by(encoding::key(|_, _| "k").manual([("k", YELLOW)]));
+
+        let got = series.resolved_color_at(0, &test_seed(), BLUE);
+
+        assert_eq!(got, YELLOW);
+    }
+
+    #[test]
+    fn series_color_wins_over_fallback() {
+        // Priority 3: with no point_colors and no encoding, series.color
+        // beats the caller-supplied fallback.
+        let series = Series::new([1.0, 2.0, 3.0]).with_color(GREEN);
+
+        let got = series.resolved_color_at(0, &test_seed(), BLUE);
+
+        assert_eq!(got, GREEN);
+    }
+
+    #[test]
+    fn fallback_returned_when_nothing_is_set() {
+        // Priority 4: with no sources at all, the caller-supplied fallback
+        // color is what the series renders as.
+        let series = Series::new([1.0, 2.0, 3.0]);
+
+        let got = series.resolved_color_at(0, &test_seed(), BLUE);
+
+        assert_eq!(got, BLUE);
+    }
+
+    #[test]
+    fn encoding_miss_falls_through_to_series_color() {
+        // The encoding extracts key "zz" which has no manual mapping — the
+        // encoding returns None for that slot, and resolved_color_at must
+        // fall through to the next priority step (series.color = GREEN),
+        // NOT return RED from the unrelated manual entry.
+        let series = Series::new([1.0, 2.0, 3.0])
+            .with_color(GREEN)
+            .color_by(encoding::key(|_, _| "zz").manual([("a", RED)]));
+
+        let got = series.resolved_color_at(0, &test_seed(), BLUE);
+
+        assert_eq!(got, GREEN);
+    }
+}
