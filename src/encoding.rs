@@ -148,7 +148,7 @@ impl Encoding<Fill> {
     ///
     /// const REGIONS: [&str; 3] = ["North", "South", "East"];
     /// let enc = encoding::key(|i, _| REGIONS[i])
-    ///     .range([0x355070u32, 0x6D597Au32, 0xB56576u32]);
+    ///     .range([0x355070, 0x6D597A, 0xB56576]);
     /// ```
     pub fn range<Col>(mut self, range: impl IntoIterator<Item = Col>) -> Self
     where
@@ -169,7 +169,7 @@ impl Encoding<Fill> {
     /// use hyozu::encoding;
     ///
     /// let enc = encoding::key(|_, d| if d.y >= 100.0 { "above" } else { "below" })
-    ///     .manual([("above", 0x1A6DAAu32), ("below", 0x93C5E8u32)]);
+    ///     .manual([("above", 0x1A6DAA), ("below", 0x93C5E8)]);
     /// ```
     pub fn manual<K, Col>(mut self, mapping: impl IntoIterator<Item = (K, Col)>) -> Self
     where

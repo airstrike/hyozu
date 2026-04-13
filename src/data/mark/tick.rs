@@ -31,7 +31,7 @@ pub enum Orientation {
 /// // Per-bar targets for a horizontal bar chart
 /// let targets = tick([(0, 80.0), (1, 95.0), (2, 75.0)])
 ///     .vertical()
-///     .color(0xD4A843_u32);
+///     .color(0xD4A843);
 /// ```
 #[derive(Debug, Clone)]
 pub struct Tick {

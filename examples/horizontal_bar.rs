@@ -22,15 +22,9 @@ impl App {
     fn new() -> Self {
         Self {
             data: data(
-                bars([
-                    bar([120, 190, 150, 80, 210]).color_by(encoding::key(|i, _| REGIONS[i]).range([
-                        0x355070u32,
-                        0x6D597Au32,
-                        0xB56576u32,
-                        0xE56B6Fu32,
-                        0xEAAC8Bu32,
-                    ])),
-                ])
+                bars([bar([120, 190, 150, 80, 210]).color_by(
+                    encoding::key(|i, _| REGIONS[i]).range([0x355070, 0x6D597A, 0xB56576, 0xE56B6F, 0xEAAC8B]),
+                )])
                 .horizontal(),
             )
             .title("Sales by Region")
