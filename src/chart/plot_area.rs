@@ -1100,6 +1100,7 @@ where
 
     /// Draws the plot area by delegating to each series
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     pub fn draw<D>(
         &self,
         tree: &crate::core::widget::Tree,
@@ -1110,6 +1111,7 @@ where
         cursor: crate::core::mouse::Cursor,
         viewport: &crate::core::Rectangle,
         palette: &crate::palette::Resolved,
+        chart_user_palette: Option<&crate::palette::Palette>,
         selection: &Option<crate::target::Target>,
         hidden_series: &std::collections::HashSet<String>,
     ) where
@@ -1164,6 +1166,7 @@ where
                         viewport,
                         color_offset,
                         palette,
+                        chart_user_palette,
                         i,
                         selection,
                     );

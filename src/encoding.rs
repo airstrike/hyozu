@@ -64,10 +64,11 @@ enum Kind {
 #[derive(Clone, Debug, PartialEq)]
 enum OrdinalSource {
     /// Build the palette from the design seed at draw time with the given
-    /// flavor. Default is [`Palette::Categorical`]; users can request
-    /// [`Palette::Sequential`] or a custom [`Palette::Gradient`] via
-    /// [`Encoding::palette`].
-    Seed(Palette),
+    /// flavor. `None` means "inherit from the chart's `Data::palette`
+    /// setting, or fall back to [`Palette::Categorical`] if the chart
+    /// didn't set one." `Some(p)` means "always use `p`, regardless of
+    /// the chart's setting." See D17 for the inheritance story.
+    Seed(Option<Palette>),
     /// Use the user-supplied color list verbatim (insertion-order assignment).
     Range(Vec<Color>),
 }
@@ -97,7 +98,9 @@ where
     Encoding {
         extractor: Arc::new(move |i, d| f(i, d).to_string()),
         kind: Kind::Ordinal {
-            source: OrdinalSource::Seed(Palette::Categorical),
+            // None = "inherit from the chart's Data::palette, or
+            // fall back to Categorical". D17.
+            source: OrdinalSource::Seed(None),
         },
         _channel: PhantomData,
     }
@@ -198,7 +201,7 @@ impl Encoding<Fill> {
     /// ```
     pub fn palette(mut self, flavor: Palette) -> Self {
         self.kind = Kind::Ordinal {
-            source: OrdinalSource::Seed(flavor),
+            source: OrdinalSource::Seed(Some(flavor)),
         };
         self
     }
@@ -255,13 +258,23 @@ impl Encoding<Fill> {
     /// - `Some(color)` — the encoding produced a color
     /// - `None` — the caller should fall back through the next priority step
     ///
-    /// `seed` is the design's palette seed, used to build a fresh categorical
-    /// palette sized to the number of distinct keys when the encoding has no
-    /// explicit `range`. The encoding deliberately does NOT share the chart's
-    /// main resolved palette; single-series bar charts default to
+    /// `seed` is the design's palette seed, used to build a fresh palette
+    /// sized to the number of distinct keys when the encoding has no explicit
+    /// `range`. The encoding deliberately does NOT share the chart's main
+    /// resolved palette (D15): single-series bar charts default to
     /// `Palette::Sequential` of length 1, which would collapse every bar to a
     /// single color.
-    pub(crate) fn resolve_fill(&self, points: &[Datum], seed: &PaletteSeed) -> Vec<Option<Color>> {
+    ///
+    /// `chart_default` is the user's `Data::palette(...)` setting (if any),
+    /// used as the flavor when the encoding itself has no explicit `.palette()`
+    /// override. This is the D17 inheritance path: `Data::palette(Sequential)`
+    /// flows into encoded series automatically.
+    pub(crate) fn resolve_fill(
+        &self,
+        points: &[Datum],
+        seed: &PaletteSeed,
+        chart_default: Option<&Palette>,
+    ) -> Vec<Option<Color>> {
         let keys: Vec<String> = points.iter().enumerate().map(|(i, d)| (self.extractor)(i, d)).collect();
 
         match &self.kind {
@@ -283,12 +296,19 @@ impl Encoding<Fill> {
                 // Pick a palette: explicit `Range`, or build a fresh palette
                 // from the seed at the requested flavor sized to the
                 // distinct-key count. The encoding does NOT share the chart's
-                // potentially-Sequential top-level palette — D15.
+                // potentially-Sequential top-level palette — D15. Flavor
+                // resolution: explicit `.palette(p)` on the encoding wins;
+                // else inherit from `chart_default` (user's `Data::palette`);
+                // else fall back to `Palette::Categorical`. D17.
                 let palette_colors: Vec<Color> = match source {
                     OrdinalSource::Range(explicit) => explicit.clone(),
-                    OrdinalSource::Seed(flavor) => {
+                    OrdinalSource::Seed(override_flavor) => {
+                        let flavor: Palette = override_flavor
+                            .clone()
+                            .or_else(|| chart_default.cloned())
+                            .unwrap_or(Palette::Categorical);
                         let n = seen.len().max(1);
-                        Resolved::resolve(flavor, seed, n).colors().to_vec()
+                        Resolved::resolve(&flavor, seed, n).colors().to_vec()
                     }
                 };
 
@@ -346,7 +366,7 @@ mod tests {
         let enc = key(move |i, _| labels[i]).range([c0, c1, c2]);
 
         let pts = points(&[1.0, 2.0, 3.0, 4.0]);
-        let got = enc.resolve_fill(&pts, &test_seed());
+        let got = enc.resolve_fill(&pts, &test_seed(), None);
 
         assert_eq!(got, vec![Some(c0), Some(c1), Some(c0), Some(c2)]);
     }
@@ -360,7 +380,7 @@ mod tests {
         let enc = key(move |i, _| labels[i]).range([c0, c1]);
 
         let pts = points(&[1.0, 2.0, 3.0, 4.0, 5.0]);
-        let got = enc.resolve_fill(&pts, &test_seed());
+        let got = enc.resolve_fill(&pts, &test_seed(), None);
 
         assert_eq!(got, vec![Some(c0), Some(c1), Some(c0), Some(c1), Some(c0)]);
     }
@@ -373,7 +393,7 @@ mod tests {
         let enc = key(|i, _| format!("{}", i)).range(std::iter::empty::<u32>());
 
         let pts = points(&[1.0, 2.0, 3.0]);
-        let got = enc.resolve_fill(&pts, &test_seed());
+        let got = enc.resolve_fill(&pts, &test_seed(), None);
 
         assert_eq!(got, vec![None, None, None]);
     }
@@ -389,7 +409,7 @@ mod tests {
         let enc = key(move |i, _| labels[i]);
 
         let pts = points(&[1.0, 2.0]);
-        let got = enc.resolve_fill(&pts, &test_seed());
+        let got = enc.resolve_fill(&pts, &test_seed(), None);
 
         assert_eq!(got.len(), 2);
         let c0 = got[0].expect("seed-derived palette should produce a color for key 'a'");
@@ -397,6 +417,55 @@ mod tests {
         assert_ne!(
             c0, c1,
             "seed-derived categorical palette must produce distinct colors for distinct keys"
+        );
+    }
+
+    #[test]
+    fn ordinal_inherits_chart_palette_when_encoding_has_no_explicit_flavor() {
+        // D17: when the encoding itself has no `.palette()` override, it
+        // should inherit the chart-level `Data::palette` choice. Here we
+        // build an encoding and a "user set Sequential on Data" and verify
+        // the encoding produces Sequential shades (not Categorical hues).
+        let labels = ["a", "b", "c", "d"];
+        let enc = key(move |i, _| labels[i]);
+
+        let pts = points(&[1.0, 2.0, 3.0, 4.0]);
+        let inherited = enc.resolve_fill(&pts, &test_seed(), Some(&Palette::Sequential));
+        let default = enc.resolve_fill(&pts, &test_seed(), None);
+
+        // Both paths must produce 4 colors and at least two distinct shades,
+        // but they should NOT be identical — Sequential and Categorical pick
+        // colors differently, and the inheritance path honors Sequential.
+        let inherited_colors: Vec<Color> = inherited.into_iter().map(|c| c.unwrap()).collect();
+        let default_colors: Vec<Color> = default.into_iter().map(|c| c.unwrap()).collect();
+        assert_eq!(inherited_colors.len(), 4);
+        assert_eq!(default_colors.len(), 4);
+        assert_ne!(
+            inherited_colors, default_colors,
+            "Sequential-inherited palette should differ from default Categorical"
+        );
+    }
+
+    #[test]
+    fn ordinal_explicit_palette_override_beats_chart_default() {
+        // D17 override path: when the encoding explicitly sets `.palette(X)`,
+        // it must ignore the chart's `Data::palette` choice. Build an
+        // encoding with `.palette(Categorical)` and a chart with Sequential;
+        // the encoding should use Categorical, not inherit Sequential.
+        let labels = ["a", "b", "c", "d"];
+        let explicit = key(move |i, _| labels[i]).palette(Palette::Categorical);
+        let inheriting = key(move |i, _| labels[i]);
+
+        let pts = points(&[1.0, 2.0, 3.0, 4.0]);
+        let explicit_colors = explicit.resolve_fill(&pts, &test_seed(), Some(&Palette::Sequential));
+        let inheriting_colors = inheriting.resolve_fill(&pts, &test_seed(), Some(&Palette::Sequential));
+
+        // The explicit-Categorical encoding must differ from the inheriting
+        // (Sequential) encoding — i.e. the explicit .palette() override
+        // successfully blocks the chart-level inheritance.
+        assert_ne!(
+            explicit_colors, inheriting_colors,
+            "explicit .palette(Categorical) should override inherited Sequential"
         );
     }
 
@@ -411,7 +480,7 @@ mod tests {
         let enc = key(move |i, _| labels[i]).palette(Palette::Sequential);
 
         let pts = points(&[1.0, 2.0, 3.0, 4.0]);
-        let got = enc.resolve_fill(&pts, &test_seed());
+        let got = enc.resolve_fill(&pts, &test_seed(), None);
 
         assert_eq!(got.len(), 4);
         let colors: Vec<Color> = got.into_iter().map(|c| c.expect("sequential slot")).collect();
@@ -434,7 +503,7 @@ mod tests {
             .palette(Palette::Sequential);
 
         let pts = points(&[1.0, 2.0]);
-        let got = enc.resolve_fill(&pts, &test_seed());
+        let got = enc.resolve_fill(&pts, &test_seed(), None);
 
         // If .palette(...) correctly cleared the range, neither slot is the
         // sentinel color. The chances of Sequential producing (123,45,67) from
@@ -453,7 +522,7 @@ mod tests {
         let enc = key(move |i, _| labels[i]).palette(Palette::Sequential).range([c0, c1]);
 
         let pts = points(&[1.0, 2.0]);
-        let got = enc.resolve_fill(&pts, &test_seed());
+        let got = enc.resolve_fill(&pts, &test_seed(), None);
 
         assert_eq!(got, vec![Some(c0), Some(c1)]);
     }
@@ -467,7 +536,7 @@ mod tests {
         let enc = key(move |i, _| labels[i]).manual([("a", c0), ("b", c1)]);
 
         let pts = points(&[1.0, 2.0, 3.0]);
-        let got = enc.resolve_fill(&pts, &test_seed());
+        let got = enc.resolve_fill(&pts, &test_seed(), None);
 
         assert_eq!(got, vec![Some(c0), Some(c1), Some(c0)]);
     }
@@ -482,7 +551,7 @@ mod tests {
         let enc = key(move |i, _| labels[i]).manual([("a", c0), ("b", c1)]);
 
         let pts = points(&[1.0, 2.0]);
-        let got = enc.resolve_fill(&pts, &test_seed());
+        let got = enc.resolve_fill(&pts, &test_seed(), None);
 
         assert_eq!(got, vec![Some(c0), None]);
     }
@@ -494,7 +563,7 @@ mod tests {
         let enc = key(move |i, _| labels[i]).manual_with(move |k| if k == "even" { Some(c0) } else { None });
 
         let pts = points(&[1.0, 2.0, 3.0]);
-        let got = enc.resolve_fill(&pts, &test_seed());
+        let got = enc.resolve_fill(&pts, &test_seed(), None);
 
         assert_eq!(got, vec![Some(c0), None, Some(c0)]);
     }
@@ -504,7 +573,7 @@ mod tests {
         let enc = key(|i, _| format!("{}", i)).manual_with(|_| None);
 
         let pts = points(&[1.0, 2.0, 3.0]);
-        let got = enc.resolve_fill(&pts, &test_seed());
+        let got = enc.resolve_fill(&pts, &test_seed(), None);
 
         assert_eq!(got, vec![None, None, None]);
     }
@@ -514,7 +583,7 @@ mod tests {
         // Pathological input: no points. Must not panic; returns an empty Vec.
         let enc = key(|i, _| format!("{}", i));
 
-        let got = enc.resolve_fill(&[], &test_seed());
+        let got = enc.resolve_fill(&[], &test_seed(), None);
 
         assert!(got.is_empty());
     }

@@ -4,7 +4,7 @@ use crate::core::Pixels;
 use crate::core::font::{Style, Weight};
 use crate::data::{Datum, IntoDatums};
 use crate::encoding::{Encoding, channel};
-use crate::palette::PaletteSeed;
+use crate::palette::{Palette, PaletteSeed};
 
 /// A single series of bars within a bar chart.
 #[derive(Debug, Clone)]
@@ -69,7 +69,17 @@ impl Series {
     /// on what color a given bar shows. Single-shot: re-resolves the whole
     /// encoding on each call — N is small in practice and this is intentionally
     /// not optimized for v1.
-    pub fn resolved_color_at(&self, i: usize, seed: &PaletteSeed, fallback: Color) -> Color {
+    ///
+    /// `chart_default` is the user's `Data::palette(...)` setting (if any),
+    /// threaded through so encodings built without an explicit `.palette(...)`
+    /// override can inherit the chart's flavor. See `GOG.md` D17.
+    pub fn resolved_color_at(
+        &self,
+        i: usize,
+        seed: &PaletteSeed,
+        chart_default: Option<&Palette>,
+        fallback: Color,
+    ) -> Color {
         // 1. point_colors override
         if let Some(pc) = self.point_color(i) {
             return *pc;
@@ -77,7 +87,7 @@ impl Series {
 
         // 2. fill encoding
         if let Some(enc) = &self.color_by
-            && let Some(Some(c)) = enc.resolve_fill(&self.points, seed).get(i).copied()
+            && let Some(Some(c)) = enc.resolve_fill(&self.points, seed, chart_default).get(i).copied()
         {
             return c;
         }
@@ -313,7 +323,7 @@ mod tests {
             .color_by(encoding::key(|_, _| "k").manual([("k", YELLOW)]));
         series.set_point_color(0, RED);
 
-        let got = series.resolved_color_at(0, &test_seed(), BLUE);
+        let got = series.resolved_color_at(0, &test_seed(), None, BLUE);
 
         assert_eq!(got, RED);
     }
@@ -326,7 +336,7 @@ mod tests {
             .with_color(GREEN)
             .color_by(encoding::key(|_, _| "k").manual([("k", YELLOW)]));
 
-        let got = series.resolved_color_at(0, &test_seed(), BLUE);
+        let got = series.resolved_color_at(0, &test_seed(), None, BLUE);
 
         assert_eq!(got, YELLOW);
     }
@@ -337,7 +347,7 @@ mod tests {
         // beats the caller-supplied fallback.
         let series = Series::new([1.0, 2.0, 3.0]).with_color(GREEN);
 
-        let got = series.resolved_color_at(0, &test_seed(), BLUE);
+        let got = series.resolved_color_at(0, &test_seed(), None, BLUE);
 
         assert_eq!(got, GREEN);
     }
@@ -348,7 +358,7 @@ mod tests {
         // color is what the series renders as.
         let series = Series::new([1.0, 2.0, 3.0]);
 
-        let got = series.resolved_color_at(0, &test_seed(), BLUE);
+        let got = series.resolved_color_at(0, &test_seed(), None, BLUE);
 
         assert_eq!(got, BLUE);
     }
@@ -363,7 +373,7 @@ mod tests {
             .with_color(GREEN)
             .color_by(encoding::key(|_, _| "zz").manual([("a", RED)]));
 
-        let got = series.resolved_color_at(0, &test_seed(), BLUE);
+        let got = series.resolved_color_at(0, &test_seed(), None, BLUE);
 
         assert_eq!(got, GREEN);
     }

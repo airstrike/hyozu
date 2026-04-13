@@ -1,7 +1,7 @@
 use iced::widget::center;
 use iced::{Task, Theme};
 
-use hyozu::{bar, bars, data, encoding};
+use hyozu::{Palette, bar, bars, data, encoding};
 
 const MONTHS: [&str; 6] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun"];
 
@@ -25,6 +25,7 @@ impl App {
                 bars([bar([1200, 1900, 1500, 2200, 1800, 2400]).color_by(encoding::key(|i, _| MONTHS[i]))])
                     .corner_radius(5.0),
             )
+            .palette(Palette::Sequential)
             .x_axis_labels(MONTHS)
             .y_axis(|a| a.show_grid(true).show_minor_grid(true)),
         }

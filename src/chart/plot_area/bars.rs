@@ -149,6 +149,10 @@ where
 
             let label_size = label_config.size.map(|p| p.0).unwrap_or(12.0);
             let char_width = label_size * 0.6;
+            // Vertical text run for line-height-ish font metrics. 1.2
+            // is the iced LineHeight::default() coefficient; +4 matches
+            // the ~2px top/bottom pad drawn around a label.
+            let label_height = label_size * 1.2 + 4.0;
 
             for point in &series.points {
                 // point.y carries the bar length in both orientations
@@ -165,12 +169,23 @@ where
                 if text.is_empty() {
                     continue;
                 }
-                let label_width = text.len() as f32 * char_width + 6.0;
+                // The relevant label extent is along the value axis:
+                // text width for horizontal bars (label at the bar's
+                // right end), text height for vertical bars (label
+                // above the bar top). Using the wrong one produces
+                // grossly wrong top insets on vertical bars — the
+                // label clips against the plot area top because the
+                // reserved space is derived from a horizontal measure.
+                let label_extent_along_value_axis = if is_horizontal {
+                    text.len() as f32 * char_width + 6.0
+                } else {
+                    label_height
+                };
 
                 // Assumes the other-end inset on the same axis is 0 (safe
                 // under-estimate of extent; any actual other-end inset makes
                 // the true required value slightly larger, typically <2px).
-                let required = extent - (extent - pad - label_width) / v;
+                let required = extent - (extent - pad - label_extent_along_value_axis) / v;
                 let required = required.max(0.0);
 
                 if is_horizontal {
@@ -579,6 +594,7 @@ where
         _viewport: &crate::core::Rectangle,
         color_offset: usize,
         palette: &crate::palette::Resolved,
+        chart_user_palette: Option<&crate::palette::Palette>,
         mark_index: usize,
         selection: &Option<crate::target::Target>,
     ) where
@@ -631,7 +647,7 @@ where
             let fill_colors = series
                 .color_by
                 .as_ref()
-                .map(|enc| enc.resolve_fill(&series.points, &seed));
+                .map(|enc| enc.resolve_fill(&series.points, &seed, chart_user_palette));
 
             // Resolve per-bar colors following the priority chain:
             // point_colors > color_by > series.color > palette fallback.

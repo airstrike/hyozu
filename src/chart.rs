@@ -845,7 +845,7 @@ fn draw_tooltip_overlay<Message>(
                 let seed = design.palette_seed();
                 let color_idx = plot_area.color_offset_for(mark_idx, series_idx);
                 let fallback = palette.get(color_idx);
-                let resolved = bar_series.resolved_color_at(pt_idx, &seed, fallback);
+                let resolved = bar_series.resolved_color_at(pt_idx, &seed, scene.user_palette(), fallback);
                 bars_resolved_color = Some(resolved.resolve(background, text_pair, None));
 
                 (
