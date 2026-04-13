@@ -1,7 +1,9 @@
 use iced::widget::center;
 use iced::{Task, Theme};
 
-use hyozu::{bars, data};
+use hyozu::{bar, bars, data, encoding};
+
+const REGIONS: [&str; 5] = ["North", "South", "East", "West", "Central"];
 
 pub fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
@@ -19,10 +21,21 @@ pub type Message = ();
 impl App {
     fn new() -> Self {
         Self {
-            data: data(bars([120, 190, 150, 80, 210]).horizontal())
-                .title("Sales by Region")
-                .x_axis_labels(|v: f64| format!("{:.0}", v))
-                .y_axis_labels(["North", "South", "East", "West", "Central"]),
+            data: data(
+                bars([
+                    bar([120, 190, 150, 80, 210]).color_by(encoding::key(|i, _| REGIONS[i]).range([
+                        0x355070u32,
+                        0x6D597Au32,
+                        0xB56576u32,
+                        0xE56B6Fu32,
+                        0xEAAC8Bu32,
+                    ])),
+                ])
+                .horizontal(),
+            )
+            .title("Sales by Region")
+            .x_axis_labels(|v: f64| format!("{:.0}", v))
+            .y_axis_labels(REGIONS),
         }
     }
 
