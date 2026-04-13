@@ -23,10 +23,11 @@ impl App {
         Self {
             data: data(
                 bars([bar([120, 190, 150, 80, 210]).color_by(
-                    encoding::key(|i, _| REGIONS[i]).range([0x355070, 0x6D597A, 0xB56576, 0xE56B6F, 0xEAAC8B]),
+                    encoding::key(|i, _| REGIONS[i]), // .range([0x355070, 0x6D597A, 0xB56576, 0xE56B6F, 0xEAAC8B]),
                 )])
                 .horizontal(),
             )
+            .palette(hyozu::Palette::Categorical)
             .title("Sales by Region")
             .x_axis_labels(|v: f64| format!("{:.0}", v))
             .y_axis_labels(REGIONS),
