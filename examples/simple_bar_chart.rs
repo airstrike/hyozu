@@ -23,7 +23,7 @@ impl App {
         Self {
             sales: data(
                 bars([bar([1200, 1900, 1500, 2200, 1800, 2400]).color_by(encoding::key(|i, _| MONTHS[i]))])
-                    .corner_radius(6.0),
+                    .corner_radius(5.0),
             )
             .x_axis_labels(MONTHS)
             .y_axis(|a| a.show_grid(true).show_minor_grid(true)),
@@ -31,7 +31,7 @@ impl App {
     }
 
     fn view(&self) -> iced::Element<'_, Message> {
-        center(hyozu::chart(&self.sales).design(&Theme::TokyoNightLight).padding(20))
+        center(hyozu::chart(&self.sales).design(&Theme::Light).padding(20))
             .padding(20)
             .into()
     }

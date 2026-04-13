@@ -340,7 +340,8 @@ where
         let has_action = self.on_action.is_some();
         let legend_interactive = self.scene.legend().map(|l| l.interactive()).unwrap_or(false);
 
-        // --- Interactive legend click-to-toggle ---
+        // Interactive legend click-to-toggle
+        //
         // Handled before plot-area actions so legend clicks take priority
         // even if an action handler is attached.
         // Hit-test before borrowing widget State mutably below.
@@ -894,7 +895,7 @@ fn draw_tooltip_overlay<Message>(
 
     // Wrap everything in a layer so it composites above chart content
     renderer.with_layer(*viewport, |renderer| {
-        // --- Draw tracking line and markers via canvas Frame ---
+        // Draw tracking line and markers via canvas Frame
         let frame_size = crate::core::Size::new(plane.bounds.width, plane.bounds.height);
         let mut frame = Frame::new(renderer, frame_size);
 
@@ -943,7 +944,7 @@ fn draw_tooltip_overlay<Message>(
             geometry::Renderer::draw_geometry(renderer, frame.into_geometry());
         });
 
-        // --- Draw tooltip box using renderer fill_quad/fill_text ---
+        // Draw tooltip box using renderer fill_quad/fill_text
         let font = renderer.default_font();
         let font_size: f32 = 12.0;
         let line_height_px: f32 = 18.0;

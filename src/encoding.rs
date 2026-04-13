@@ -288,8 +288,7 @@ mod tests {
         ys.iter().enumerate().map(|(i, &y)| Datum::new(i as f64, y)).collect()
     }
 
-    // --- Ordinal scale -------------------------------------------------------
-
+    // Ordinal scale
     #[test]
     fn ordinal_assigns_keys_by_first_appearance() {
         // Keys ["a", "b", "a", "c"] with a two-color explicit range should
@@ -357,8 +356,7 @@ mod tests {
         );
     }
 
-    // --- Manual lookup -------------------------------------------------------
-
+    // Manual lookup
     #[test]
     fn manual_returns_mapped_color_for_each_hit() {
         let labels = ["a", "b", "a"];
@@ -387,8 +385,6 @@ mod tests {
         assert_eq!(got, vec![Some(c0), None]);
     }
 
-    // --- manual_with closure -------------------------------------------------
-
     #[test]
     fn manual_with_returns_some_from_closure() {
         let labels = ["even", "odd", "even"];
@@ -410,8 +406,6 @@ mod tests {
 
         assert_eq!(got, vec![None, None, None]);
     }
-
-    // --- Edge cases ----------------------------------------------------------
 
     #[test]
     fn empty_points_vec_returns_empty_vec() {

@@ -25,10 +25,6 @@ pub fn main() -> iced::Result {
         .run()
 }
 
-// ---------------------------------------------------------------------------
-// State
-// ---------------------------------------------------------------------------
-
 enum Screen {
     Gallery,
     Detail(detail::Detail),
@@ -51,10 +47,6 @@ enum Message {
     SelectChart(ChartId),
     Detail(detail::Message),
 }
-
-// ---------------------------------------------------------------------------
-// Logic
-// ---------------------------------------------------------------------------
 
 impl App {
     fn new() -> (Self, Task<Message>) {
@@ -123,8 +115,6 @@ impl App {
         row![sidebar, content].into()
     }
 
-    // -- Sidebar -----------------------------------------------------------
-
     fn view_sidebar(&self) -> Element<'_, Message> {
         let heading = text("hyozu").size(20);
 
@@ -169,8 +159,6 @@ impl App {
             .into()
     }
 
-    // -- Chart grid --------------------------------------------------------
-
     fn view_grid(&self) -> Element<'_, Message> {
         let visible: Vec<&Variant> = self
             .variants
@@ -197,8 +185,6 @@ impl App {
         scrollable(grid_col).width(Fill).height(Fill).into()
     }
 
-    // -- Single chart card -------------------------------------------------
-
     fn view_card<'a>(&'a self, variant: &'a Variant) -> Element<'a, Message> {
         let id = variant.id;
 
@@ -214,10 +200,6 @@ impl App {
         container(card).width(Fill).into()
     }
 }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 fn sidebar_button(label: &str, active: bool, msg: Message) -> Element<'_, Message> {
     let btn = button(text(label).size(12))

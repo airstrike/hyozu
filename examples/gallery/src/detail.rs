@@ -6,14 +6,6 @@ use hyozu::Data;
 use iced::widget::{button, column, container, row, scrollable, text, text_editor};
 use iced::{Element, Fill, Font, Length};
 
-// ---------------------------------------------------------------------------
-// State
-// ---------------------------------------------------------------------------
-
-pub struct Detail {
-    code: text_editor::Content,
-}
-
 #[derive(Debug, Clone)]
 pub enum Message {
     Back,
@@ -24,9 +16,9 @@ pub enum Instruction {
     Back,
 }
 
-// ---------------------------------------------------------------------------
-// Logic
-// ---------------------------------------------------------------------------
+pub struct Detail {
+    code: text_editor::Content,
+}
 
 impl Detail {
     pub fn new(source: &str) -> Self {

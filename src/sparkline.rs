@@ -103,8 +103,6 @@ impl<'a, Message, Theme> Sparkline<'a, Message, Theme> {
     }
 }
 
-// --- Internals ---
-
 /// Precomputed data range and highlight indices for rendering.
 struct Computed {
     min_y: f64,

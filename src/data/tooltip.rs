@@ -127,7 +127,7 @@ impl Tooltip {
     }
 }
 
-// --- Atom types for composable tooltip construction ---
+// Atom types for composable tooltip construction
 
 /// Show a colored swatch circle before each tooltip entry.
 ///
@@ -151,8 +151,6 @@ pub struct Swatch;
 /// ```
 #[derive(Debug, Clone, Copy)]
 pub struct ColoredText;
-
-// --- From impls: atoms → Tooltip ---
 
 impl From<Swatch> for Tooltip {
     fn from(_: Swatch) -> Self {
@@ -183,8 +181,6 @@ where
         Tooltip::default().format(f)
     }
 }
-
-// --- Add impls: composing atoms ---
 
 impl std::ops::Add<ColoredText> for Swatch {
     type Output = Tooltip;

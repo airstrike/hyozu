@@ -300,7 +300,7 @@ where
         let legend_is_side = matches!(legend_pos, Some(LPos::Left | LPos::Right));
         let legend_is_above = matches!(legend_pos, Some(LPos::Above));
 
-        // --- Phase 1: Title (always at top, full width) ---
+        // Phase 1: Title (always at top, full width)
         let (title_height, title_node) = if let Some(title) = &self.title {
             if let Some(title_tree) = tree.children.get_mut(0) {
                 let node = title.layout(title_tree, renderer, &lim(available.width, available.height));
@@ -313,7 +313,7 @@ where
             (0.0, None)
         };
 
-        // --- Phase 2: Side legend measurement (Left/Right) ---
+        // Phase 2: Side legend measurement (Left/Right)
         let (legend_side_width, legend_side_node) = if legend_is_side {
             if let (Some(legend), Some(legend_tree)) = (&self.legend, tree.children.get_mut(1)) {
                 let remaining_h = available.height - title_height;
@@ -327,7 +327,7 @@ where
             (0.0, None)
         };
 
-        // --- Phase 3a: Measure secondary axes (top and right) ---
+        // Phase 3a: Measure secondary axes (top and right)
         let (top_height, right_width) = {
             let remaining_h = available.height - title_height;
             let top_tree = &mut tree.children[2];
@@ -360,7 +360,7 @@ where
             (top_height, right_width)
         };
 
-        // --- Phase 3: Measure axes ---
+        // Phase 3: Measure axes
         let (bottom_height, left_width) = {
             let (first_children, second_children) = tree.children.split_at_mut(5);
             let bottom_tree = &mut first_children[4];
@@ -401,10 +401,10 @@ where
             (bottom_height, left_width)
         };
 
-        // --- Phase 4: Compute plot_width (horizontal space) ---
+        // Phase 4: Compute plot_width (horizontal space)
         let plot_width = available.width - left_width - right_width - legend_side_width;
 
-        // --- Phase 5: Above/Below legend measurement (needs plot_width for wrapping) ---
+        // Phase 5: Above/Below legend measurement (needs plot_width for wrapping)
         let (legend_tb_height, legend_tb_node) = if !legend_is_side {
             if let (Some(legend), Some(legend_tree)) = (&self.legend, tree.children.get_mut(1)) {
                 let node = legend.layout(legend_tree, renderer, &lim(plot_width, available.height));
@@ -424,12 +424,12 @@ where
             0.0
         };
 
-        // --- Phase 6: Compute plot_height (vertical space) ---
+        // Phase 6: Compute plot_height (vertical space)
         let remaining_height = available.height - title_height - above_legend_h - top_height;
         let vertical_space = remaining_height - bottom_height - below_legend_h;
         let plot_height = vertical_space;
 
-        // --- Phase 6.5: Series-driven inset floor ---
+        // Phase 6.5: Series-driven inset floor
         // Ask the plot area how much inset its series need past the data
         // mapping region (e.g., for data labels that extend past bar ends).
         // This becomes a floor for the axis insets so ticks & bars stay aligned.
@@ -453,7 +453,7 @@ where
                 .compute_series_insets(crate::core::Size::new(plot_width, plot_height), xb, yb)
         };
 
-        // --- Phase 7: Final layout pass ---
+        // Phase 7: Final layout pass
         let (first_children, second_children) = tree.children.split_at_mut(5);
 
         // Overflow budgets: sibling axis columns absorb edge-label overhang.
@@ -582,7 +582,7 @@ where
             axis_layout,
         );
 
-        // --- Phase 8: Position all nodes ---
+        // Phase 8: Position all nodes
         let mut layout_children = Vec::new();
 
         // Compute vertical offsets

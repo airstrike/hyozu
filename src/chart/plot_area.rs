@@ -875,7 +875,7 @@ where
 
         let minor_subdivs: usize = 4;
 
-        // --- Minor gridlines (drawn first, so majors render on top) ---
+        // Minor gridlines (drawn first, so majors render on top)
         if shows_minor_x && x_ticks.len() >= 2 {
             let color = x_axis
                 .and_then(|a| a.minor_grid_color())
@@ -926,7 +926,7 @@ where
             frame.stroke(&path, Stroke::default().with_width(1.0).with_color(color));
         }
 
-        // --- Major gridlines ---
+        // Major gridlines
         if shows_major_x {
             let color = x_axis
                 .and_then(|a| a.grid_color())

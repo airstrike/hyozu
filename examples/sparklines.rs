@@ -84,8 +84,6 @@ impl App {
     }
 }
 
-// --- Helpers ---
-
 fn header<'a>(label: &str) -> Element<'a, Message> {
     container(
         text(label.to_string())
@@ -152,8 +150,6 @@ fn ratio_color(value: f64, low: f64, high: f64) -> Color {
     let base = if t <= 0.5 { green } else { red };
     Color { a: s * 0.8, ..base }
 }
-
-// --- Data ---
 
 struct Product {
     name: String,
