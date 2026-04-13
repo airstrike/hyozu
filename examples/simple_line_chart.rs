@@ -1,7 +1,7 @@
 use iced::Task;
 use iced::widget::center;
 
-use hyozu::{Tooltip, chart, data, line};
+use hyozu::{Tooltip, band, chart, data, line};
 
 pub fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
@@ -26,10 +26,12 @@ impl App {
         use line::label::*;
 
         Self {
-            data: data(
+            data: data(vec![
                 line(std::array::from_fn::<usize, 10, _>(|i| (i * 7) % 13))
-                    .data_labels(Position::Auto + Show::FirstAndLast),
-            )
+                    .data_labels(Position::Auto + Show::FirstAndLast)
+                    .into(),
+                band(3.0, 8.0).label("Comfort zone").into(),
+            ])
             .title("Temperature Over Time")
             .tooltip(Tooltip::default()),
         }
