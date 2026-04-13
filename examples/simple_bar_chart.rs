@@ -32,7 +32,7 @@ impl App {
     }
 
     fn view(&self) -> iced::Element<'_, Message> {
-        center(hyozu::chart(&self.sales).design(&Theme::Light).padding(20))
+        center(hyozu::chart(&self.sales).design(&Theme::Light))
             .padding(20)
             .into()
     }
