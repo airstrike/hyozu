@@ -18,6 +18,10 @@ use scene::Scene;
 
 const DEFAULT_PADDING: Padding = Padding::new(10.0);
 
+/// Pixels to expand each legend entry's cached rect by when hit-testing,
+/// so small clickable swatches are forgiving to hover/click at the edges.
+const LEGEND_HIT_PADDING: f32 = 2.0;
+
 /// Chart widget for displaying data visualizations.
 pub struct Chart<'a, Message, Design = crate::core::Theme, Theme = crate::core::Theme>
 where
@@ -332,7 +336,6 @@ where
             return;
         }
 
-        let state = tree.state.downcast_mut::<State>();
         let has_tooltip = self.scene.has_tooltip();
         let has_action = self.on_action.is_some();
         let legend_interactive = self.scene.legend().map(|l| l.interactive()).unwrap_or(false);
@@ -340,46 +343,28 @@ where
         // --- Interactive legend click-to-toggle ---
         // Handled before plot-area actions so legend clicks take priority
         // even if an action handler is attached.
-        if legend_interactive
-            && let Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) = event
-            && let Some(legend) = self.scene.legend()
-            && let Some(legend_rect) = self.scene.legend_bounds()
-        {
-            let chart_bounds = layout.bounds();
-            let abs_legend = Rectangle {
-                x: chart_bounds.x + self.padding.left + legend_rect.x,
-                y: chart_bounds.y + self.padding.top + legend_rect.y,
-                width: legend_rect.width,
-                height: legend_rect.height,
+        // Hit-test before borrowing widget State mutably below.
+        let legend_click =
+            if legend_interactive && matches!(event, Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))) {
+                self.legend_entry_at(tree, layout, cursor)
+            } else {
+                None
             };
-            if let Some(local) = cursor.position_in(abs_legend) {
-                let scene_tree = &tree.children[0];
-                let legend_tree = &scene_tree.children[1];
-                // Downcast to the concrete State<Paragraph> stored by Legend.
-                let legend_state = legend_tree
-                    .state
-                    .downcast_ref::<legend::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
-                let hit = legend_state.entry_rects.iter().enumerate().find_map(|(i, maybe_rect)| {
-                    maybe_rect.and_then(|r| {
-                        if r.contains(Point::new(local.x, local.y)) {
-                            Some(i)
-                        } else {
-                            None
-                        }
-                    })
-                });
-                if let Some(idx) = hit {
-                    let entry = &legend.entries()[idx];
-                    if state.hidden_series.contains(&entry.name) {
-                        state.hidden_series.remove(&entry.name);
-                    } else {
-                        state.hidden_series.insert(entry.name.clone());
-                    }
-                    shell.capture_event();
-                    shell.request_redraw();
-                    return;
-                }
+
+        let state = tree.state.downcast_mut::<State>();
+
+        if let Some(idx) = legend_click
+            && let Some(legend) = self.scene.legend()
+        {
+            let entry = &legend.entries()[idx];
+            if state.hidden_series.contains(&entry.name) {
+                state.hidden_series.remove(&entry.name);
+            } else {
+                state.hidden_series.insert(entry.name.clone());
             }
+            shell.capture_event();
+            shell.request_redraw();
+            return;
         }
 
         if !has_tooltip && !has_action {
@@ -662,6 +647,12 @@ where
         _viewport: &Rectangle,
         _renderer: &Renderer,
     ) -> mouse::Interaction {
+        // Interactive legend entries — show a Pointer cursor when hovering
+        // over a toggleable swatch so the affordance is clear.
+        if self.legend_entry_at(tree, layout, cursor).is_some() {
+            return mouse::Interaction::Pointer;
+        }
+
         if self.scene.has_tooltip() {
             let chart_bounds = layout.bounds();
             let plot_area_offset = self.scene.plot_area_offset();
@@ -675,6 +666,43 @@ where
             }
         }
         mouse::Interaction::None
+    }
+}
+
+impl<'a, Message, Design, Theme> Chart<'a, Message, Design, Theme>
+where
+    Design: design::Design + Clone + 'a,
+    Theme: design::Design,
+{
+    /// Hit-tests the cursor against legend entry rectangles.
+    ///
+    /// Returns `Some(idx)` if the legend is interactive and the cursor is
+    /// over the `idx`-th entry swatch+label, else `None`. Shared between
+    /// click handling in `update` and cursor feedback in `mouse_interaction`
+    /// so both use the exact same hit region.
+    fn legend_entry_at(&self, tree: &Tree, layout: Layout<'_>, cursor: mouse::Cursor) -> Option<usize> {
+        let legend = self.scene.legend()?;
+        if !legend.interactive() {
+            return None;
+        }
+        let legend_rect = self.scene.legend_bounds()?;
+        let chart_bounds = layout.bounds();
+        let abs_legend = Rectangle {
+            x: chart_bounds.x + self.padding.left + legend_rect.x,
+            y: chart_bounds.y + self.padding.top + legend_rect.y,
+            width: legend_rect.width,
+            height: legend_rect.height,
+        };
+        let local = cursor.position_in(abs_legend)?;
+        let scene_tree = &tree.children[0];
+        let legend_tree = &scene_tree.children[1];
+        let legend_state = legend_tree
+            .state
+            .downcast_ref::<legend::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
+        let probe = Point::new(local.x, local.y);
+        legend_state.entry_rects.iter().enumerate().find_map(|(i, maybe_rect)| {
+            maybe_rect.and_then(|r| r.expand(LEGEND_HIT_PADDING).contains(probe).then_some(i))
+        })
     }
 }
 
