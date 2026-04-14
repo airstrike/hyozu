@@ -7,8 +7,8 @@ pub fn paper() -> Theme {
         background: color!(0xf2eede),
         text: color!(0x555555),
         primary: color!(0x1a1a1a), // Dark gray
-        success: color!(0x1e6fcc), // Blue
-        warning: color!(0x216609), // Green
+        success: color!(0x216609), // Green
+        warning: color!(0xc2850c), // Warm amber
         danger: color!(0xcc3e28),  // Red-orange
     })
 }
@@ -19,8 +19,8 @@ pub fn paper_dark() -> Theme {
         background: color!(0x1f1e1a), // Warm dark background
         text: color!(0xd4c8b0),       // Warm muted paper color
         primary: color!(0xe8dcc0),    // Warm light paper color
-        success: color!(0x1e6fcc),    // Blue
-        warning: color!(0x216609),    // Green
+        success: color!(0x216609),    // Green
+        warning: color!(0xc2850c),    // Warm amber
         danger: color!(0xcc3e28),     // Red-orange
     })
 }
