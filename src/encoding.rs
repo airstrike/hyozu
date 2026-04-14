@@ -238,7 +238,63 @@ impl Encoding<Fill> {
         self
     }
 
+    /// Build a theme-independent plan for this encoding.
+    ///
+    /// Walks the points once, runs the extractor closure, and pre-computes
+    /// distinct-key indices (Ordinal) or fully-resolved per-point colors
+    /// (Manual / ManualWith). Suitable for caching on a widget's `State`
+    /// during `layout`, where the theme is not yet available.
+    ///
+    /// The returned [`FillPlan`] is materialized into actual colors by
+    /// [`FillPlan::materialize`] during draw, when the theme's palette seed
+    /// becomes available. Splitting the work this way means the expensive
+    /// String allocations and walks happen once per layout invalidation
+    /// rather than on every repaint.
+    pub(crate) fn plan_fill(&self, points: &[Datum]) -> FillPlan {
+        let keys: Vec<String> = points.iter().enumerate().map(|(i, d)| (self.extractor)(i, d)).collect();
+
+        match &self.kind {
+            FillKind::Ordinal { source } => {
+                let mut seen: Vec<String> = Vec::new();
+                let indices: Vec<usize> = keys
+                    .iter()
+                    .map(|k| {
+                        if let Some(idx) = seen.iter().position(|s| s == k) {
+                            idx
+                        } else {
+                            seen.push(k.clone());
+                            seen.len() - 1
+                        }
+                    })
+                    .collect();
+                FillPlan::Ordinal {
+                    indices,
+                    distinct: seen.len(),
+                    source: source.clone(),
+                }
+            }
+            FillKind::Manual { mapping } => {
+                let resolved = keys
+                    .iter()
+                    .map(|k| mapping.iter().find(|(mk, _)| mk == k).map(|(_, c)| *c))
+                    .collect();
+                FillPlan::Static(resolved)
+            }
+            FillKind::ManualWith { lookup } => {
+                let resolved = keys.iter().map(|k| lookup(k)).collect();
+                FillPlan::Static(resolved)
+            }
+        }
+    }
+
     /// Resolve this encoding for a set of points.
+    ///
+    /// Convenience wrapper around [`plan_fill`](Self::plan_fill) +
+    /// [`FillPlan::materialize`]. Used by tests and by the tooltip / hit-test
+    /// path (`bar::Series::resolved_color_at`); renderers that draw on every
+    /// frame should instead cache a `FillPlan` during layout and call
+    /// `materialize` directly so the per-point walk doesn't repeat per
+    /// repaint.
     ///
     /// Returns one entry per point:
     /// - `Some(color)` — the encoding produced a color
@@ -261,31 +317,57 @@ impl Encoding<Fill> {
         seed: &PaletteSeed,
         chart_default: Option<&Palette>,
     ) -> Vec<Option<Color>> {
-        let keys: Vec<String> = points.iter().enumerate().map(|(i, d)| (self.extractor)(i, d)).collect();
+        self.plan_fill(points).materialize(seed, chart_default)
+    }
+}
 
-        match &self.kind {
-            FillKind::Ordinal { source } => {
-                // Compute distinct-key insertion order once.
-                let mut seen: Vec<String> = Vec::new();
-                let key_indices: Vec<usize> = keys
-                    .iter()
-                    .map(|k| {
-                        if let Some(idx) = seen.iter().position(|s| s == k) {
-                            idx
-                        } else {
-                            seen.push(k.clone());
-                            seen.len() - 1
-                        }
-                    })
-                    .collect();
+/// A theme-independent partial resolution of a fill encoding.
+///
+/// Computed in `layout` (where iced does not yet expose the theme) and
+/// materialized into concrete colors in `draw` against the theme's palette
+/// seed. Splits the expensive walks (extractor closure, String allocations,
+/// distinct-key indexing) from the cheap palette generation, so repainting
+/// without a layout invalidation doesn't re-walk the data.
+///
+/// Public so renderer `State` types (which are themselves `pub`) can hold
+/// it; the variants are crate-private so the materialize entry point is the
+/// only sanctioned way to consume one.
+#[derive(Clone, Debug)]
+pub enum FillPlan {
+    /// Manual / ManualWith encodings have no theme dependency, so they're
+    /// fully resolved at plan time. Materialization is just a `clone`.
+    Static(Vec<Option<Color>>),
+    /// Ordinal encodings need the theme seed to build a palette. The
+    /// expensive part — running the extractor and computing distinct-key
+    /// insertion-order indices — happens at plan time; materialization
+    /// generates the palette of the right size and indexes into it.
+    Ordinal {
+        indices: Vec<usize>,
+        distinct: usize,
+        source: OrdinalSource,
+    },
+}
 
-                // Pick a palette: explicit `Range`, or build a fresh palette
-                // from the seed at the requested flavor sized to the
-                // distinct-key count. The encoding does NOT share the chart's
-                // potentially-Sequential top-level palette — D15. Flavor
-                // resolution: explicit `.palette(p)` on the encoding wins;
-                // else inherit from `chart_default` (user's `Data::palette`);
-                // else fall back to `Palette::Categorical`. D17.
+impl FillPlan {
+    /// Materialize the per-point color vector for this plan.
+    ///
+    /// For `Static` this is a clone of the cached vector. For `Ordinal`
+    /// this generates a palette of `distinct` colors from the seed (using
+    /// the cached `source` to choose between explicit Range, encoding-level
+    /// `.palette()` override, chart-level inheritance, or the Categorical
+    /// fallback) and looks up each cached index. No String allocations,
+    /// no extractor calls — those happened at plan time.
+    pub(crate) fn materialize(&self, seed: &PaletteSeed, chart_default: Option<&Palette>) -> Vec<Option<Color>> {
+        match self {
+            FillPlan::Static(v) => v.clone(),
+            FillPlan::Ordinal {
+                indices,
+                distinct,
+                source,
+            } => {
+                // Same flavor-resolution chain as the original resolve_fill:
+                // explicit Range > encoding `.palette()` override > chart
+                // `Data::palette` inheritance (D17) > Categorical fallback.
                 let palette_colors: Vec<Color> = match source {
                     OrdinalSource::Range(explicit) => explicit.clone(),
                     OrdinalSource::Seed(override_flavor) => {
@@ -293,24 +375,19 @@ impl Encoding<Fill> {
                             .clone()
                             .or_else(|| chart_default.cloned())
                             .unwrap_or(Palette::Categorical);
-                        let n = seen.len().max(1);
+                        let n = (*distinct).max(1);
                         Resolved::resolve(&flavor, seed, n).colors().to_vec()
                     }
                 };
 
                 if palette_colors.is_empty() {
-                    return vec![None; keys.len()];
+                    return vec![None; indices.len()];
                 }
-                key_indices
+                indices
                     .iter()
                     .map(|&i| Some(palette_colors[i % palette_colors.len()]))
                     .collect()
             }
-            FillKind::Manual { mapping } => keys
-                .iter()
-                .map(|k| mapping.iter().find(|(mk, _)| mk == k).map(|(_, c)| *c))
-                .collect(),
-            FillKind::ManualWith { lookup } => keys.iter().map(|k| lookup(k)).collect(),
         }
     }
 }

@@ -61,6 +61,11 @@ pub struct State {
     pub series_rects: Vec<Vec<Rectangle>>,
     /// Pixel rectangles for each label, outer vec is series, inner vec is bars
     pub label_rects: Vec<Vec<Option<Rectangle>>>,
+    /// Theme-independent fill encoding plans, one per series. `None` for
+    /// series with no `color_by` encoding. Computed in `layout` so the
+    /// encoding's expensive walk (extractor calls, distinct-key indexing)
+    /// only runs when the data changes, not on every repaint.
+    pub series_fill_plans: Vec<Option<crate::encoding::FillPlan>>,
 }
 
 /// A Bars series that renders vertical bar charts.
@@ -95,6 +100,7 @@ where
             state: tree::State::new(State {
                 series_rects: Vec::new(),
                 label_rects: Vec::new(),
+                series_fill_plans: Vec::new(),
             }),
             children: Vec::new(),
         }
@@ -233,6 +239,17 @@ where
 
         // Compute label rects for hit-testing
         state.label_rects = self.compute_label_rects(state);
+
+        // Pre-plan fill encodings, one per series. The plan is theme-free
+        // and stable across repaints — only re-runs when layout invalidates
+        // (data change, resize). Materialization to actual colors happens
+        // in `draw` once the theme seed is available.
+        state.series_fill_plans = self
+            .data
+            .series
+            .iter()
+            .map(|s| s.color_by.as_ref().map(|enc| enc.plan_fill(&s.points)))
+            .collect();
 
         // Bars take no space - they're rendered within the plane
         Node::new(Size::ZERO)
@@ -642,12 +659,16 @@ where
                     .resolve(background, text_pair, None)
             };
 
-            // Resolve the optional fill-channel encoding once per series.
-            // See GOG.md § 7 for priority and § 8a for the integration contract.
-            let fill_colors = series
-                .color_by
-                .as_ref()
-                .map(|enc| enc.resolve_fill(&series.points, &seed, chart_user_palette));
+            // Materialize the cached fill plan for this series. The expensive
+            // walk (extractor + distinct-key indexing) happened in `layout`;
+            // here we only build the palette from the seed and look up by
+            // pre-computed index. See GOG.md § 7 for priority and § 8a for
+            // the integration contract.
+            let fill_colors = state
+                .series_fill_plans
+                .get(series_idx)
+                .and_then(|p| p.as_ref())
+                .map(|plan| plan.materialize(&seed, chart_user_palette));
 
             // Resolve per-bar colors following the priority chain:
             // point_colors > color_by > series.color > palette fallback.
