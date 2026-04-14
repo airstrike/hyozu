@@ -343,6 +343,26 @@ fn generate_categorical(seed: &PaletteSeed, n: usize) -> Vec<Color> {
 }
 
 /// Generate sequential colors: shades of one hue.
+///
+/// Targets the same perceptual envelope as ColorBrewer-class single-hue
+/// palettes (Blues, Greens, Reds, etc.) which D3, Vega, matplotlib,
+/// Bokeh, Plotly, and Observable Plot all ship verbatim. Two principles:
+///
+/// 1. **Wide lightness range (~0.57 ΔL in OKLch)** — the lightest slot
+///    is nearly paper-white (L≈0.95) and the deepest is a saturated
+///    near-navy (L≈0.38). Earlier hyozu builds used a 0.40 range which
+///    put the per-step ΔL right at the perceptual discrimination
+///    threshold, so adjacent shades looked "basically identical".
+/// 2. **Chroma tapers as lightness approaches 1.0** — saturated colors
+///    at very high L look unnaturally pastel and exceed the sRGB gamut
+///    edge for most hues. ColorBrewer's empirical profile drops chroma
+///    by ~75% between L=0.7 and L=1.0 while keeping it at full strength
+///    for darker stops. Matched here with a piecewise-linear taper.
+///
+/// Direction (which slot is darkest vs lightest) is preserved from the
+/// pre-widen behavior: `palette[0]` is the most prominent shade for
+/// the active background — darkest on light backgrounds, brightest on
+/// dark backgrounds — so existing call sites' visual order is unchanged.
 fn generate_sequential(primary: crate::core::Color, background: crate::core::Color, n: usize) -> Vec<Color> {
     if n == 1 {
         return vec![Color::Fixed(primary)];
@@ -351,19 +371,30 @@ fn generate_sequential(primary: crate::core::Color, background: crate::core::Col
     let oklch = to_oklch(primary);
     let dark_bg = is_dark_background(background);
 
+    // ColorBrewer-class span. ΔL ≈ 0.57 on light bg, 0.52 on dark.
     let (l_start, l_end) = if dark_bg {
-        (0.80_f32, 0.45_f32)
+        (0.92_f32, 0.40_f32) // bright → deep on dark backgrounds
     } else {
-        (0.35_f32, 0.75_f32)
+        (0.38_f32, 0.95_f32) // deep → light on light backgrounds
     };
 
     (0..n)
         .map(|i| {
             let t = i as f32 / (n - 1).max(1) as f32;
             let l = l_start + (l_end - l_start) * t;
+            // Chroma stays at full strength for L ≤ 0.70, then linearly
+            // tapers to 25% as L approaches 1.0. Direction-agnostic
+            // (depends on output lightness, not on `t`), so dark and
+            // light backgrounds get the same physical treatment.
+            let c = if l <= 0.70 {
+                oklch.c
+            } else {
+                let taper = (l - 0.70) / 0.30; // 0..1 across L=0.70..1.0
+                oklch.c * (1.0 - 0.75 * taper)
+            };
             Color::Fixed(from_oklch(Oklch {
                 l,
-                c: oklch.c,
+                c,
                 h: oklch.h,
                 a: oklch.a,
             }))
@@ -484,6 +515,67 @@ mod tests {
         let seed = test_seed();
         let resolved = Resolved::resolve(&Palette::SEQUENTIAL, &seed, 5);
         assert_eq!(resolved.len(), 5);
+    }
+
+    #[test]
+    fn sequential_5_spans_colorbrewer_class_lightness_range() {
+        // Sequential N=5 should span at least 0.45 of OKLch lightness so
+        // the shades are visually distinct. ColorBrewer-class palettes
+        // (Blues, Greens, etc.) use ~0.53; we target similar to avoid the
+        // "basically identical" perceptual flatness that the earlier 0.40
+        // range produced. Property test, not exact numbers, so future
+        // tweaks within the safe band don't need to update the test.
+        let primary = crate::core::Color::from_rgb(0.20, 0.40, 0.80);
+        let on_light = generate_sequential(primary, crate::core::Color::WHITE, 5);
+        let on_dark = generate_sequential(primary, crate::core::Color::BLACK, 5);
+
+        for (label, palette) in [("light", &on_light), ("dark", &on_dark)] {
+            let lightnesses: Vec<f32> = palette
+                .iter()
+                .map(|c| {
+                    let Color::Fixed(rgb) = c else {
+                        panic!("expected Fixed color from generate_sequential");
+                    };
+                    to_oklch(*rgb).l
+                })
+                .collect();
+            let l_min = lightnesses.iter().copied().fold(f32::INFINITY, f32::min);
+            let l_max = lightnesses.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            assert!(
+                l_max - l_min >= 0.45,
+                "{label} bg: sequential N=5 should span ≥ 0.45 OKLch L, got {l_max} - {l_min} = {}",
+                l_max - l_min
+            );
+        }
+    }
+
+    #[test]
+    fn sequential_chroma_tapers_at_light_end() {
+        // The slot with the highest output lightness should have noticeably
+        // reduced chroma compared to the slot at the deep end. Matches
+        // ColorBrewer's empirical profile (lightest stop ≈ paper-white,
+        // dark stops at full saturation) and avoids the unnatural
+        // pastel-saturated look of constant-chroma sequentials.
+        let primary = crate::core::Color::from_rgb(0.20, 0.40, 0.80);
+        let palette = generate_sequential(primary, crate::core::Color::WHITE, 5);
+
+        let oklchs: Vec<Oklch> = palette
+            .iter()
+            .map(|c| {
+                let Color::Fixed(rgb) = c else {
+                    panic!("expected Fixed color from generate_sequential");
+                };
+                to_oklch(*rgb)
+            })
+            .collect();
+        let lightest = oklchs.iter().max_by(|a, b| a.l.total_cmp(&b.l)).unwrap();
+        let darkest = oklchs.iter().min_by(|a, b| a.l.total_cmp(&b.l)).unwrap();
+        assert!(
+            lightest.c < darkest.c,
+            "chroma at lightest slot ({}) should be < chroma at darkest slot ({})",
+            lightest.c,
+            darkest.c
+        );
     }
 
     #[test]
