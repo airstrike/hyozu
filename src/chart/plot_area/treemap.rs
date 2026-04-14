@@ -21,10 +21,19 @@ const DEFAULT_PALETTE: &[(u8, u8, u8)] = &[
     (0x48, 0x7D, 0xA8), // dusty blue
 ];
 
-/// State for Treemap — stores pre-calculated rectangle positions for hit-testing.
+/// State for Treemap — stores pre-calculated rectangle positions for
+/// hit-testing AND pre-truncated label strings, so `draw` doesn't allocate
+/// a new String for every item every frame.
 pub struct State {
     /// Pixel rectangles for each item.
     pub item_rects: Vec<crate::core::Rectangle>,
+    /// Pre-truncated display labels per item, sized to fit each rectangle's
+    /// width using a 12 px font baseline (the bar/line label default).
+    /// Empty string means "rectangle too small to label". Computed in
+    /// `layout`; theme-font-size mismatches at draw time may cause minor
+    /// over- or under-truncation that auto-corrects on the next layout
+    /// (resize, data change).
+    pub item_labels: Vec<String>,
 }
 
 /// A Treemap series that renders treemap charts.
@@ -54,7 +63,10 @@ where
     pub(super) fn state(&self) -> Tree {
         Tree {
             tag: tree::Tag::of::<State>(),
-            state: tree::State::new(State { item_rects: Vec::new() }),
+            state: tree::State::new(State {
+                item_rects: Vec::new(),
+                item_labels: Vec::new(),
+            }),
             children: Vec::new(),
         }
     }
@@ -125,6 +137,52 @@ where
             state.item_rects[orig_idx] = inset_rect;
         }
 
+        // Pre-truncate per-item labels so `draw` doesn't allocate Strings
+        // every frame. Uses a fixed 12 px baseline for char width because
+        // `theme.font_size()` isn't available in `layout` (theme is draw-
+        // only by design). Mismatches with non-default themes auto-correct
+        // on the next relayout (resize, data change).
+        const LABEL_FONT_BASELINE: f32 = 12.0;
+        const LABEL_PADDING: f32 = 4.0;
+        const MIN_LABEL_WIDTH: f32 = 20.0;
+        const MIN_LABEL_HEIGHT: f32 = 14.0;
+        let char_width = LABEL_FONT_BASELINE * 0.6;
+
+        state.item_labels = self
+            .data
+            .items
+            .iter()
+            .zip(state.item_rects.iter())
+            .map(|(item, rect)| {
+                if rect.width < MIN_LABEL_WIDTH || rect.height < MIN_LABEL_HEIGHT {
+                    return String::new();
+                }
+                let available = rect.width - LABEL_PADDING * 2.0;
+                let max_chars = (available / char_width).floor() as usize;
+                if item.label.len() <= max_chars {
+                    item.label.clone()
+                } else if max_chars > 3 {
+                    // Truncate on a char boundary so multi-byte UTF-8 codepoints
+                    // don't get sliced mid-character.
+                    let byte_end = item
+                        .label
+                        .char_indices()
+                        .nth(max_chars - 3)
+                        .map(|(i, _)| i)
+                        .unwrap_or(item.label.len());
+                    format!("{}...", &item.label[..byte_end])
+                } else {
+                    let byte_end = item
+                        .label
+                        .char_indices()
+                        .nth(max_chars)
+                        .map(|(i, _)| i)
+                        .unwrap_or(item.label.len());
+                    item.label[..byte_end].to_string()
+                }
+            })
+            .collect();
+
         Node::new(Size::ZERO)
     }
 
@@ -155,6 +213,13 @@ where
 
         let layout_bounds = layout.bounds();
         let mut frame = Frame::new(renderer, layout_bounds.size());
+
+        // Per-item label padding/font baseline match the constants used in
+        // `layout` so the truncation lines up with where `draw` puts the
+        // text. Theme font size is still honored for the actual rendering;
+        // only the truncation budget is fixed.
+        let padding = 4.0;
+        let font_size = theme.font_size();
 
         // Draw each rectangle
         for (i, (item, rect)) in self.data.items.iter().zip(state.item_rects.iter()).enumerate() {
@@ -190,46 +255,23 @@ where
             });
             frame.fill(&path, color);
 
-            // Draw label if the rectangle is large enough
-            let min_label_width = 20.0;
-            let min_label_height = 14.0;
-
-            if rect.width >= min_label_width && rect.height >= min_label_height {
-                // Resolve label color for contrast against the rectangle
+            // Draw label — pre-truncated in layout. Empty string means
+            // "rectangle too small to label".
+            let label_text = state.item_labels.get(i).map(String::as_str).unwrap_or("");
+            if !label_text.is_empty() {
                 let label_color = text_pair.resolve(color, Some(background));
-
-                let font_size = theme.font_size();
-                let padding = 4.0;
-
-                // Truncate label to fit within rectangle
-                let available_width = rect.width - padding * 2.0;
-                let char_width = font_size * 0.6;
-                let max_chars = (available_width / char_width).floor() as usize;
-
-                let label_text = if item.label.len() > max_chars && max_chars > 3 {
-                    format!("{}...", &item.label[..max_chars - 3])
-                } else if item.label.len() > max_chars {
-                    item.label[..max_chars.min(item.label.len())].to_string()
-                } else {
-                    item.label.clone()
-                };
-
-                if !label_text.is_empty() {
-                    let font = crate::core::Font::default();
-
-                    frame.fill_text(CanvasText {
-                        content: label_text,
-                        position: crate::core::Point::new(rect.x + padding, rect.y + padding),
-                        color: label_color,
-                        size: crate::core::Pixels(font_size),
-                        font,
-                        align_x: crate::core::alignment::Horizontal::Left.into(),
-                        align_y: crate::core::alignment::Vertical::Top,
-                        line_height: crate::core::text::LineHeight::default(),
-                        shaping: crate::core::text::Shaping::Basic,
-                        ..CanvasText::default()
-                    });
-                }
+                frame.fill_text(CanvasText {
+                    content: label_text.to_string(),
+                    position: crate::core::Point::new(rect.x + padding, rect.y + padding),
+                    color: label_color,
+                    size: crate::core::Pixels(font_size),
+                    font: crate::core::Font::default(),
+                    align_x: crate::core::alignment::Horizontal::Left.into(),
+                    align_y: crate::core::alignment::Vertical::Top,
+                    line_height: crate::core::text::LineHeight::default(),
+                    shaping: crate::core::text::Shaping::Basic,
+                    ..CanvasText::default()
+                });
             }
         }
 
