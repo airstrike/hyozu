@@ -994,6 +994,13 @@ where
         let (min_value, max_value) = (state.bounds.min(), state.bounds.max());
 
         if labels.is_empty() || (!self.axis.has_ticks() && !self.axis.has_labels()) {
+            // Hidden axes (e.g. a y-axis muted via `.none()` to show only
+            // gridlines) still need to propagate the `min_inset` floor so
+            // series-driven insets — bar data labels extending past the
+            // plot area top, etc. — reach the plot area. Without this the
+            // scene reads `(0, 0)` from `state.label_insets` and lays the
+            // plot area flush against the chart edge, clipping the labels.
+            state.label_insets = min_inset;
             return Node::new(Size::ZERO);
         }
 
