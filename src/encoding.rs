@@ -1,22 +1,40 @@
 //! Grammar-of-graphics style encodings: bind each point of a series to a
-//! visual channel (color, in v1) via a closure and a scale rule.
+//! visual channel via a closure and a scale rule.
 //!
-//! An `Encoding<C>` is built from a key-extraction closure via [`key`] and
-//! refined with channel-specific methods like [`Encoding::manual`],
-//! [`Encoding::manual_with`], and [`Encoding::range`]. In v1 only
-//! [`channel::Fill`] exists as a channel marker.
+//! In v1 there are two channels:
 //!
-//! # Example
+//! - [`channel::Fill`] — categorical color via [`key`] / [`fill_by`] and
+//!   the ordinal/manual builder methods.
+//! - [`channel::Size`] — continuous pixel diameter via [`size_by`] and a
+//!   selectable scale (Sqrt by default — perceptually correct for area).
+//!
+//! Each channel is a separate `Encoding<C>` instance; the entry points are
+//! sibling functions ([`key`]/[`fill_by`] vs [`size_by`]) rather than a
+//! generic builder, intentionally — that avoids a type-inference gotcha on
+//! bare `let` bindings where rustc can't decide the channel type from the
+//! closure alone.
+//!
+//! # Example — fill (categorical)
 //!
 //! ```
 //! use hyozu::encoding;
 //!
-//! // Six bars, each keyed by month — encoded into distinct palette slots.
 //! const MONTHS: [&str; 6] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun"];
 //! let enc = encoding::key(|i, _| MONTHS[i]);
 //! ```
+//!
+//! # Example — size (continuous bubble)
+//!
+//! ```
+//! use hyozu::encoding;
+//!
+//! // Each point's y value drives the bubble's pixel diameter (4–24 px),
+//! // with a sqrt scale so area is perceptually proportional to y.
+//! let enc = encoding::size_by(|_, d| d.y).range(4.0..=24.0);
+//! ```
 
 use std::marker::PhantomData;
+use std::ops::RangeInclusive;
 use std::sync::Arc;
 
 use crate::color::Color;
@@ -25,85 +43,23 @@ use crate::palette::{Palette, PaletteSeed, Resolved};
 
 pub mod channel;
 
-use channel::{Channel, Fill};
+use channel::{Channel, Fill, FillKind, OrdinalSource, Size, SizeKind, SizeScale};
 
-/// Shared extractor closure: maps `(point_index, datum)` to a string key.
-type Extractor = Arc<dyn Fn(usize, &Datum) -> String + Send + Sync>;
-
-/// Shared manual-lookup closure: maps a string key to an optional color.
-type Lookup = Arc<dyn Fn(&str) -> Option<Color> + Send + Sync>;
+/// Type alias for the per-point extractor closure that pulls a channel's
+/// input value out of a datum. Generic over the channel input type so the
+/// `Fill` channel can extract a `String` key while the `Size` channel
+/// extracts an `f64`.
+type Extractor<I> = Arc<dyn Fn(usize, &Datum) -> I + Send + Sync>;
 
 /// A binding from each point of a series to a visual value on a channel `C`.
 ///
-/// Build with [`key`]; refine with channel-specific methods like
-/// [`Encoding::manual`], [`Encoding::manual_with`], or [`Encoding::range`]
-/// (all available on `Encoding<channel::Fill>`).
+/// Build with [`key`] / [`fill_by`] for [`channel::Fill`] or [`size_by`] for
+/// [`channel::Size`]; refine with channel-specific methods on
+/// `Encoding<Fill>` / `Encoding<Size>`.
 pub struct Encoding<C: Channel> {
-    extractor: Extractor,
-    kind: Kind,
+    extractor: Extractor<C::Input>,
+    kind: C::Kind,
     _channel: PhantomData<C>,
-}
-
-/// Private: how the encoding's extracted key maps to the channel value.
-#[derive(Clone)]
-enum Kind {
-    /// Assign successive palette slots to keys in order of first appearance.
-    /// The `source` decides whether those slots come from a seed-derived
-    /// palette (theme-driven, default [`Palette::Categorical`]) or from an
-    /// explicit user-provided color list.
-    Ordinal { source: OrdinalSource },
-    /// Explicit lookup table. Missing keys fall through the resolution chain.
-    Manual { mapping: Vec<(String, Color)> },
-    /// Closure-based lookup. `None` from the closure also falls through.
-    ManualWith { lookup: Lookup },
-}
-
-/// Private: how an ordinal encoding picks its colors. Mutually exclusive by
-/// construction — calling [`Encoding::range`] replaces any prior palette
-/// choice, and [`Encoding::palette`] replaces any prior range.
-#[derive(Clone, Debug, PartialEq)]
-enum OrdinalSource {
-    /// Build the palette from the design seed at draw time with the given
-    /// flavor. `None` means "inherit from the chart's `Data::palette`
-    /// setting, or fall back to [`Palette::Categorical`] if the chart
-    /// didn't set one." `Some(p)` means "always use `p`, regardless of
-    /// the chart's setting." See D17 for the inheritance story.
-    Seed(Option<Palette>),
-    /// Use the user-supplied color list verbatim (insertion-order assignment).
-    Range(Vec<Color>),
-}
-
-/// Build a fill-channel encoding from a key-extraction closure.
-///
-/// In v1 this returns a concrete `Encoding<channel::Fill>`. When additional
-/// channels arrive, this becomes `fill_by` plus siblings (`size_by`, etc.) —
-/// not a generic — to avoid a type-inference gotcha on bare `let` bindings.
-///
-/// The closure receives the point index and the raw [`Datum`]. The returned
-/// value is any `Display` type — strings, integers, booleans, or custom enums
-/// implementing `Display` — and is stamped onto the datum as its key.
-///
-/// # Example
-///
-/// ```
-/// use hyozu::encoding;
-///
-/// let enc = encoding::key(|i, _| if i % 2 == 0 { "even" } else { "odd" });
-/// ```
-pub fn key<F, S>(f: F) -> Encoding<Fill>
-where
-    F: Fn(usize, &Datum) -> S + Send + Sync + 'static,
-    S: std::fmt::Display,
-{
-    Encoding {
-        extractor: Arc::new(move |i, d| f(i, d).to_string()),
-        kind: Kind::Ordinal {
-            // None = "inherit from the chart's Data::palette, or
-            // fall back to Categorical". D17.
-            source: OrdinalSource::Seed(None),
-        },
-        _channel: PhantomData,
-    }
 }
 
 impl<C: Channel> Clone for Encoding<C> {
@@ -125,32 +81,62 @@ impl<C: Channel> std::fmt::Debug for Encoding<C> {
 }
 
 // PartialEq via Arc::ptr_eq on the extractor + value-compare on Kind.
-// Required so bar::props::Property can keep deriving PartialEq when a future
-// Property::ColorBy variant arrives.
+// Required so `bar::props::Property` and `xy::props::Property` can derive
+// `PartialEq` even when they hold an `Encoding<C>`. The Arc pointer
+// comparison is intentionally conservative — two encodings built from the
+// "same" closure literal aren't equal because each builder call wraps a
+// fresh allocation.
 impl<C: Channel> PartialEq for Encoding<C> {
     fn eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.extractor, &other.extractor) && self.kind == other.kind
     }
 }
 
-impl PartialEq for Kind {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Kind::Ordinal { source: a }, Kind::Ordinal { source: b }) => a == b,
-            (Kind::Manual { mapping: a }, Kind::Manual { mapping: b }) => a == b,
-            (Kind::ManualWith { lookup: a }, Kind::ManualWith { lookup: b }) => Arc::ptr_eq(a, b),
-            _ => false,
-        }
-    }
+// ============================================================================
+// Fill channel — entry point + builder methods
+// ============================================================================
+
+/// Build a fill-channel encoding from a key-extraction closure.
+///
+/// The closure receives the point index and the raw [`Datum`]. The returned
+/// value is any `Display` type — strings, integers, booleans, or custom enums
+/// implementing `Display` — and is stamped onto the datum as its key.
+///
+/// Alias of [`fill_by`]; kept for backwards compatibility.
+///
+/// # Example
+///
+/// ```
+/// use hyozu::encoding;
+///
+/// let enc = encoding::key(|i, _| if i % 2 == 0 { "even" } else { "odd" });
+/// ```
+pub fn key<F, S>(f: F) -> Encoding<Fill>
+where
+    F: Fn(usize, &Datum) -> S + Send + Sync + 'static,
+    S: std::fmt::Display,
+{
+    fill_by(f)
 }
 
-impl std::fmt::Debug for Kind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Kind::Ordinal { source } => f.debug_struct("Ordinal").field("source", source).finish(),
-            Kind::Manual { mapping } => f.debug_struct("Manual").field("entries", &mapping.len()).finish(),
-            Kind::ManualWith { .. } => f.debug_struct("ManualWith").finish_non_exhaustive(),
-        }
+/// Build a fill-channel encoding from a key-extraction closure.
+///
+/// Sibling of [`size_by`]; both names exist so call sites read as
+/// `encoding::fill_by(...)` / `encoding::size_by(...)` when both channels
+/// are in play.
+pub fn fill_by<F, S>(f: F) -> Encoding<Fill>
+where
+    F: Fn(usize, &Datum) -> S + Send + Sync + 'static,
+    S: std::fmt::Display,
+{
+    Encoding {
+        extractor: Arc::new(move |i, d| f(i, d).to_string()),
+        kind: FillKind::Ordinal {
+            // None = "inherit from the chart's Data::palette, or
+            // fall back to Categorical". D17.
+            source: OrdinalSource::Seed(None),
+        },
+        _channel: PhantomData,
     }
 }
 
@@ -171,7 +157,7 @@ impl Encoding<Fill> {
     where
         Col: Into<Color>,
     {
-        self.kind = Kind::Ordinal {
+        self.kind = FillKind::Ordinal {
             source: OrdinalSource::Range(range.into_iter().map(Into::into).collect()),
         };
         self
@@ -200,7 +186,7 @@ impl Encoding<Fill> {
     /// let enc = encoding::key(|i, _| MONTHS[i]).palette(Palette::Sequential);
     /// ```
     pub fn palette(mut self, flavor: Palette) -> Self {
-        self.kind = Kind::Ordinal {
+        self.kind = FillKind::Ordinal {
             source: OrdinalSource::Seed(Some(flavor)),
         };
         self
@@ -222,7 +208,7 @@ impl Encoding<Fill> {
         K: Into<String>,
         Col: Into<Color>,
     {
-        self.kind = Kind::Manual {
+        self.kind = FillKind::Manual {
             mapping: mapping.into_iter().map(|(k, c)| (k.into(), c.into())).collect(),
         };
         self
@@ -246,7 +232,7 @@ impl Encoding<Fill> {
     where
         F: Fn(&str) -> Option<Color> + Send + Sync + 'static,
     {
-        self.kind = Kind::ManualWith {
+        self.kind = FillKind::ManualWith {
             lookup: Arc::new(lookup),
         };
         self
@@ -278,7 +264,7 @@ impl Encoding<Fill> {
         let keys: Vec<String> = points.iter().enumerate().map(|(i, d)| (self.extractor)(i, d)).collect();
 
         match &self.kind {
-            Kind::Ordinal { source } => {
+            FillKind::Ordinal { source } => {
                 // Compute distinct-key insertion order once.
                 let mut seen: Vec<String> = Vec::new();
                 let key_indices: Vec<usize> = keys
@@ -320,12 +306,179 @@ impl Encoding<Fill> {
                     .map(|&i| Some(palette_colors[i % palette_colors.len()]))
                     .collect()
             }
-            Kind::Manual { mapping } => keys
+            FillKind::Manual { mapping } => keys
                 .iter()
                 .map(|k| mapping.iter().find(|(mk, _)| mk == k).map(|(_, c)| *c))
                 .collect(),
-            Kind::ManualWith { lookup } => keys.iter().map(|k| lookup(k)).collect(),
+            FillKind::ManualWith { lookup } => keys.iter().map(|k| lookup(k)).collect(),
         }
+    }
+}
+
+// ============================================================================
+// Size channel — entry point + builder methods
+// ============================================================================
+
+/// Build a size-channel encoding from a numeric extractor closure.
+///
+/// The closure receives the point index and the raw [`Datum`] and returns a
+/// numeric value. By default the encoding uses an auto-detected domain
+/// (min/max across the data), a 2.0–20.0 px output range, and a Sqrt scale
+/// (perceptually correct for bubble area).
+///
+/// # Example
+///
+/// ```
+/// use hyozu::encoding;
+///
+/// // Each point's y value drives the bubble's pixel diameter, with the
+/// // default sqrt scale so a point with twice the y produces twice the area.
+/// let enc = encoding::size_by(|_, d| d.y).range(4.0..=24.0);
+/// ```
+pub fn size_by<F>(f: F) -> Encoding<Size>
+where
+    F: Fn(usize, &Datum) -> f64 + Send + Sync + 'static,
+{
+    Encoding {
+        extractor: Arc::new(f),
+        kind: SizeKind::Continuous {
+            domain: None,
+            range: 2.0..=20.0,
+            scale: SizeScale::Sqrt,
+        },
+        _channel: PhantomData,
+    }
+}
+
+impl Encoding<Size> {
+    /// Set the input domain explicitly. By default the domain is auto-detected
+    /// from the data (min/max across points) at resolve time.
+    pub fn domain(mut self, domain: RangeInclusive<f64>) -> Self {
+        let SizeKind::Continuous { domain: d, .. } = &mut self.kind;
+        *d = Some(domain);
+        self
+    }
+
+    /// Set the output pixel range (diameter, not area).
+    pub fn range(mut self, range: RangeInclusive<f32>) -> Self {
+        let SizeKind::Continuous { range: r, .. } = &mut self.kind;
+        *r = range;
+        self
+    }
+
+    /// Set the scale function explicitly.
+    pub fn scale(mut self, scale: SizeScale) -> Self {
+        let SizeKind::Continuous { scale: s, .. } = &mut self.kind;
+        *s = scale;
+        self
+    }
+
+    /// Linear scale: diameter is proportional to the input value. Use this
+    /// when the input is already an area (e.g. land km²) and you want the
+    /// diameter to scale linearly with it.
+    pub fn linear(self) -> Self {
+        self.scale(SizeScale::Linear)
+    }
+
+    /// Sqrt scale (the default): diameter is proportional to sqrt(value), so
+    /// bubble *area* is perceptually proportional to the value. This is the
+    /// right choice when the user thinks of the encoded value as "size of
+    /// the thing" (population, sales, count).
+    pub fn sqrt(self) -> Self {
+        self.scale(SizeScale::Sqrt)
+    }
+
+    /// Log scale: diameter is proportional to log(value). Useful for highly
+    /// skewed distributions where a few outliers would otherwise dominate.
+    pub fn log(self) -> Self {
+        self.scale(SizeScale::Log)
+    }
+
+    /// Resolve this encoding for a set of points.
+    ///
+    /// Returns one entry per point:
+    /// - `Some(diameter_px)` — the encoding produced a pixel diameter
+    /// - `None` — the input was non-finite; caller falls back to the marker's
+    ///   configured size
+    ///
+    /// When `domain` is `None`, the min/max of the extracted values is used
+    /// as the domain. A degenerate domain (min == max) maps every point to
+    /// the midpoint of the output range.
+    pub(crate) fn resolve_size(&self, points: &[Datum]) -> Vec<Option<f32>> {
+        let inputs: Vec<f64> = points.iter().enumerate().map(|(i, d)| (self.extractor)(i, d)).collect();
+
+        let SizeKind::Continuous { domain, range, scale } = &self.kind;
+
+        // Effective domain: explicit, or auto from the inputs.
+        let (d_min, d_max) = if let Some(d) = domain {
+            (*d.start(), *d.end())
+        } else {
+            let mut min = f64::INFINITY;
+            let mut max = f64::NEG_INFINITY;
+            for &v in &inputs {
+                if v.is_finite() {
+                    if v < min {
+                        min = v;
+                    }
+                    if v > max {
+                        max = v;
+                    }
+                }
+            }
+            if min.is_infinite() || max.is_infinite() {
+                // No finite inputs at all — every point falls back.
+                return vec![None; inputs.len()];
+            }
+            (min, max)
+        };
+
+        let r_min = *range.start();
+        let r_max = *range.end();
+        let mid = (r_min + r_max) / 2.0;
+
+        inputs
+            .into_iter()
+            .map(|v| {
+                if !v.is_finite() {
+                    return None;
+                }
+                if d_max == d_min {
+                    return Some(mid);
+                }
+                let t = match scale {
+                    SizeScale::Linear => (v - d_min) / (d_max - d_min),
+                    SizeScale::Sqrt => {
+                        // Stevens' law: linearly interpolate sqrt(value) so
+                        // that the resulting diameter, when squared into an
+                        // area, is linear in the original value. Inputs are
+                        // clamped to >= 0 because sqrt of a negative is NaN.
+                        let v_s = v.max(0.0).sqrt();
+                        let lo_s = d_min.max(0.0).sqrt();
+                        let hi_s = d_max.max(0.0).sqrt();
+                        if hi_s == lo_s {
+                            0.5
+                        } else {
+                            (v_s - lo_s) / (hi_s - lo_s)
+                        }
+                    }
+                    SizeScale::Log => {
+                        // Log requires positive inputs; clamp to MIN_POSITIVE
+                        // so a 0 or negative input maps to the bottom of the
+                        // range rather than producing NaN.
+                        let v_l = v.max(f64::MIN_POSITIVE).ln();
+                        let lo_l = d_min.max(f64::MIN_POSITIVE).ln();
+                        let hi_l = d_max.max(f64::MIN_POSITIVE).ln();
+                        if hi_l == lo_l {
+                            0.5
+                        } else {
+                            (v_l - lo_l) / (hi_l - lo_l)
+                        }
+                    }
+                };
+                let t_clamped = t.clamp(0.0, 1.0) as f32;
+                Some(r_min + (r_max - r_min) * t_clamped)
+            })
+            .collect()
     }
 }
 
@@ -586,5 +739,116 @@ mod tests {
         let got = enc.resolve_fill(&[], &test_seed(), None);
 
         assert!(got.is_empty());
+    }
+
+    // ========================================================================
+    // Size channel tests
+    // ========================================================================
+
+    #[test]
+    fn size_linear_maps_endpoints_and_midpoint_correctly() {
+        // Linear scale: y=0 → 4px, y=10 → 24px, y=5 → 14px (exact midpoint).
+        let enc = size_by(|_, d| d.y).domain(0.0..=10.0).range(4.0..=24.0).linear();
+        let pts = points(&[0.0, 5.0, 10.0]);
+        let got = enc.resolve_size(&pts);
+        assert_eq!(got, vec![Some(4.0), Some(14.0), Some(24.0)]);
+    }
+
+    #[test]
+    fn size_sqrt_default_scales_diameter_by_sqrt_of_value() {
+        // Sqrt scale: a value 4× larger should produce a diameter 2× larger
+        // (so its visual area is 4× — perceptually correct). Domain [0, 16],
+        // range [0, 16]: sqrt(0)=0 → 0, sqrt(4)=2 → 0.5*16=8 wait — we
+        // interpolate sqrt(v) between sqrt(0)=0 and sqrt(16)=4. So v=4
+        // gives t = (2-0)/(4-0) = 0.5 → diameter 8. v=16 gives t=1 → 16.
+        // Verify those exact values.
+        let enc = size_by(|_, d| d.y).domain(0.0..=16.0).range(0.0..=16.0); // default Sqrt
+        let pts = points(&[0.0, 4.0, 16.0]);
+        let got = enc.resolve_size(&pts);
+        assert_eq!(got, vec![Some(0.0), Some(8.0), Some(16.0)]);
+    }
+
+    #[test]
+    fn size_default_scale_is_sqrt() {
+        // size_by() with no explicit .linear()/.sqrt()/.log() must use Sqrt.
+        // Build two identical encodings, one with explicit .sqrt() and one
+        // without — they should produce the same output.
+        let enc_default = size_by(|_, d| d.y).domain(0.0..=100.0).range(2.0..=20.0);
+        let enc_explicit = size_by(|_, d| d.y).domain(0.0..=100.0).range(2.0..=20.0).sqrt();
+        let pts = points(&[0.0, 25.0, 100.0]);
+        assert_eq!(enc_default.resolve_size(&pts), enc_explicit.resolve_size(&pts));
+    }
+
+    #[test]
+    fn size_auto_domain_uses_min_max_of_inputs() {
+        // No explicit domain → infer [min, max] from the data. Linear so the
+        // midpoint check is easy. Inputs [10, 20, 30] → domain [10, 30],
+        // range [0, 100]: 10→0, 20→50, 30→100.
+        let enc = size_by(|_, d| d.y).range(0.0..=100.0).linear();
+        let pts = points(&[10.0, 20.0, 30.0]);
+        let got = enc.resolve_size(&pts);
+        assert_eq!(got, vec![Some(0.0), Some(50.0), Some(100.0)]);
+    }
+
+    #[test]
+    fn size_degenerate_domain_returns_midpoint() {
+        // domain min == max → every point lands on the midpoint of the range.
+        let enc = size_by(|_, d| d.y).domain(5.0..=5.0).range(2.0..=20.0).linear();
+        let pts = points(&[5.0, 5.0, 5.0]);
+        let got = enc.resolve_size(&pts);
+        assert_eq!(got, vec![Some(11.0), Some(11.0), Some(11.0)]);
+    }
+
+    #[test]
+    fn size_input_outside_domain_clamps_to_range() {
+        // Values below the explicit domain min clamp to range start; values
+        // above the domain max clamp to range end. Guards against runaway
+        // bubbles from outliers when the user has already set a fixed
+        // domain expecting a known range.
+        let enc = size_by(|_, d| d.y).domain(0.0..=10.0).range(2.0..=20.0).linear();
+        let pts = points(&[-5.0, 0.0, 10.0, 50.0]);
+        let got = enc.resolve_size(&pts);
+        assert_eq!(got, vec![Some(2.0), Some(2.0), Some(20.0), Some(20.0)]);
+    }
+
+    #[test]
+    fn size_non_finite_input_returns_none() {
+        // NaN / inf inputs return None so the caller falls back to the
+        // marker's configured size.
+        let enc = size_by(|_, d| d.y).domain(0.0..=10.0).range(2.0..=20.0);
+        let pts = points(&[f64::NAN, 5.0, f64::INFINITY]);
+        let got = enc.resolve_size(&pts);
+        assert_eq!(got[0], None);
+        assert!(got[1].is_some());
+        assert_eq!(got[2], None);
+    }
+
+    #[test]
+    fn size_log_scale_handles_positive_values() {
+        // Log scale: domain [1, 100] → range [0, 10]. Value 1 → 0,
+        // value 100 → 10, value 10 → 5 (since log(10) = (log(1)+log(100))/2).
+        let enc = size_by(|_, d| d.y).domain(1.0..=100.0).range(0.0..=10.0).log();
+        let pts = points(&[1.0, 10.0, 100.0]);
+        let got = enc.resolve_size(&pts);
+        // Allow tiny floating-point slack on the midpoint
+        assert_eq!(got[0], Some(0.0));
+        assert!(got[1].is_some() && (got[1].unwrap() - 5.0).abs() < 1e-4);
+        assert_eq!(got[2], Some(10.0));
+    }
+
+    #[test]
+    fn size_empty_points_vec_returns_empty_vec() {
+        let enc = size_by(|_, d| d.y);
+        assert!(enc.resolve_size(&[]).is_empty());
+    }
+
+    #[test]
+    fn size_all_non_finite_inputs_return_all_none() {
+        // Every input non-finite → auto-domain has no valid bounds, so
+        // every point returns None. Degenerate-but-valid early exit.
+        let enc = size_by(|_, d| d.y);
+        let pts = points(&[f64::NAN, f64::NAN]);
+        let got = enc.resolve_size(&pts);
+        assert_eq!(got, vec![None, None]);
     }
 }

@@ -2,6 +2,7 @@ use crate::color::Color;
 use crate::data::axis::{self, Axis, Kind, Orientation, Placement};
 use crate::data::mark::line::marker;
 use crate::data::{Datum, IntoDatums};
+use crate::encoding::{Encoding, channel};
 
 pub use marker::Marker;
 
@@ -15,6 +16,11 @@ pub struct Xy {
     pub(crate) marker: marker::Marker,
     /// Optional name for this scatter series (used in legends).
     pub(crate) name: Option<String>,
+    /// Optional size-channel encoding: binds each point's marker diameter to
+    /// a closure over its datum. See [`crate::encoding::size_by`]. When set,
+    /// the renderer uses the resolved per-point diameter instead of
+    /// `marker.size`. This turns the scatter into a bubble chart.
+    pub(crate) size_by: Option<Encoding<channel::Size>>,
 }
 
 /// Creates an XY scatter chart from point data.
@@ -36,6 +42,7 @@ pub fn xy(data: impl IntoDatums) -> Xy {
         color: None,
         marker: marker::Marker::default(),
         name: None,
+        size_by: None,
     }
 }
 
@@ -50,6 +57,46 @@ impl Xy {
     pub fn markers(mut self, marker: impl Into<marker::Marker>) -> Self {
         self.marker = marker.into();
         self
+    }
+
+    /// Encode the size channel: compute each point's marker diameter from
+    /// its datum via the given [`Encoding`]. Replaces any previous encoding.
+    ///
+    /// Turns an XY scatter into a bubble chart. Resolved diameters fall back
+    /// to `marker.size` for any point where the encoding returns `None`
+    /// (typically a non-finite input).
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use hyozu::{encoding, xy};
+    ///
+    /// let chart = xy([(1.0, 10.0), (2.0, 40.0), (3.0, 25.0)])
+    ///     .size_by(encoding::size_by(|_, d| d.y).range(4.0..=24.0));
+    /// ```
+    pub fn size_by(mut self, encoding: Encoding<channel::Size>) -> Self {
+        self.size_by = Some(encoding);
+        self
+    }
+
+    /// Resolve the displayed marker diameter for a single point.
+    ///
+    /// Priority: 1) `size_by` encoding, 2) the marker's `size` fallback.
+    /// Mirrors `bar::Series::resolved_color_at` so the bubble path and any
+    /// future hit-test/tooltip path agree on what diameter a given point
+    /// shows.
+    ///
+    /// `fallback` is what the renderer falls back to when no encoding is
+    /// configured or when the encoding returns `None` for this point —
+    /// typically `marker.size`.
+    pub fn resolved_size_at(&self, i: usize, fallback: f32) -> f32 {
+        if let Some(enc) = &self.size_by
+            && let Some(Some(s)) = enc.resolve_size(&self.points).get(i).copied()
+        {
+            s
+        } else {
+            fallback
+        }
     }
 
     /// Sets the name for this scatter series (used in legends).

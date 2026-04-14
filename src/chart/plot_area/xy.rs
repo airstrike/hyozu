@@ -98,8 +98,23 @@ where
         let marker_config = &self.data.marker;
         let mut frame = Frame::new(renderer, layout_bounds.size());
 
-        for pixel_point in &state.pixel_points {
-            let size = marker_config.size;
+        // Resolve per-point sizes from the size_by encoding once per draw.
+        // Falls back to `marker.size` when no encoding is configured or for
+        // points where the encoding returns None (non-finite inputs).
+        let resolved_sizes: Vec<f32> = self
+            .data
+            .size_by
+            .as_ref()
+            .map(|enc| {
+                enc.resolve_size(&self.data.points)
+                    .into_iter()
+                    .map(|s| s.unwrap_or(marker_config.size))
+                    .collect()
+            })
+            .unwrap_or_else(|| vec![marker_config.size; state.pixel_points.len()]);
+
+        for (i, pixel_point) in state.pixel_points.iter().enumerate() {
+            let size = resolved_sizes.get(i).copied().unwrap_or(marker_config.size);
             let half = size / 2.0;
 
             let path = Path::new(|builder| match marker_config.shape {
