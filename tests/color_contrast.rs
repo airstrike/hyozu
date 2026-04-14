@@ -44,7 +44,9 @@ fn test_all_themes_bar_labels_comprehensive() {
             if contrast < 2.0 {
                 failures.push(format!(
                     "{:?} color {}: contrast {:.2} (bar lum {:.3}, label lum {:.3})",
-                    theme, i, contrast,
+                    theme,
+                    i,
+                    contrast,
                     bar_color.relative_luminance(),
                     label_color.relative_luminance()
                 ));
@@ -57,10 +59,7 @@ fn test_all_themes_bar_labels_comprehensive() {
         for failure in &failures {
             println!("❌ {}", failure);
         }
-        panic!(
-            "\n{} theme/color combinations have poor contrast",
-            failures.len()
-        );
+        panic!("\n{} theme/color combinations have poor contrast", failures.len());
     }
 }
 
@@ -120,14 +119,8 @@ fn test_dark_theme_debug() {
 
     println!("\n=== Theme::Dark Debug ===");
     println!("Background: lum={:.3}", background.relative_luminance());
-    println!(
-        "text_pair.on_light: lum={:.3}",
-        text_pair.on_light.relative_luminance()
-    );
-    println!(
-        "text_pair.on_dark: lum={:.3}",
-        text_pair.on_dark.relative_luminance()
-    );
+    println!("text_pair.on_light: lum={:.3}", text_pair.on_light.relative_luminance());
+    println!("text_pair.on_dark: lum={:.3}", text_pair.on_dark.relative_luminance());
 
     for (i, color_spec) in data_colors.iter().enumerate().take(3) {
         let bar_color = color_spec.resolve(background, text_pair, None);
@@ -164,14 +157,8 @@ fn test_solarized_light_debug() {
 
     println!("\n=== Solarized Light Debug ===");
     println!("Background: lum={:.3}", background.relative_luminance());
-    println!(
-        "text_pair.on_light: lum={:.3}",
-        text_pair.on_light.relative_luminance()
-    );
-    println!(
-        "text_pair.on_dark: lum={:.3}",
-        text_pair.on_dark.relative_luminance()
-    );
+    println!("text_pair.on_light: lum={:.3}", text_pair.on_light.relative_luminance());
+    println!("text_pair.on_dark: lum={:.3}", text_pair.on_dark.relative_luminance());
 
     for (i, color_spec) in data_colors.iter().enumerate().take(5) {
         let bar_color = color_spec.resolve(background, text_pair, None);
@@ -194,12 +181,7 @@ fn test_solarized_light_debug() {
             bg_contrast, opt1_contrast, opt2_contrast
         );
 
-        assert!(
-            contrast >= 2.0,
-            "Color {}: contrast {} too low",
-            i,
-            contrast
-        );
+        assert!(contrast >= 2.0, "Color {}: contrast {} too low", i, contrast);
     }
 }
 
@@ -213,14 +195,8 @@ fn test_gruvbox_light_debug() {
 
     println!("\n=== GruvboxLight Debug ===");
     println!("Background: lum={:.3}", background.relative_luminance());
-    println!(
-        "text_pair.on_light: lum={:.3}",
-        text_pair.on_light.relative_luminance()
-    );
-    println!(
-        "text_pair.on_dark: lum={:.3}",
-        text_pair.on_dark.relative_luminance()
-    );
+    println!("text_pair.on_light: lum={:.3}", text_pair.on_light.relative_luminance());
+    println!("text_pair.on_dark: lum={:.3}", text_pair.on_dark.relative_luminance());
 
     for (i, color_spec) in data_colors.iter().enumerate().take(5) {
         let bar_color = color_spec.resolve(background, text_pair, None);
@@ -243,11 +219,6 @@ fn test_gruvbox_light_debug() {
             bg_contrast, opt1_contrast, opt2_contrast
         );
 
-        assert!(
-            contrast >= 2.0,
-            "Color {}: contrast {} too low",
-            i,
-            contrast
-        );
+        assert!(contrast >= 2.0, "Color {}: contrast {} too low", i, contrast);
     }
 }

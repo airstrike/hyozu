@@ -67,9 +67,7 @@ impl TimeRange {
             // 1 year: 1 point per week (~52 points)
             TimeRange::OneYear => (365 * 24 * 3600, 7 * 24 * 3600, "week"),
             // 5 years: 1 point per week (~260 points)
-            TimeRange::FiveYears => {
-                (5 * 365 * 24 * 3600, 7 * 24 * 3600, "week")
-            }
+            TimeRange::FiveYears => (5 * 365 * 24 * 3600, 7 * 24 * 3600, "week"),
         }
     }
 
@@ -114,11 +112,7 @@ impl App {
         }
     }
 
-    fn build_data(
-        range: TimeRange,
-        alignment: Alignment,
-        show: line::label::Show,
-    ) -> data::Data {
+    fn build_data(range: TimeRange, alignment: Alignment, show: line::label::Show) -> data::Data {
         // End timestamp: 2024-06-15 12:00:00 UTC
         let end_ts: i64 = 1718452800;
         let (duration, interval, _desc) = range.config();
@@ -128,13 +122,9 @@ impl App {
         // so all time ranges share the same underlying price path
         let points = generate_gbm(start_ts, end_ts, interval);
 
-        data(
-            line(points).data_labels(
-                show + line::label::Position::Right + format_price,
-            ),
-        )
-        .x_axis(|_| line::Line::time_axis().with_ticks(alignment))
-        .y_axis_labels(format_price)
+        data(line(points).data_labels(show + line::label::Position::Right + format_price))
+            .x_axis(|_| line::Line::time_axis().with_ticks(alignment))
+            .y_axis_labels(format_price)
     }
 
     fn rebuild_data(&mut self) {
@@ -155,9 +145,7 @@ impl App {
             }
             Message::Show(show) => {
                 self.show = show;
-                if let Some(label) =
-                    self.data.line_mut(0).and_then(|l| l.label_mut())
-                {
+                if let Some(label) = self.data.line_mut(0).and_then(|l| l.label_mut()) {
                     label.show = show;
                 }
             }
@@ -178,9 +166,9 @@ impl App {
             (Alignment::SnapToStart, "Start"),
             (Alignment::SnapToEnd, "End"),
         ];
-        let alignment_buttons = row(alignments.iter().map(|&(a, label)| {
-            btn(label, self.alignment == a, Message::Alignment(a))
-        }))
+        let alignment_buttons = row(alignments
+            .iter()
+            .map(|&(a, label)| btn(label, self.alignment == a, Message::Alignment(a))))
         .spacing(4);
 
         let shows = [
@@ -217,19 +205,11 @@ impl App {
         ]
         .spacing(20);
 
-        container(content)
-            .width(Fill)
-            .height(Fill)
-            .padding(20)
-            .into()
+        container(content).width(Fill).height(Fill).padding(20).into()
     }
 }
 
-fn btn<'a, Message: Clone + 'a>(
-    label: &'a str,
-    selected: bool,
-    msg: Message,
-) -> iced::Element<'a, Message> {
+fn btn<'a, Message: Clone + 'a>(label: &'a str, selected: bool, msg: Message) -> iced::Element<'a, Message> {
     button(text(label).size(12))
         .padding([6, 12])
         .style(move |theme, status| {
@@ -256,8 +236,7 @@ impl SimpleRng {
 
     fn next_u64(&mut self) -> u64 {
         // LCG parameters from Numerical Recipes
-        self.state =
-            self.state.wrapping_mul(6364136223846793005).wrapping_add(1);
+        self.state = self.state.wrapping_mul(6364136223846793005).wrapping_add(1);
         self.state
     }
 

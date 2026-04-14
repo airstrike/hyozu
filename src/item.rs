@@ -22,14 +22,36 @@ use crate::props;
 pub enum Item {
     /// The chart title
     Title(String),
+    /// An area chart at the given index with a property change
+    Area(usize, props::area::Property),
     /// A bar chart at the given index with a property change
     Bars(usize, props::bar::Property),
+    /// A box plot chart at the given index with a property change
+    BoxPlot(usize, props::boxplot::Property),
     /// A line chart at the given index with a property change
     Line(usize, props::line::Property),
+    /// A pie chart at the given index with a property change
+    Pie(usize, props::pie::Property),
+    /// A gauge chart at the given index with a property change
+    Gauge(usize, props::gauge::Property),
+    /// A waterfall chart at the given index with a property change
+    Waterfall(usize, props::waterfall::Property),
+    /// An XY scatter chart at the given index with a property change
+    Xy(usize, props::xy::Property),
+    /// A rule mark at the given index with a property change
+    Rule(usize, props::rule::Property),
+    /// A heatmap chart at the given index with a property change
+    Heatmap(usize, props::heatmap::Property),
+    /// A violin chart at the given index with a property change
+    Violin(usize, props::violin::Property),
     /// The X axis
     XAxis(props::axis::Property),
     /// The Y axis
     YAxis(props::axis::Property),
+    /// The palette strategy
+    Palette(crate::palette::Palette),
+    /// The selection state
+    Selection(Option<crate::target::Target>),
 }
 
 impl Map for Item {}
@@ -38,6 +60,12 @@ impl Map for Item {}
 #[allow(non_snake_case)]
 pub fn Title(value: String) -> Item {
     Item::Title(value)
+}
+
+/// Creates an area item for a given mark index and property.
+#[allow(non_snake_case)]
+pub fn Area(index: usize, property: props::area::Property) -> Item {
+    Item::Area(index, property)
 }
 
 /// Creates a bars item for a given mark index and property.
@@ -52,10 +80,58 @@ pub fn Bars(index: usize, property: props::bar::Property) -> Item {
     Item::Bars(index, property)
 }
 
+/// Creates a box plot item for a given mark index and property.
+#[allow(non_snake_case)]
+pub fn BoxPlot(index: usize, property: props::boxplot::Property) -> Item {
+    Item::BoxPlot(index, property)
+}
+
 /// Creates a line item for a given mark index and property.
 #[allow(non_snake_case)]
 pub fn Line(index: usize, property: props::line::Property) -> Item {
     Item::Line(index, property)
+}
+
+/// Creates a pie item for a given mark index and property.
+#[allow(non_snake_case)]
+pub fn Pie(index: usize, property: props::pie::Property) -> Item {
+    Item::Pie(index, property)
+}
+
+/// Creates a gauge item for a given mark index and property.
+#[allow(non_snake_case)]
+pub fn Gauge(index: usize, property: props::gauge::Property) -> Item {
+    Item::Gauge(index, property)
+}
+
+/// Creates a waterfall item for a given mark index and property.
+#[allow(non_snake_case)]
+pub fn Waterfall(index: usize, property: props::waterfall::Property) -> Item {
+    Item::Waterfall(index, property)
+}
+
+/// Creates an XY item for a given mark index and property.
+#[allow(non_snake_case)]
+pub fn Xy(index: usize, property: props::xy::Property) -> Item {
+    Item::Xy(index, property)
+}
+
+/// Creates a rule item for a given mark index and property.
+#[allow(non_snake_case)]
+pub fn Rule(index: usize, property: props::rule::Property) -> Item {
+    Item::Rule(index, property)
+}
+
+/// Creates a heatmap item for a given mark index and property.
+#[allow(non_snake_case)]
+pub fn Heatmap(index: usize, property: props::heatmap::Property) -> Item {
+    Item::Heatmap(index, property)
+}
+
+/// Creates a violin item for a given mark index and property.
+#[allow(non_snake_case)]
+pub fn Violin(index: usize, property: props::violin::Property) -> Item {
+    Item::Violin(index, property)
 }
 
 /// Wraps an x-axis property into an item.
@@ -68,4 +144,16 @@ pub fn XAxis(property: props::axis::Property) -> Item {
 #[allow(non_snake_case)]
 pub fn YAxis(property: props::axis::Property) -> Item {
     Item::YAxis(property)
+}
+
+/// Wraps a palette strategy into an item.
+#[allow(non_snake_case)]
+pub fn Palette(palette: crate::palette::Palette) -> Item {
+    Item::Palette(palette)
+}
+
+/// Wraps a selection target into an item.
+#[allow(non_snake_case)]
+pub fn Selection(target: Option<crate::target::Target>) -> Item {
+    Item::Selection(target)
 }

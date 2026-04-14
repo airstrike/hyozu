@@ -15,6 +15,15 @@
 //!     .map(Message::Set)
 //! ```
 
+pub mod area;
 pub mod axis;
 pub mod bar;
+pub mod boxplot;
+pub mod gauge;
+pub mod heatmap;
 pub mod line;
+pub mod pie;
+pub mod rule;
+pub mod violin;
+pub mod waterfall;
+pub mod xy;

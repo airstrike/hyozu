@@ -15,13 +15,12 @@ pub enum Property {
     Spacing(f32),
     /// Layout strategy (grouped or stacked)
     Layout(bar::Layout),
+    /// Bar direction (vertical or horizontal)
+    Direction(bar::Direction),
     /// Label property (applies to all series)
     Label(label::Property),
     /// A property of a specific series
-    Series {
-        index: usize,
-        property: series::Property,
-    },
+    Series { index: usize, property: series::Property },
 }
 
 impl Map for Property {}
@@ -33,6 +32,7 @@ impl Property {
             Property::Size(v) => bars.set_size(*v),
             Property::Spacing(v) => bars.set_spacing(*v),
             Property::Layout(v) => bars.layout = *v,
+            Property::Direction(d) => bars.direction = *d,
             Property::Label(p) => p.apply(bars),
             Property::Series { index, property } => {
                 if let Some(series) = bars.series_mut().get_mut(*index) {
@@ -44,7 +44,7 @@ impl Property {
 }
 
 // Re-export enum variants as constructor functions
-pub use Property::{Label, Layout, Size, Spacing};
+pub use Property::{Direction, Label, Layout, Size, Spacing};
 
 /// Creates a series property wrapper for a given series index.
 ///

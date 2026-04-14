@@ -122,6 +122,24 @@ impl std::ops::Add<Style> for Ticks {
     }
 }
 
+impl From<Vec<f64>> for Ticks {
+    fn from(values: Vec<f64>) -> Self {
+        Ticks {
+            frequency: Frequency::Custom(values),
+            ..Default::default()
+        }
+    }
+}
+
+impl<const N: usize> From<[f64; N]> for Ticks {
+    fn from(values: [f64; N]) -> Self {
+        Ticks {
+            frequency: Frequency::Custom(values.to_vec()),
+            ..Default::default()
+        }
+    }
+}
+
 /// Style of tick marks on an axis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Style {
@@ -142,6 +160,8 @@ pub enum Frequency {
     EveryItem,
     /// Show tick every N items
     EveryNthItem(usize),
+    /// Show ticks only at the first and last positions
+    FirstAndLast,
     /// Custom tick positions (for manual override)
     Custom(Vec<f64>),
 }

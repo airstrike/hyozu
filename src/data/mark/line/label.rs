@@ -1,5 +1,6 @@
 use crate::color::Color;
 use crate::core::Pixels;
+use crate::core::font::{Style, Weight};
 use std::sync::Arc;
 
 /// Position of data labels on line chart points.
@@ -38,7 +39,7 @@ pub enum Show {
     MinMaxLast,
 }
 
-/// Data label configuration for line charts.
+/// Data label configuration for line and area charts.
 #[derive(Clone)]
 pub struct Label {
     /// Position of the label relative to the data point
@@ -50,6 +51,12 @@ pub struct Label {
     pub color: Option<Color>,
     /// Label size
     pub size: Option<Pixels>,
+    /// Label font weight (e.g. bold)
+    pub weight: Option<Weight>,
+    /// Label font style (e.g. italic)
+    pub style: Option<Style>,
+    /// Optional background fill color drawn behind the label
+    pub fill: Option<Color>,
 }
 
 impl std::fmt::Debug for Label {
@@ -60,7 +67,26 @@ impl std::fmt::Debug for Label {
             .field("format", &"<function>")
             .field("color", &self.color)
             .field("size", &self.size)
+            .field("weight", &self.weight)
+            .field("style", &self.style)
+            .field("fill", &self.fill)
             .finish()
+    }
+}
+
+impl PartialEq for Label {
+    fn eq(&self, other: &Self) -> bool {
+        // Closure equality is undecidable, so compare a probe value.
+        // Mirrors the approach in `bar::label::Label` so the surface is
+        // consistent across mark types.
+        self.position == other.position
+            && self.show == other.show
+            && (self.format)(1.0) == (other.format)(1.0)
+            && self.color == other.color
+            && self.size == other.size
+            && self.weight == other.weight
+            && self.style == other.style
+            && self.fill == other.fill
     }
 }
 
@@ -81,6 +107,9 @@ impl Default for Label {
             format: Arc::new(default),
             color: None,
             size: None,
+            weight: None,
+            style: None,
+            fill: None,
         }
     }
 }
@@ -104,10 +133,7 @@ impl Label {
     }
 
     /// Set a custom format function for the label text.
-    pub fn format(
-        mut self,
-        f: impl Fn(f64) -> String + Send + Sync + 'static,
-    ) -> Self {
+    pub fn format(mut self, f: impl Fn(f64) -> String + Send + Sync + 'static) -> Self {
         self.format = Arc::new(f);
         self
     }
@@ -122,6 +148,98 @@ impl Label {
     pub fn size(mut self, size: impl Into<Pixels>) -> Self {
         self.size = Some(size.into());
         self
+    }
+
+    /// Set the label font weight (e.g. `Weight::Bold`).
+    pub fn weight(mut self, weight: Weight) -> Self {
+        self.weight = Some(weight);
+        self
+    }
+
+    /// Set the label font style (e.g. `Style::Italic`).
+    pub fn style(mut self, style: Style) -> Self {
+        self.style = Some(style);
+        self
+    }
+
+    /// Set a background fill color drawn behind the label text.
+    pub fn fill(mut self, fill: impl Into<Color>) -> Self {
+        self.fill = Some(fill.into());
+        self
+    }
+
+    // === Property setters (in-place) ===
+
+    /// Sets the label position in place.
+    pub fn set_position(&mut self, position: Position) {
+        self.position = position;
+    }
+
+    /// Sets the label show mode in place.
+    pub fn set_show(&mut self, show: Show) {
+        self.show = show;
+    }
+
+    /// Sets the label color in place.
+    pub fn set_color(&mut self, color: Option<Color>) {
+        self.color = color;
+    }
+
+    /// Sets the label size in place.
+    pub fn set_size(&mut self, size: Option<Pixels>) {
+        self.size = size;
+    }
+
+    /// Sets the label font weight in place.
+    pub fn set_weight(&mut self, weight: Option<Weight>) {
+        self.weight = weight;
+    }
+
+    /// Sets the label font style in place.
+    pub fn set_style(&mut self, style: Option<Style>) {
+        self.style = style;
+    }
+
+    /// Sets the label background fill in place.
+    pub fn set_fill(&mut self, fill: Option<Color>) {
+        self.fill = fill;
+    }
+
+    // === Property getters ===
+
+    /// Returns the label position.
+    pub fn position_value(&self) -> Position {
+        self.position
+    }
+
+    /// Returns the label show mode.
+    pub fn show_value(&self) -> Show {
+        self.show
+    }
+
+    /// Returns the label color, if any.
+    pub fn color_value(&self) -> Option<&Color> {
+        self.color.as_ref()
+    }
+
+    /// Returns the label size, if any.
+    pub fn size_value(&self) -> Option<Pixels> {
+        self.size
+    }
+
+    /// Returns the label font weight, if any.
+    pub fn weight_value(&self) -> Option<Weight> {
+        self.weight
+    }
+
+    /// Returns the label font style, if any.
+    pub fn style_value(&self) -> Option<Style> {
+        self.style
+    }
+
+    /// Returns the label background fill color, if any.
+    pub fn fill_value(&self) -> Option<&Color> {
+        self.fill.as_ref()
     }
 }
 
@@ -160,9 +278,7 @@ impl std::ops::Add<Show> for Position {
     }
 }
 
-impl<F: Fn(f64) -> String + Send + Sync + 'static> std::ops::Add<F>
-    for Position
-{
+impl<F: Fn(f64) -> String + Send + Sync + 'static> std::ops::Add<F> for Position {
     type Output = Label;
     fn add(self, format: F) -> Label {
         Label::from(self).format(format)

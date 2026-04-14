@@ -1,5 +1,6 @@
 use crate::color::Color;
 use crate::core::Pixels;
+use crate::core::font::{Style, Weight};
 use std::sync::Arc;
 
 /// Position of data labels on bars.
@@ -22,6 +23,9 @@ pub struct Label {
     pub(crate) format: Arc<dyn Fn(f64) -> String + Send + Sync>,
     pub(crate) color: Option<Color>,
     pub(crate) size: Option<Pixels>,
+    pub(crate) weight: Option<Weight>,
+    pub(crate) style: Option<Style>,
+    pub(crate) fill: Option<Color>,
 }
 
 impl PartialEq for Label {
@@ -30,6 +34,9 @@ impl PartialEq for Label {
             && (self.format)(1.0) == (other.format)(1.0)
             && self.color == other.color
             && self.size == other.size
+            && self.weight == other.weight
+            && self.style == other.style
+            && self.fill == other.fill
     }
 }
 
@@ -40,6 +47,9 @@ impl std::fmt::Debug for Label {
             .field("format", &"<function>")
             .field("color", &self.color)
             .field("size", &self.size)
+            .field("weight", &self.weight)
+            .field("style", &self.style)
+            .field("fill", &self.fill)
             .finish()
     }
 }
@@ -60,6 +70,9 @@ impl Default for Label {
             format: Arc::new(default),
             color: None,
             size: None,
+            weight: None,
+            style: None,
+            fill: None,
         }
     }
 }
@@ -77,10 +90,7 @@ impl Label {
     }
 
     /// Set a custom format function for the label text.
-    pub fn with_format(
-        mut self,
-        f: impl Fn(f64) -> String + Send + Sync + 'static,
-    ) -> Self {
+    pub fn with_format(mut self, f: impl Fn(f64) -> String + Send + Sync + 'static) -> Self {
         self.format = Arc::new(f);
         self
     }
@@ -95,6 +105,51 @@ impl Label {
     pub fn with_size(mut self, size: impl Into<Pixels>) -> Self {
         self.size = Some(size.into());
         self
+    }
+
+    /// Set the label font weight.
+    pub fn with_weight(mut self, weight: Weight) -> Self {
+        self.weight = Some(weight);
+        self
+    }
+
+    /// Set the label font style.
+    pub fn with_style(mut self, style: Style) -> Self {
+        self.style = Some(style);
+        self
+    }
+
+    /// Set the label background fill color.
+    pub fn with_fill(mut self, fill: impl Into<Color>) -> Self {
+        self.fill = Some(fill.into());
+        self
+    }
+
+    // === Property setters ===
+
+    /// Sets the label color in place.
+    pub fn set_color(&mut self, color: Option<Color>) {
+        self.color = color;
+    }
+
+    /// Sets the label size in place.
+    pub fn set_size(&mut self, size: Option<Pixels>) {
+        self.size = size;
+    }
+
+    /// Sets the label font weight in place.
+    pub fn set_weight(&mut self, weight: Option<Weight>) {
+        self.weight = weight;
+    }
+
+    /// Sets the label font style in place.
+    pub fn set_style(&mut self, style: Option<Style>) {
+        self.style = style;
+    }
+
+    /// Sets the label background fill color in place.
+    pub fn set_fill(&mut self, fill: Option<Color>) {
+        self.fill = fill;
     }
 
     // === Property getters ===
@@ -112,6 +167,21 @@ impl Label {
     /// Returns the label size.
     pub fn size(&self) -> Option<Pixels> {
         self.size
+    }
+
+    /// Returns the label font weight.
+    pub fn weight(&self) -> Option<Weight> {
+        self.weight
+    }
+
+    /// Returns the label font style.
+    pub fn style(&self) -> Option<Style> {
+        self.style
+    }
+
+    /// Returns the label background fill color.
+    pub fn fill(&self) -> Option<&Color> {
+        self.fill.as_ref()
     }
 }
 
@@ -134,9 +204,7 @@ impl From<Position> for Option<Label> {
 
 // === Position + component ===
 
-impl<F: Fn(f64) -> String + Send + Sync + 'static> std::ops::Add<F>
-    for Position
-{
+impl<F: Fn(f64) -> String + Send + Sync + 'static> std::ops::Add<F> for Position {
     type Output = Label;
     fn add(self, format: F) -> Label {
         Label::from(self).with_format(format)

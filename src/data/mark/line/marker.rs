@@ -41,7 +41,7 @@ pub enum Show {
 }
 
 /// Marker configuration for line charts.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Marker {
     /// Shape of the marker
     pub shape: Shape,
@@ -110,6 +110,70 @@ impl Marker {
     pub fn stroke_width(mut self, width: f32) -> Self {
         self.stroke_width = width;
         self
+    }
+
+    // === Property setters (in-place) ===
+
+    /// Sets the marker shape in place.
+    pub fn set_shape(&mut self, shape: Shape) {
+        self.shape = shape;
+    }
+
+    /// Sets the marker show mode in place.
+    pub fn set_show(&mut self, show: Show) {
+        self.show = show;
+    }
+
+    /// Sets the marker size in place.
+    pub fn set_size(&mut self, size: f32) {
+        self.size = size;
+    }
+
+    /// Sets the marker fill color in place. `None` falls back to the series color.
+    pub fn set_color(&mut self, color: Option<Color>) {
+        self.color = color;
+    }
+
+    /// Sets the marker stroke (outline) color in place. `None` removes the outline.
+    pub fn set_stroke(&mut self, stroke: Option<Color>) {
+        self.stroke = stroke;
+    }
+
+    /// Sets the marker stroke width in place.
+    pub fn set_stroke_width(&mut self, width: f32) {
+        self.stroke_width = width;
+    }
+
+    // === Property getters ===
+
+    /// Returns the marker shape.
+    pub fn shape_value(&self) -> Shape {
+        self.shape
+    }
+
+    /// Returns the marker show mode.
+    pub fn show_value(&self) -> Show {
+        self.show
+    }
+
+    /// Returns the marker size.
+    pub fn size_value(&self) -> f32 {
+        self.size
+    }
+
+    /// Returns the marker fill color, if any.
+    pub fn color_value(&self) -> Option<&Color> {
+        self.color.as_ref()
+    }
+
+    /// Returns the marker stroke (outline) color, if any.
+    pub fn stroke_value(&self) -> Option<&Color> {
+        self.stroke.as_ref()
+    }
+
+    /// Returns the marker stroke width.
+    pub fn stroke_width_value(&self) -> f32 {
+        self.stroke_width
     }
 }
 

@@ -43,6 +43,16 @@ macro_rules! bars {
     };
 }
 
+/// Direction of bar growth.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Direction {
+    /// Bars grow upward from a horizontal baseline.
+    #[default]
+    Vertical,
+    /// Bars grow rightward from a vertical baseline.
+    Horizontal,
+}
+
 /// Proportional bar length - determines how much of available width bars occupy.
 ///
 /// Value is clamped to [0.1, 1.0]:
@@ -120,6 +130,17 @@ pub struct Bars {
     pub(crate) size: Size,
     /// Proportional spacing [0.0, 1.0] - spacing between bars as proportion of bar width (grouped layout only)
     pub(crate) spacing: Spacing,
+    /// Direction of bar growth (vertical or horizontal).
+    pub(crate) direction: Direction,
+    /// Radius for the bar's "end" corners (opposite the baseline).
+    ///
+    /// `0.0` uses a sharp rectangle (default). When positive, vertical bars
+    /// round the top corners and horizontal bars round the right corners.
+    /// The radius is clamped to `min(width, height) / 2.0` at draw time.
+    ///
+    /// Note: with `Layout::Stacked`, only the topmost segment of each stack
+    /// is rounded so that adjacent segments meet without gaps.
+    pub(crate) corner_radius: f32,
 }
 
 /// Creates a single bar series with styling options.
@@ -181,6 +202,8 @@ impl<T: IntoDatums> IntoBars for T {
             layout: Layout::default(),
             size: Size::default(),
             spacing: Spacing::default(),
+            direction: Direction::default(),
+            corner_radius: 0.0,
         }
     }
 }
@@ -193,6 +216,8 @@ impl<const N: usize> IntoBars for [Series; N] {
             layout: Layout::default(),
             size: Size::default(),
             spacing: Spacing::default(),
+            direction: Direction::default(),
+            corner_radius: 0.0,
         }
     }
 }
@@ -205,6 +230,8 @@ impl IntoBars for Vec<Series> {
             layout: Layout::default(),
             size: Size::default(),
             spacing: Spacing::default(),
+            direction: Direction::default(),
+            corner_radius: 0.0,
         }
     }
 }
@@ -218,7 +245,20 @@ impl Bars {
             layout: Layout::default(),
             size: Size::default(),
             spacing: Spacing::default(),
+            direction: Direction::default(),
+            corner_radius: 0.0,
         }
+    }
+
+    /// Sets the corner radius for the bar "end" corners.
+    ///
+    /// Vertical bars round top corners; horizontal bars round the right
+    /// corners. The radius is clamped to `min(width, height) / 2.0` at draw
+    /// time. For stacked layouts, only the topmost segment of each stack is
+    /// rounded.
+    pub fn corner_radius(mut self, radius: f32) -> Self {
+        self.corner_radius = radius.max(0.0);
+        self
     }
 
     /// Set the layout to grouped (side-by-side).
@@ -290,6 +330,24 @@ impl Bars {
         self.spacing = spacing.into();
     }
 
+    /// Sets the direction to horizontal (bars grow rightward).
+    pub fn horizontal(mut self) -> Self {
+        self.direction = Direction::Horizontal;
+        self
+    }
+
+    /// Sets the direction to vertical (bars grow upward).
+    pub fn vertical(mut self) -> Self {
+        self.direction = Direction::Vertical;
+        self
+    }
+
+    /// Sets the bar direction explicitly.
+    pub fn with_direction(mut self, direction: Direction) -> Self {
+        self.direction = direction;
+        self
+    }
+
     /// Applies data label configuration to all series.
     pub fn data_labels(mut self, label: impl Into<Option<Label>>) -> Self {
         let label_config = label.into();
@@ -326,6 +384,11 @@ impl Bars {
         self.spacing.get()
     }
 
+    /// Returns the bar direction.
+    pub fn direction(&self) -> Direction {
+        self.direction
+    }
+
     /// Returns a reference to a specific series by index.
     pub fn series(&self, index: usize) -> Option<&Series> {
         self.series.get(index)
@@ -356,6 +419,26 @@ impl Bars {
             .with_kind(Kind::ScalarAnchored)
             .with_ticks(axis::tick::Ticks::continuous())
     }
+
+    /// Creates axes appropriate for the given direction.
+    ///
+    /// For vertical bars: categorical x-axis, scalar y-axis (default).
+    /// For horizontal bars: scalar x-axis (values), categorical y-axis (categories).
+    pub fn axes(direction: Direction) -> (Axis, Axis) {
+        match direction {
+            Direction::Vertical => (Self::x_axis(), Self::y_axis()),
+            Direction::Horizontal => (
+                // x becomes scalar (values), y becomes categorical (categories)
+                Axis::new(Orientation::Bottom)
+                    .with_kind(Kind::ScalarAnchored)
+                    .with_ticks(axis::tick::Ticks::continuous()),
+                Axis::new(Orientation::Left)
+                    .with_kind(Kind::Categorical)
+                    .labels(Placement::OnTicks)
+                    .with_ticks(axis::tick::Ticks::categorical()),
+            ),
+        }
+    }
 }
 
 impl From<Bars> for crate::Data {
@@ -367,8 +450,6 @@ impl From<Bars> for crate::Data {
 
 impl<const N: usize> From<[Bars; N]> for crate::Data {
     fn from(bars: [Bars; N]) -> Self {
-        crate::Data::from(
-            bars.into_iter().map(crate::Mark::Bars).collect::<Vec<_>>(),
-        )
+        crate::Data::from(bars.into_iter().map(crate::Mark::Bars).collect::<Vec<_>>())
     }
 }

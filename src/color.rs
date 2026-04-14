@@ -64,10 +64,7 @@ pub struct Pair {
 
 impl Pair {
     /// Create a new color pair.
-    pub const fn new(
-        on_light: crate::core::Color,
-        on_dark: crate::core::Color,
-    ) -> Self {
+    pub const fn new(on_light: crate::core::Color, on_dark: crate::core::Color) -> Self {
         Self { on_light, on_dark }
     }
 
@@ -101,11 +98,7 @@ impl Pair {
     /// // Label inside bar - use chart background as fallback
     /// let label_color = text_pair.resolve(bar_color, Some(chart_background));
     /// ```
-    pub fn resolve(
-        self,
-        background: crate::core::Color,
-        fallback: Option<crate::core::Color>,
-    ) -> crate::core::Color {
+    pub fn resolve(self, background: crate::core::Color, fallback: Option<crate::core::Color>) -> crate::core::Color {
         // Calculate contrast for both pair options
         let contrast_light = background.relative_contrast(self.on_light);
         let contrast_dark = background.relative_contrast(self.on_dark);
@@ -113,14 +106,10 @@ impl Pair {
 
         // If we have a fallback, prefer it if it's competitive
         if let Some(fallback_color) = fallback {
-            let fallback_contrast =
-                background.relative_contrast(fallback_color);
+            let fallback_contrast = background.relative_contrast(fallback_color);
             // Use fallback if it's good enough (>= 2.5) AND competitive with the best pair option
             // "Competitive" means within 80% of the best, or if best is poor (<3.0), fallback is decent (>2.5)
-            if fallback_contrast >= 2.5
-                && (fallback_contrast >= best_pair_contrast * 0.8
-                    || best_pair_contrast < 3.0)
-            {
+            if fallback_contrast >= 2.5 && (fallback_contrast >= best_pair_contrast * 0.8 || best_pair_contrast < 3.0) {
                 return fallback_color;
             }
         }
@@ -176,10 +165,7 @@ impl Color {
     }
 
     /// Creates an adaptive color from a custom light/dark pair.
-    pub const fn contrast(
-        on_light: crate::core::Color,
-        on_dark: crate::core::Color,
-    ) -> Self {
+    pub const fn contrast(on_light: crate::core::Color, on_dark: crate::core::Color) -> Self {
         Color::Contrast(Some(Pair::new(on_light, on_dark)))
     }
 
@@ -193,8 +179,7 @@ impl Color {
     pub const WHITE: Color = Color::Fixed(crate::core::Color::WHITE);
 
     /// A color with no opacity.
-    pub const TRANSPARENT: Color =
-        Color::Fixed(crate::core::Color::TRANSPARENT);
+    pub const TRANSPARENT: Color = Color::Fixed(crate::core::Color::TRANSPARENT);
 
     /// Resolve this color to a concrete iced Color given a background and design pair.
     /// Optionally provide a fallback color to use if the pair options have poor contrast.
@@ -234,9 +219,7 @@ impl Color {
     /// The effect is very, very subtle. Hue and chroma are preserved using perceptually uniform HCL color space.
     pub fn faded(self) -> Color {
         match self {
-            Color::Fixed(c) => {
-                Color::Fixed(adjust_lightness_hcl(c, false, 3.0))
-            }
+            Color::Fixed(c) => Color::Fixed(adjust_lightness_hcl(c, false, 3.0)),
             Color::Contrast(Some(pair)) => Color::Contrast(Some(Pair::new(
                 adjust_lightness_hcl(pair.on_light, false, 3.0),
                 adjust_lightness_hcl(pair.on_dark, false, 3.0),
@@ -283,21 +266,14 @@ pub fn faded(color: crate::core::Color) -> crate::core::Color {
 /// * `color` - The color to adjust
 /// * `crisp` - True to increase contrast, false to decrease contrast
 /// * `intensity` - How much to adjust lightness (on 0-100 scale). Typical values: 1-10
-fn adjust_lightness_hcl(
-    color: crate::core::Color,
-    crisp: bool,
-    intensity: f32,
-) -> crate::core::Color {
+fn adjust_lightness_hcl(color: crate::core::Color, crisp: bool, intensity: f32) -> crate::core::Color {
     // Convert RGB -> Linear RGB -> XYZ -> LAB -> LCH (HCL)
     let linear = color.into_linear();
 
     // Linear RGB to XYZ (D65 illuminant)
-    let x =
-        0.4124564 * linear[0] + 0.3575761 * linear[1] + 0.1804375 * linear[2];
-    let y =
-        0.2126729 * linear[0] + 0.7151522 * linear[1] + 0.0721750 * linear[2];
-    let z =
-        0.0193339 * linear[0] + 0.119_192 * linear[1] + 0.9503041 * linear[2];
+    let x = 0.4124564 * linear[0] + 0.3575761 * linear[1] + 0.1804375 * linear[2];
+    let y = 0.2126729 * linear[0] + 0.7151522 * linear[1] + 0.0721750 * linear[2];
+    let z = 0.0193339 * linear[0] + 0.119_192 * linear[1] + 0.9503041 * linear[2];
 
     // XYZ to LAB (D65 white point: 0.95047, 1.0, 1.08883)
     let f = |t: f32| {
@@ -363,12 +339,7 @@ fn adjust_lightness_hcl(
     let lb = 0.0556434 * x2 - 0.2040259 * y2 + 1.0572252 * z2;
 
     // Linear RGB to sRGB (gamma correction)
-    crate::core::Color::from_linear_rgba(
-        lr.clamp(0.0, 1.0),
-        lg.clamp(0.0, 1.0),
-        lb.clamp(0.0, 1.0),
-        color.a,
-    )
+    crate::core::Color::from_linear_rgba(lr.clamp(0.0, 1.0), lg.clamp(0.0, 1.0), lb.clamp(0.0, 1.0), color.a)
 }
 
 /// Invert the brightness/lightness of a color while preserving hue and saturation.
@@ -396,9 +367,7 @@ fn adjust_lightness_hcl(
 ///
 /// The resulting color may not always provide perfect contrast with all backgrounds.
 /// Use [`Pair::resolve()`] to automatically select the best option based on actual contrast.
-pub const fn invert_brightness(
-    color: crate::core::Color,
-) -> crate::core::Color {
+pub const fn invert_brightness(color: crate::core::Color) -> crate::core::Color {
     let (h, s, l) = rgb_to_hsl(color.r, color.g, color.b);
 
     // Invert lightness

@@ -1,0 +1,6 @@
+module = "icon"
+
+[icons]
+sun        = "sun"
+moon       = "moon"
+arrow_left = "arrow-left"

@@ -1,12 +1,19 @@
 pub mod area;
 pub mod axis;
 pub mod datum;
+pub mod legend;
 pub mod mark;
+pub mod tooltip;
 
 pub use area::Area;
 pub use axis::{Axis, Orientation};
 pub use datum::{Datum, IntoDatums};
-pub use mark::{Bars, Line, Mark, bar, bars, line};
+pub use mark::{
+    Band, Bars, BoxPlot, BubbleMap, Choropleth, ChoroplethEntry, Gauge, Heatmap, LegendEntry, Line, MapPoint, Mark,
+    Pie, Rule, Treemap, Violin, Waterfall, Xy, areas, band, bar, bars, boxplot, bubble_map, choropleth,
+    choropleth_entry, entry, entry_from_data, gauge, heatmap, line, map_point, pie, rule, treemap, violin,
+    violin_entry, violin_from_data, waterfall, xy,
+};
 
 /// Trait for types that can be converted into chart Data.
 ///
@@ -35,16 +42,48 @@ pub struct Data {
 
     /// Optional title
     pub(crate) title: Option<String>,
-    // TODO: Add legend in future
+
+    /// Optional palette strategy override
+    pub(crate) palette: Option<crate::palette::Palette>,
+
+    /// Currently selected chart element
+    pub(crate) selection: Option<crate::target::Target>,
+
+    /// Optional legend configuration
+    pub(crate) legend: Option<legend::Legend>,
+
+    /// Optional tooltip configuration
+    pub(crate) tooltip: Option<tooltip::Tooltip>,
+}
+
+/// Returns the default axis pair for a given mark type.
+fn axes_for_mark(mark: &Mark) -> (Option<Axis>, Option<Axis>) {
+    match mark {
+        Mark::Area(_) => (Some(mark::Area::x_axis()), Some(mark::Area::y_axis())),
+        Mark::Bars(bars) => {
+            let (x, y) = Bars::axes(bars.direction());
+            (Some(x), Some(y))
+        }
+        Mark::BoxPlot(bp) => (Some(bp.x_axis()), Some(bp.y_axis())),
+        Mark::Line(_) => (Some(Line::x_axis()), Some(Line::y_axis())),
+        Mark::BubbleMap(_) => (BubbleMap::x_axis(), BubbleMap::y_axis()),
+        Mark::Choropleth(_) => (Choropleth::x_axis(), Choropleth::y_axis()),
+        Mark::Pie(_) => (Pie::x_axis(), Pie::y_axis()),
+        Mark::Gauge(_) => (Gauge::x_axis(), Gauge::y_axis()),
+        Mark::Treemap(_) => (Treemap::x_axis(), Treemap::y_axis()),
+        Mark::Waterfall(_) => (Some(Waterfall::x_axis()), Some(Waterfall::y_axis())),
+        Mark::Xy(_) => (Some(Xy::x_axis()), Some(Xy::y_axis())),
+        Mark::Violin(v) => (Some(v.x_axis()), Some(v.y_axis())),
+        Mark::Rule(_) => (Rule::x_axis(), Rule::y_axis()),
+        Mark::Band(_) => (mark::band::Band::x_axis(), mark::band::Band::y_axis()),
+        Mark::Tick(_) => (mark::tick::Tick::x_axis(), mark::tick::Tick::y_axis()),
+        Mark::Heatmap(hm) => (Some(hm.x_axis()), Some(hm.y_axis())),
+    }
 }
 
 impl From<Mark> for Area {
     fn from(mark: Mark) -> Self {
-        // Configure axes based on mark type using the mark's factory methods
-        let (x_axis, y_axis) = match &mark {
-            Mark::Bars(_) => (Some(Bars::x_axis()), Some(Bars::y_axis())),
-            Mark::Line(_) => (Some(Line::x_axis()), Some(Line::y_axis())),
-        };
+        let (x_axis, y_axis) = axes_for_mark(&mark);
 
         Self {
             marks: vec![mark],
@@ -60,18 +99,15 @@ impl From<Vec<Mark>> for Area {
             return Self::empty();
         }
 
-        // Configure axes based on first mark type using mark factory methods
-        let (x_axis, y_axis) = match marks.first() {
-            Some(Mark::Bars(_)) => (Some(Bars::x_axis()), Some(Bars::y_axis())),
-            Some(Mark::Line(_)) => (Some(Line::x_axis()), Some(Line::y_axis())),
-            None => (None, None), // shouldn't happen
-        };
+        // Configure axes based on first non-Rule mark (rules inherit axes)
+        let (x_axis, y_axis) = marks
+            .iter()
+            .find(|m| !matches!(m, Mark::Rule(_) | Mark::Band(_) | Mark::Tick(_)))
+            .or(marks.first())
+            .map(axes_for_mark)
+            .unwrap_or((None, None));
 
-        Self {
-            marks,
-            x_axis,
-            y_axis,
-        }
+        Self { marks, x_axis, y_axis }
     }
 }
 
@@ -81,11 +117,27 @@ impl IntoData for Mark {
             primary: Area::from(self),
             secondary: Area::empty(),
             title: None,
+            palette: None,
+            selection: None,
+            legend: None,
+            tooltip: None,
         }
     }
 }
 
+impl IntoData for mark::Area {
+    fn into_data(self) -> Data {
+        Mark::from(self).into_data()
+    }
+}
+
 impl IntoData for Bars {
+    fn into_data(self) -> Data {
+        Mark::from(self).into_data()
+    }
+}
+
+impl IntoData for BoxPlot {
     fn into_data(self) -> Data {
         Mark::from(self).into_data()
     }
@@ -97,12 +149,70 @@ impl IntoData for Line {
     }
 }
 
+impl IntoData for Pie {
+    fn into_data(self) -> Data {
+        Mark::from(self).into_data()
+    }
+}
+
+impl IntoData for Gauge {
+    fn into_data(self) -> Data {
+        Mark::from(self).into_data()
+    }
+}
+
+impl IntoData for Waterfall {
+    fn into_data(self) -> Data {
+        Mark::from(self).into_data()
+    }
+}
+
+impl IntoData for Xy {
+    fn into_data(self) -> Data {
+        Mark::from(self).into_data()
+    }
+}
+
+impl IntoData for Heatmap {
+    fn into_data(self) -> Data {
+        Mark::from(self).into_data()
+    }
+}
+
+impl IntoData for Treemap {
+    fn into_data(self) -> Data {
+        Mark::from(self).into_data()
+    }
+}
+
+impl IntoData for Violin {
+    fn into_data(self) -> Data {
+        Mark::from(self).into_data()
+    }
+}
+
+impl IntoData for BubbleMap {
+    fn into_data(self) -> Data {
+        Mark::from(self).into_data()
+    }
+}
+
+impl IntoData for Choropleth {
+    fn into_data(self) -> Data {
+        Mark::from(self).into_data()
+    }
+}
+
 impl IntoData for Vec<Mark> {
     fn into_data(self) -> Data {
         Data {
             primary: Area::from(self),
             secondary: Area::empty(),
             title: None,
+            palette: None,
+            selection: None,
+            legend: None,
+            tooltip: None,
         }
     }
 }
@@ -200,13 +310,8 @@ impl Data {
     /// // Pin lower bound at 0, auto-scale upper
     /// Data::from(line).x_axis_bounds(0.0, None)
     /// ```
-    pub fn x_axis_bounds(
-        mut self,
-        lower: impl Into<Option<f64>>,
-        upper: impl Into<Option<f64>>,
-    ) -> Self {
-        self.primary =
-            self.primary.x_axis(|axis| axis.with_bounds(lower, upper));
+    pub fn x_axis_bounds(mut self, lower: impl Into<Option<f64>>, upper: impl Into<Option<f64>>) -> Self {
+        self.primary = self.primary.x_axis(|axis| axis.with_bounds(lower, upper));
         self
     }
 
@@ -225,14 +330,53 @@ impl Data {
     /// // Pin lower bound at 0, auto-scale upper
     /// Data::from(line).y_axis_bounds(0.0, None)
     /// ```
-    pub fn y_axis_bounds(
-        mut self,
-        lower: impl Into<Option<f64>>,
-        upper: impl Into<Option<f64>>,
-    ) -> Self {
-        self.primary =
-            self.primary.y_axis(|axis| axis.with_bounds(lower, upper));
+    pub fn y_axis_bounds(mut self, lower: impl Into<Option<f64>>, upper: impl Into<Option<f64>>) -> Self {
+        self.primary = self.primary.y_axis(|axis| axis.with_bounds(lower, upper));
         self
+    }
+
+    /// Sets the palette strategy for this chart.
+    pub fn palette(mut self, palette: crate::palette::Palette) -> Self {
+        self.palette = Some(palette);
+        self
+    }
+
+    /// Configures the chart legend.
+    ///
+    /// ```
+    /// # use hyozu::{data, line, LegendPosition, LegendConfig};
+    /// // Short form — just position
+    /// data(line("Revenue", [(0, 10)])).legend(LegendPosition::Below);
+    ///
+    /// // Detailed form — builder
+    /// data(line("Revenue", [(0, 10)])).legend(LegendConfig::below().font_size(10.0));
+    /// ```
+    pub fn legend(mut self, legend: impl Into<legend::Legend>) -> Self {
+        self.legend = Some(legend.into());
+        self
+    }
+
+    /// Enables tooltips on the chart.
+    ///
+    /// Accepts a `Tooltip` directly or a closure `Fn(&TooltipEntry) -> String`
+    /// thanks to the `From` impl.
+    ///
+    /// # Examples
+    /// ```ignore
+    /// // Default tooltip (name: value)
+    /// data(line("Revenue", [(0, 10)])).tooltip(Tooltip::default())
+    ///
+    /// // Custom format
+    /// data(line("Revenue", [(0, 10)])).tooltip(|e: &TooltipEntry| format!("${:.2}", e.y))
+    /// ```
+    pub fn tooltip(mut self, tooltip: impl Into<tooltip::Tooltip>) -> Self {
+        self.tooltip = Some(tooltip.into());
+        self
+    }
+
+    /// Returns the current palette override, if any.
+    pub fn get_palette(&self) -> Option<&crate::palette::Palette> {
+        self.palette.as_ref()
     }
 
     /// Returns a reference to the marks in the primary area.
@@ -252,6 +396,72 @@ impl Data {
         &self.primary
     }
 
+    /// Returns a reference to the secondary plotting area.
+    pub fn secondary_area(&self) -> &Area {
+        &self.secondary
+    }
+
+    /// Appends marks to the secondary (top/right) axis area.
+    ///
+    /// By default the secondary area has no axes; call [`Data::right_axis`]
+    /// or [`Data::top_axis`] to configure them. Any marks whose default axis
+    /// pair is numeric (e.g. lines, areas, bars) will work out of the box
+    /// with a default right axis.
+    pub fn secondary(mut self, marks: impl Into<Vec<Mark>>) -> Self {
+        let mut new_marks = marks.into();
+        // Auto-configure only the right (secondary Y) axis. We do *not*
+        // auto-create a top X axis: in the Excel-style dual-axis case
+        // the x dimension is shared between primary and secondary, so
+        // the bottom x axis is enough and a duplicate top axis would
+        // just add noise. If a caller genuinely wants a separate top x
+        // axis (different x dimension for the secondary marks), they
+        // opt in explicitly via `.top_axis(|a| ...)` and take
+        // responsibility for its labels.
+        //
+        // When `top_axis` is `None`, `Scene::layout` falls back to the
+        // primary x bounds for the secondary plane, so secondary marks
+        // still plot against the same x range as the primary marks.
+        if self.secondary.y_axis.is_none() {
+            let (_, auto_y) = new_marks
+                .iter()
+                .find(|m| !matches!(m, Mark::Rule(_) | Mark::Band(_) | Mark::Tick(_)))
+                .or(new_marks.first())
+                .map(axes_for_mark)
+                .unwrap_or((None, None));
+            self.secondary.y_axis = auto_y.map(|a| a.with_orientation(Orientation::Right));
+        }
+        self.secondary.marks.append(&mut new_marks);
+        self
+    }
+
+    /// Configure the right (secondary Y) axis.
+    ///
+    /// Initializes the axis to a default `Kind::Scalar` oriented on the right
+    /// side if it hasn't been set yet, then applies `f` to it.
+    pub fn right_axis(mut self, f: impl FnOnce(Axis) -> Axis) -> Self {
+        let base = self
+            .secondary
+            .y_axis
+            .take()
+            .unwrap_or_else(|| Axis::new(Orientation::Right).with_kind(axis::Kind::Scalar));
+        self.secondary.y_axis = Some(f(base));
+        self
+    }
+
+    /// Configure the top (secondary X) axis.
+    ///
+    /// Initializes the axis to a default `Kind::Scalar` oriented on the top
+    /// edge if it hasn't been set yet, then applies `f` to it.
+    pub fn top_axis(mut self, f: impl FnOnce(Axis) -> Axis) -> Self {
+        let base = self
+            .secondary
+            .x_axis
+            .take()
+            .unwrap_or_else(|| Axis::new(Orientation::Top).with_kind(axis::Kind::Scalar));
+        self.secondary.x_axis = Some(f(base));
+        self
+    }
+
     /// Returns a reference to the title.
     pub fn get_title(&self) -> Option<&str> {
         self.title.as_deref()
@@ -265,6 +475,11 @@ impl Data {
     /// Returns a reference to a line mark by index.
     pub fn line(&self, index: usize) -> Option<&Line> {
         self.primary.line(index)
+    }
+
+    /// Returns a reference to a pie mark by index.
+    pub fn pie(&self, index: usize) -> Option<&Pie> {
+        self.primary.pie(index)
     }
 
     /// Returns a reference to the X axis.
@@ -296,6 +511,23 @@ impl Data {
     pub fn y_axis_mut(&mut self) -> Option<&mut Axis> {
         self.primary.y_axis_mut()
     }
+
+    // === Selection ===
+
+    /// Returns the current selection target.
+    pub fn selection(&self) -> Option<&crate::target::Target> {
+        self.selection.as_ref()
+    }
+
+    /// Sets the selection to a target.
+    pub fn select(&mut self, target: crate::target::Target) {
+        self.selection = Some(target);
+    }
+
+    /// Clears the selection.
+    pub fn deselect(&mut self) {
+        self.selection = None;
+    }
 }
 
 /// Actions that can be performed on chart data.
@@ -305,6 +537,8 @@ impl Data {
 pub enum Action {
     /// Set a property on a chart item.
     Set(crate::item::Item),
+    /// A chart element was clicked.
+    Clicked(crate::target::Target),
 }
 
 impl Data {
@@ -319,18 +553,59 @@ impl Data {
                 Item::Title(title) => {
                     self.title = Some(title);
                 }
+                Item::Area(index, property) => {
+                    if let Some(Mark::Area(area)) = self.primary.marks.get_mut(index) {
+                        property.apply(area);
+                    }
+                }
                 Item::Bars(index, property) => {
-                    if let Some(Mark::Bars(bars)) =
-                        self.primary.marks.get_mut(index)
-                    {
+                    if let Some(Mark::Bars(bars)) = self.primary.marks.get_mut(index) {
                         property.apply(bars);
                     }
                 }
+                Item::BoxPlot(index, property) => {
+                    if let Some(Mark::BoxPlot(bp)) = self.primary.marks.get_mut(index) {
+                        property.apply(bp);
+                    }
+                }
                 Item::Line(index, property) => {
-                    if let Some(Mark::Line(line)) =
-                        self.primary.marks.get_mut(index)
-                    {
+                    if let Some(Mark::Line(line)) = self.primary.marks.get_mut(index) {
                         property.apply(line);
+                    }
+                }
+                Item::Pie(index, property) => {
+                    if let Some(Mark::Pie(pie)) = self.primary.marks.get_mut(index) {
+                        property.apply(pie);
+                    }
+                }
+                Item::Gauge(index, property) => {
+                    if let Some(Mark::Gauge(gauge)) = self.primary.marks.get_mut(index) {
+                        property.apply(gauge);
+                    }
+                }
+                Item::Waterfall(index, property) => {
+                    if let Some(Mark::Waterfall(wf)) = self.primary.marks.get_mut(index) {
+                        property.apply(wf);
+                    }
+                }
+                Item::Xy(index, property) => {
+                    if let Some(Mark::Xy(xy)) = self.primary.marks.get_mut(index) {
+                        property.apply(xy);
+                    }
+                }
+                Item::Rule(index, property) => {
+                    if let Some(Mark::Rule(rule)) = self.primary.marks.get_mut(index) {
+                        property.apply(rule);
+                    }
+                }
+                Item::Heatmap(index, property) => {
+                    if let Some(Mark::Heatmap(hm)) = self.primary.marks.get_mut(index) {
+                        property.apply(hm);
+                    }
+                }
+                Item::Violin(index, property) => {
+                    if let Some(Mark::Violin(violin)) = self.primary.marks.get_mut(index) {
+                        property.apply(violin);
                     }
                 }
                 Item::XAxis(property) => {
@@ -343,7 +618,17 @@ impl Data {
                         property.apply(axis);
                     }
                 }
+                Item::Palette(palette) => {
+                    self.palette = Some(palette);
+                }
+                Item::Selection(target) => {
+                    self.selection = target;
+                }
             },
+            Action::Clicked(_) => {
+                // Clicked actions are reported to the application via on_action.
+                // The application decides how to handle them (e.g., update selection).
+            }
         }
     }
 }
@@ -377,10 +662,9 @@ mod tests {
 
     #[test]
     fn test_data_title_chainable() {
-        let data =
-            vec![Mark::Bars(bars([100, 200])), Mark::Bars(bars([300, 400]))]
-                .into_data()
-                .title("Multi-Series Chart");
+        let data = vec![Mark::Bars(bars([100, 200])), Mark::Bars(bars([300, 400]))]
+            .into_data()
+            .title("Multi-Series Chart");
 
         assert_eq!(data.primary.marks.len(), 2);
         assert_eq!(data.title, Some("Multi-Series Chart".to_string()));

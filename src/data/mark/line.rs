@@ -23,6 +23,23 @@ impl<T: IntoDatums> IntoLines for T {
     }
 }
 
+/// Dash pattern for a line.
+///
+/// Patterns other than `Solid` are rendered using the underlying iced
+/// `Stroke::line_dash` field.
+#[derive(Debug, Clone, Default)]
+pub enum LineStyle {
+    /// Solid, continuous line (default).
+    #[default]
+    Solid,
+    /// Dashed pattern (`[8.0, 4.0]`).
+    Dashed,
+    /// Dotted pattern (`[1.0, 3.0]` with round caps for a dot look).
+    Dotted,
+    /// User-provided dash segments (alternating lengths of lines and gaps).
+    Custom { segments: Vec<f32> },
+}
+
 /// Line chart specification.
 #[derive(Debug, Clone)]
 pub struct Line {
@@ -33,6 +50,10 @@ pub struct Line {
     pub(crate) label: Option<label::Label>,
     /// Marker configuration
     pub(crate) marker: Option<marker::Marker>,
+    /// Optional name for this line (used in legends).
+    pub(crate) name: Option<String>,
+    /// Dash pattern for the line stroke.
+    pub(crate) style: LineStyle,
 }
 
 /// Creates a line chart mark from data points.
@@ -60,6 +81,8 @@ pub fn line(data: impl IntoDatums) -> Line {
         width: 2.0,
         label: None,
         marker: None,
+        name: None,
+        style: LineStyle::Solid,
     }
 }
 
@@ -107,11 +130,25 @@ impl Line {
         self
     }
 
+    /// Sets the dash pattern for this line.
+    pub fn style(mut self, style: LineStyle) -> Self {
+        self.style = style;
+        self
+    }
+
+    /// Sets the name for this line (used in legends).
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+
+    /// Returns the name of this line.
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+
     /// Configure data labels for the line points.
-    pub fn data_labels(
-        mut self,
-        label: impl Into<Option<label::Label>>,
-    ) -> Self {
+    pub fn data_labels(mut self, label: impl Into<Option<label::Label>>) -> Self {
         self.label = label.into();
         self
     }
@@ -135,10 +172,7 @@ impl Line {
     /// // Only first and last with diamond markers
     /// let mark = line([1, 2, 3, 4]).markers(Shape::Diamond + Show::FirstAndLast);
     /// ```
-    pub fn markers(
-        mut self,
-        marker: impl Into<Option<marker::Marker>>,
-    ) -> Self {
+    pub fn markers(mut self, marker: impl Into<Option<marker::Marker>>) -> Self {
         self.marker = marker.into();
         self
     }
@@ -197,8 +231,6 @@ impl From<Line> for crate::Data {
 
 impl<const N: usize> From<[Line; N]> for crate::Data {
     fn from(lines: [Line; N]) -> Self {
-        crate::Data::from(
-            lines.into_iter().map(crate::Mark::Line).collect::<Vec<_>>(),
-        )
+        crate::Data::from(lines.into_iter().map(crate::Mark::Line).collect::<Vec<_>>())
     }
 }
