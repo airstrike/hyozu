@@ -14,8 +14,12 @@ pub enum Palette {
     /// don't carry a meaningful single hue and fall back to the theme's
     /// primary at resolve time.
     Sequential(Color),
-    /// Interpolate between 2+ color stops in OKLch.
-    Gradient(Vec<crate::core::Color>),
+    /// Interpolate between 2+ color stops in OKLch. Each stop can be a
+    /// fixed RGB value or a semantic seed reference (e.g.
+    /// `[Color::Success, Color::Danger]` interpolates from the theme's
+    /// success hue to its danger hue). Resolved against the design seed
+    /// at draw time so theme changes flow through automatically.
+    Gradient(Vec<Color>),
 }
 
 impl Palette {
@@ -41,7 +45,7 @@ impl Palette {
 /// let p = palette::sequential(Color::Success);
 ///
 /// // Explicit hex (via `From<u32> for Color`)
-/// let p = palette::sequential(0x35_70_B0_u32);
+/// let p = palette::sequential(0x3570B0);
 /// ```
 pub fn sequential(hue: impl Into<Color>) -> Palette {
     Palette::Sequential(hue.into())
@@ -68,6 +72,37 @@ pub fn categorical() -> Palette {
     Palette::Categorical
 }
 
+/// Convenience constructor for [`Palette::Gradient`]. Accepts any iterable
+/// of values that convert into [`Color`], so semantic seed slots, fixed
+/// RGB, hex `u32`, and adaptive `Pair`s all flow through naturally.
+///
+/// Stops are interpolated in OKLch at draw time; semantic variants like
+/// [`Color::Success`] are resolved against the active theme's seed, so a
+/// `[Color::Success, Color::Danger]` gradient automatically tracks
+/// theme changes.
+///
+/// # Examples
+///
+/// ```
+/// use hyozu::{palette, Color};
+///
+/// // Theme-driven semantic gradient — success → danger
+/// let p = palette::gradient([Color::Success, Color::Danger]);
+///
+/// // Explicit hex stops via `From<u32> for Color`
+/// let p = palette::gradient([0xff0000, 0xffff00, 0x00ff00]);
+///
+/// // Mix-and-match (semantic + hex)
+/// let p = palette::gradient([Color::from(0xffffff2), Color::Primary]);
+/// ```
+pub fn gradient<I, C>(stops: I) -> Palette
+where
+    I: IntoIterator<Item = C>,
+    C: Into<Color>,
+{
+    Palette::Gradient(stops.into_iter().map(Into::into).collect())
+}
+
 /// Seed colors extracted from a theme, used to generate palettes.
 #[derive(Debug, Clone, Copy)]
 pub struct PaletteSeed {
@@ -92,10 +127,10 @@ impl Resolved {
         let colors = match palette {
             Palette::Categorical => generate_categorical(seed, n),
             Palette::Sequential(source) => {
-                let hue = sequential_hue(source, seed);
+                let hue = source.resolve_seed(seed);
                 generate_sequential(hue, seed.background, n)
             }
-            Palette::Gradient(stops) => generate_gradient(stops, n),
+            Palette::Gradient(stops) => generate_gradient(stops, seed, n),
         };
         Self { colors }
     }
@@ -171,23 +206,6 @@ impl Palette {
 
         // Multiple marks: use categorical for distinct series
         Palette::Categorical
-    }
-}
-
-/// Resolve a [`Color`] reference to a concrete RGB hue source for
-/// sequential palette generation. Only the `Fixed` and semantic seed
-/// variants make sense here; adaptive `Contrast` falls back to
-/// `seed.primary` because there's no meaningful single-hue interpretation
-/// of a contrast pair.
-fn sequential_hue(source: &Color, seed: &PaletteSeed) -> crate::core::Color {
-    match source {
-        Color::Fixed(c) => *c,
-        Color::Primary => seed.primary,
-        Color::Secondary => seed.secondary,
-        Color::Success => seed.success,
-        Color::Warning => seed.warning,
-        Color::Danger => seed.danger,
-        Color::Contrast(_) => seed.primary,
     }
 }
 
@@ -385,18 +403,23 @@ pub(crate) fn sample_gradient(stops: &[crate::core::Color], t: f32) -> crate::co
 }
 
 /// Generate gradient colors: interpolate between stops in OKLch.
-fn generate_gradient(stops: &[crate::core::Color], n: usize) -> Vec<Color> {
+///
+/// Stops are wrapper [`Color`]s — semantic seed slots are resolved
+/// through `seed`, and adaptive `Contrast` stops fall back to
+/// `seed.primary` (same rule as [`Color::resolve_seed`]).
+fn generate_gradient(stops: &[Color], seed: &PaletteSeed, n: usize) -> Vec<Color> {
     if stops.is_empty() {
         return vec![Color::Fixed(crate::core::Color::BLACK); n];
     }
-    if stops.len() == 1 || n == 1 {
-        return vec![Color::Fixed(stops[0]); n];
+    let resolved: Vec<crate::core::Color> = stops.iter().map(|c| c.resolve_seed(seed)).collect();
+    if resolved.len() == 1 || n == 1 {
+        return vec![Color::Fixed(resolved[0]); n];
     }
 
     (0..n)
         .map(|i| {
             let t = i as f32 / (n - 1).max(1) as f32;
-            Color::Fixed(sample_gradient(stops, t))
+            Color::Fixed(sample_gradient(&resolved, t))
         })
         .collect()
 }
@@ -513,12 +536,34 @@ mod tests {
 
     #[test]
     fn gradient_2_stops_3_samples() {
+        let seed = test_seed();
         let stops = vec![
-            crate::core::Color::from_rgb(1.0, 0.0, 0.0),
-            crate::core::Color::from_rgb(0.0, 0.0, 1.0),
+            Color::Fixed(crate::core::Color::from_rgb(1.0, 0.0, 0.0)),
+            Color::Fixed(crate::core::Color::from_rgb(0.0, 0.0, 1.0)),
         ];
-        let colors = generate_gradient(&stops, 3);
+        let colors = generate_gradient(&stops, &seed, 3);
         assert_eq!(colors.len(), 3);
+    }
+
+    #[test]
+    fn gradient_resolves_semantic_stops_through_seed() {
+        // A gradient with semantic stops should produce N colors and the
+        // endpoints should match the seed slot values (modulo the conversion
+        // through the `Color::Fixed` wrapping done by `generate_gradient`).
+        let seed = test_seed();
+        let stops = vec![Color::Success, Color::Danger];
+        let colors = generate_gradient(&stops, &seed, 5);
+        assert_eq!(colors.len(), 5);
+        // First slot should be exactly the success color.
+        let Color::Fixed(first) = colors[0] else {
+            panic!("expected Fixed color");
+        };
+        assert_eq!(first, seed.success);
+        // Last slot should be exactly the danger color.
+        let Color::Fixed(last) = colors[4] else {
+            panic!("expected Fixed color");
+        };
+        assert_eq!(last, seed.danger);
     }
 
     #[test]

@@ -232,6 +232,29 @@ impl Color {
         }
     }
 
+    /// Resolve this color to a concrete iced Color using only the design
+    /// seed.
+    ///
+    /// Useful for contexts that don't have a background or text pair to
+    /// adapt against — palette generation, gradient stops, anywhere a
+    /// "give me the brand color this name refers to" lookup makes sense
+    /// without a foreground/background story.
+    ///
+    /// Adaptive [`Color::Contrast`] variants don't carry a single-hue
+    /// interpretation in this context, so they fall back to
+    /// [`PaletteSeed::primary`].
+    pub fn resolve_seed(self, seed: &crate::palette::PaletteSeed) -> crate::core::Color {
+        match self {
+            Color::Fixed(c) => c,
+            Color::Primary => seed.primary,
+            Color::Secondary => seed.secondary,
+            Color::Success => seed.success,
+            Color::Warning => seed.warning,
+            Color::Danger => seed.danger,
+            Color::Contrast(_) => seed.primary,
+        }
+    }
+
     /// Crisper version of the color. Light colors are darkened, dark colors are lightened.
     /// The effect is very, very subtle. Hue and chroma are preserved using perceptually uniform HCL color space.
     ///
