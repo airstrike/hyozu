@@ -4,7 +4,7 @@ use crate::core::{Font, Pixels};
 pub mod label;
 pub mod tick;
 
-pub use label::{Labels, Placement};
+pub use label::{Labels, Placement, TextAlign};
 pub use tick::{Alignment, Ticks};
 
 /// Orientation of an axis relative to the data area.
@@ -210,16 +210,33 @@ pub struct Axis {
     show_line: bool,
     show_labels: bool,
     show_grid: bool,
+    show_minor_grid: bool,
 
     // Style overrides
     axis_color: Option<Color>,
     label_color: Option<Color>,
     grid_color: Option<Color>,
+    minor_grid_color: Option<Color>,
     font: Option<Font>,
     label_size: Option<Pixels>,
 }
 
 impl Axis {
+    /// Hides all visual elements of this axis while preserving its kind
+    /// and bounds computation.
+    ///
+    /// Disables the axis line, labels, ticks, and grid lines so the axis
+    /// allocates no space, but the data range is still computed correctly
+    /// (e.g. `ScalarAnchored` for bars, `Scalar` for lines).
+    pub fn none(mut self) -> Self {
+        self.show_line = false;
+        self.show_labels = false;
+        self.show_grid = false;
+        self.show_minor_grid = false;
+        self.ticks = tick::Style::None.into();
+        self
+    }
+
     /// Create a new axis with the given orientation.
     ///
     /// All styling is optional and will fallback to the design system if not specified.
@@ -235,9 +252,11 @@ impl Axis {
             show_line: true,
             show_labels: true,
             show_grid: true,
+            show_minor_grid: false,
             axis_color: None,
             label_color: None,
             grid_color: None,
+            minor_grid_color: None,
             font: None,
             label_size: None,
         }
@@ -246,6 +265,13 @@ impl Axis {
     /// Set the axis kind.
     pub fn with_kind(mut self, kind: Kind) -> Self {
         self.kind = kind;
+        self
+    }
+
+    /// Override the axis orientation (e.g. to flip a default bottom axis to
+    /// the top for use as a secondary axis).
+    pub fn with_orientation(mut self, orientation: Orientation) -> Self {
+        self.orientation = orientation;
         self
     }
 
@@ -286,6 +312,9 @@ impl Axis {
         if new_labels.format.is_some() {
             self.labels.format = new_labels.format;
         }
+        if new_labels.align.is_some() {
+            self.labels.align = new_labels.align;
+        }
         self
     }
 
@@ -294,6 +323,16 @@ impl Axis {
         // Convert to Labels format for backward compatibility
         use std::sync::Arc;
         self.labels.format = Some(Arc::new(format));
+        self
+    }
+
+    /// Set the overflow strategy for labels that exceed their column width.
+    /// Defaults to [`label::Overflow::Ellipsize`]. Pass [`label::Overflow::Wrap`]
+    /// to let labels wrap at word boundaries instead (axis height grows).
+    ///
+    /// Applies to horizontal (bottom/top) axes; vertical axes ignore this.
+    pub fn label_overflow(mut self, overflow: label::Overflow) -> Self {
+        self.labels.overflow = overflow;
         self
     }
 
@@ -321,6 +360,12 @@ impl Axis {
     /// Set the grid line color (overrides design system).
     pub fn with_grid_color(mut self, color: impl Into<Color>) -> Self {
         self.grid_color = Some(color.into());
+        self
+    }
+
+    /// Set the minor grid line color (overrides design system).
+    pub fn with_minor_grid_color(mut self, color: impl Into<Color>) -> Self {
+        self.minor_grid_color = Some(color.into());
         self
     }
 
@@ -356,6 +401,12 @@ impl Axis {
     /// Show or hide grid lines.
     pub fn show_grid(mut self, show: bool) -> Self {
         self.show_grid = show;
+        self
+    }
+
+    /// Show or hide minor grid lines (subdivisions between major ticks).
+    pub fn show_minor_grid(mut self, show: bool) -> Self {
+        self.show_minor_grid = show;
         self
     }
 
@@ -423,6 +474,21 @@ impl Axis {
     /// Returns whether grid lines are shown.
     pub fn shows_grid(&self) -> bool {
         self.show_grid
+    }
+
+    /// Returns whether minor grid lines are shown.
+    pub fn shows_minor_grid(&self) -> bool {
+        self.show_minor_grid
+    }
+
+    /// Get the grid color override, if any.
+    pub(crate) fn grid_color(&self) -> Option<Color> {
+        self.grid_color
+    }
+
+    /// Get the minor grid color override, if any.
+    pub(crate) fn minor_grid_color(&self) -> Option<Color> {
+        self.minor_grid_color
     }
 
     /// Returns a mutable reference to the tick configuration.

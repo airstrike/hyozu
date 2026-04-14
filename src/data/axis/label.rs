@@ -1,5 +1,13 @@
 use std::sync::Arc;
 
+/// Horizontal text alignment for axis labels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextAlign {
+    Left,
+    Center,
+    Right,
+}
+
 /// Placement of labels relative to tick marks.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Placement {
@@ -8,6 +16,26 @@ pub enum Placement {
     /// Labels positioned BETWEEN tick marks (default for bars)
     #[default]
     BetweenTicks,
+}
+
+/// What to do when a label's intrinsic width exceeds its allotted column
+/// (the pixel distance to its nearest neighbor tick).
+///
+/// Applies to horizontal (bottom/top) axis labels. Vertical axis labels are
+/// stacked by row and don't currently collide horizontally — they keep
+/// intrinsic widths regardless of this setting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum Overflow {
+    /// Truncate the last visual line with an ellipsis (`…`) when the label
+    /// exceeds its column width. Axis height is unchanged. This is the
+    /// default: the least surprising behavior for dense dashboards.
+    #[default]
+    Ellipsize,
+    /// Wrap at word boundaries. The axis grows vertically to fit the tallest
+    /// wrapped label. No information loss, but asymmetric wrapping can look
+    /// uneven across columns.
+    Wrap,
 }
 
 /// Axis labels configuration containing placement, values, and formatting
@@ -21,6 +49,12 @@ pub struct Labels {
 
     /// Format function for numeric labels
     pub format: Option<Arc<dyn Fn(f64) -> String + Send + Sync>>,
+
+    /// Text alignment override (defaults: Center for x-axis, Right for y-axis)
+    pub align: Option<TextAlign>,
+
+    /// What to do when a label's intrinsic width exceeds its column.
+    pub overflow: Overflow,
 }
 
 impl std::fmt::Debug for Labels {
@@ -29,6 +63,8 @@ impl std::fmt::Debug for Labels {
             .field("placement", &self.placement)
             .field("values", &self.values)
             .field("format", &self.format.as_ref().map(|_| "<function>"))
+            .field("align", &self.align)
+            .field("overflow", &self.overflow)
             .finish()
     }
 }
@@ -57,6 +93,18 @@ impl Labels {
         F: Fn(f64) -> String + Send + Sync + 'static,
     {
         self.format = Some(Arc::new(format));
+        self
+    }
+
+    /// Set text alignment
+    pub fn with_align(mut self, align: TextAlign) -> Self {
+        self.align = Some(align);
+        self
+    }
+
+    /// Set the overflow strategy for labels that exceed their column width.
+    pub fn with_overflow(mut self, overflow: Overflow) -> Self {
+        self.overflow = overflow;
         self
     }
 
@@ -204,5 +252,24 @@ where
         // Otherwise, this doesn't make sense - you can't transform values that don't exist
         // Just return self unchanged
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn labels_default_overflow_is_ellipsize() {
+        // A fresh Labels config must default to Ellipsize so existing charts
+        // quietly improve (no more silent overflow) without any API change.
+        assert_eq!(Labels::new().overflow, Overflow::Ellipsize);
+        assert_eq!(Labels::default().overflow, Overflow::Ellipsize);
+    }
+
+    #[test]
+    fn labels_with_overflow_builder_sets_field() {
+        let labels = Labels::new().with_overflow(Overflow::Wrap);
+        assert_eq!(labels.overflow, Overflow::Wrap);
     }
 }

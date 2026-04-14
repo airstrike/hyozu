@@ -239,6 +239,9 @@ impl Area {
                 }
                 Mark::Waterfall(wf) => {
                     let mut running: f64 = 0.0;
+                    let mut envelope_min: f64 = f64::INFINITY;
+                    let mut envelope_max: f64 = f64::NEG_INFINITY;
+
                     for (i, entry) in wf.entries.iter().enumerate() {
                         x_min = x_min.min(i as f64);
                         x_max = x_max.max(i as f64);
@@ -250,8 +253,20 @@ impl Area {
                                 running += entry.value;
                             }
                         }
-                        y_min = y_min.min(running).min(0.0);
-                        y_max = y_max.max(running);
+                        envelope_min = envelope_min.min(running);
+                        envelope_max = envelope_max.max(running);
+                    }
+
+                    let envelope_range = envelope_max - envelope_min;
+                    let full_range = envelope_max.max(0.0) - envelope_min.min(0.0);
+
+                    if full_range > 0.0 && envelope_range / full_range < 0.4 {
+                        let padding = envelope_range * 0.5;
+                        y_min = y_min.min(envelope_min - padding);
+                        y_max = y_max.max(envelope_max + padding);
+                    } else {
+                        y_min = y_min.min(envelope_min).min(0.0);
+                        y_max = y_max.max(envelope_max);
                     }
                 }
                 Mark::Xy(xy) => {
@@ -270,6 +285,16 @@ impl Area {
                     crate::mark::rule::RuleOrientation::Vertical => {
                         x_min = x_min.min(rule.value);
                         x_max = x_max.max(rule.value);
+                    }
+                },
+                Mark::Band(band) => match band.orientation {
+                    crate::mark::band::BandOrientation::Horizontal => {
+                        y_min = y_min.min(band.lower);
+                        y_max = y_max.max(band.upper);
+                    }
+                    crate::mark::band::BandOrientation::Vertical => {
+                        x_min = x_min.min(band.lower);
+                        x_max = x_max.max(band.upper);
                     }
                 },
                 Mark::Tick(tick) => {
@@ -344,8 +369,8 @@ impl Area {
                         }
                     }
                 },
-                // Pie and Gauge don't use Cartesian bounds
-                Mark::Pie(_) | Mark::Gauge(_) => {}
+                // Non-Cartesian marks don't contribute bounds
+                Mark::Pie(_) | Mark::Gauge(_) | Mark::Treemap(_) | Mark::BubbleMap(_) | Mark::Choropleth(_) => {}
             }
         }
 
@@ -366,7 +391,7 @@ impl Area {
                     x_min = x_min.min(0.0);
                     break;
                 }
-                Mark::Area(_) | Mark::Bars(_) | Mark::Waterfall(_) => {
+                Mark::Area(_) | Mark::Bars(_) => {
                     y_min = y_min.min(0.0);
                     break;
                 }

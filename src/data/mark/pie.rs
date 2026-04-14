@@ -33,6 +33,41 @@ impl Slice {
         self
     }
 
+    /// Sets the label color for this slice.
+    pub fn set_label_color(&mut self, color: Option<Color>) {
+        if let Some(label) = &mut self.label {
+            label.set_color(color);
+        }
+    }
+
+    /// Sets the label size for this slice.
+    pub fn set_label_size(&mut self, size: Option<crate::core::Pixels>) {
+        if let Some(label) = &mut self.label {
+            label.set_size(size);
+        }
+    }
+
+    /// Sets the label font weight for this slice.
+    pub fn set_label_weight(&mut self, weight: Option<crate::core::font::Weight>) {
+        if let Some(label) = &mut self.label {
+            label.set_weight(weight);
+        }
+    }
+
+    /// Sets the label font style for this slice.
+    pub fn set_label_style(&mut self, style: Option<crate::core::font::Style>) {
+        if let Some(label) = &mut self.label {
+            label.set_style(style);
+        }
+    }
+
+    /// Sets the label background fill for this slice.
+    pub fn set_label_fill(&mut self, fill: Option<Color>) {
+        if let Some(label) = &mut self.label {
+            label.set_fill(fill);
+        }
+    }
+
     /// Returns the value of this slice.
     pub fn value(&self) -> f64 {
         self.value
@@ -46,6 +81,11 @@ impl Slice {
     /// Returns the name of this slice.
     pub fn get_name(&self) -> Option<&str> {
         self.name.as_deref()
+    }
+
+    /// Returns a reference to the label configuration.
+    pub fn get_label(&self) -> Option<&Label> {
+        self.label.as_ref()
     }
 }
 
@@ -174,6 +214,11 @@ impl Pie {
     /// Returns the slices.
     pub fn slices(&self) -> &[Slice] {
         &self.slices
+    }
+
+    /// Returns a mutable reference to the slices.
+    pub fn slices_mut(&mut self) -> &mut Vec<Slice> {
+        &mut self.slices
     }
 
     /// Returns the hole proportion.

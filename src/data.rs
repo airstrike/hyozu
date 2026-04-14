@@ -1,15 +1,18 @@
 pub mod area;
 pub mod axis;
 pub mod datum;
+pub mod legend;
 pub mod mark;
+pub mod tooltip;
 
 pub use area::Area;
 pub use axis::{Axis, Orientation};
 pub use datum::{Datum, IntoDatums};
 pub use mark::{
-    Bars, BoxPlot, Gauge, Heatmap, LegendEntry, Line, Mark, Pie, Rule, Violin, Waterfall, Xy, areas, bar, bars,
-    boxplot, entry, entry_from_data, gauge, heatmap, line, pie, rule, violin, violin_entry, violin_from_data,
-    waterfall, xy,
+    Band, Bars, BoxPlot, BubbleMap, Choropleth, ChoroplethEntry, Gauge, Heatmap, LegendEntry, Line, MapPoint, Mark,
+    Pie, Rule, Treemap, Violin, Waterfall, Xy, areas, band, bar, bars, boxplot, bubble_map, choropleth,
+    choropleth_entry, entry, entry_from_data, gauge, heatmap, line, map_point, pie, rule, treemap, violin,
+    violin_entry, violin_from_data, waterfall, xy,
 };
 
 /// Trait for types that can be converted into chart Data.
@@ -45,6 +48,12 @@ pub struct Data {
 
     /// Currently selected chart element
     pub(crate) selection: Option<crate::target::Target>,
+
+    /// Optional legend configuration
+    pub(crate) legend: Option<legend::Legend>,
+
+    /// Optional tooltip configuration
+    pub(crate) tooltip: Option<tooltip::Tooltip>,
 }
 
 /// Returns the default axis pair for a given mark type.
@@ -57,12 +66,16 @@ fn axes_for_mark(mark: &Mark) -> (Option<Axis>, Option<Axis>) {
         }
         Mark::BoxPlot(bp) => (Some(bp.x_axis()), Some(bp.y_axis())),
         Mark::Line(_) => (Some(Line::x_axis()), Some(Line::y_axis())),
+        Mark::BubbleMap(_) => (BubbleMap::x_axis(), BubbleMap::y_axis()),
+        Mark::Choropleth(_) => (Choropleth::x_axis(), Choropleth::y_axis()),
         Mark::Pie(_) => (Pie::x_axis(), Pie::y_axis()),
         Mark::Gauge(_) => (Gauge::x_axis(), Gauge::y_axis()),
+        Mark::Treemap(_) => (Treemap::x_axis(), Treemap::y_axis()),
         Mark::Waterfall(_) => (Some(Waterfall::x_axis()), Some(Waterfall::y_axis())),
         Mark::Xy(_) => (Some(Xy::x_axis()), Some(Xy::y_axis())),
         Mark::Violin(v) => (Some(v.x_axis()), Some(v.y_axis())),
         Mark::Rule(_) => (Rule::x_axis(), Rule::y_axis()),
+        Mark::Band(_) => (mark::band::Band::x_axis(), mark::band::Band::y_axis()),
         Mark::Tick(_) => (mark::tick::Tick::x_axis(), mark::tick::Tick::y_axis()),
         Mark::Heatmap(hm) => (Some(hm.x_axis()), Some(hm.y_axis())),
     }
@@ -89,7 +102,7 @@ impl From<Vec<Mark>> for Area {
         // Configure axes based on first non-Rule mark (rules inherit axes)
         let (x_axis, y_axis) = marks
             .iter()
-            .find(|m| !matches!(m, Mark::Rule(_) | Mark::Tick(_)))
+            .find(|m| !matches!(m, Mark::Rule(_) | Mark::Band(_) | Mark::Tick(_)))
             .or(marks.first())
             .map(axes_for_mark)
             .unwrap_or((None, None));
@@ -106,6 +119,8 @@ impl IntoData for Mark {
             title: None,
             palette: None,
             selection: None,
+            legend: None,
+            tooltip: None,
         }
     }
 }
@@ -164,7 +179,25 @@ impl IntoData for Heatmap {
     }
 }
 
+impl IntoData for Treemap {
+    fn into_data(self) -> Data {
+        Mark::from(self).into_data()
+    }
+}
+
 impl IntoData for Violin {
+    fn into_data(self) -> Data {
+        Mark::from(self).into_data()
+    }
+}
+
+impl IntoData for BubbleMap {
+    fn into_data(self) -> Data {
+        Mark::from(self).into_data()
+    }
+}
+
+impl IntoData for Choropleth {
     fn into_data(self) -> Data {
         Mark::from(self).into_data()
     }
@@ -178,6 +211,8 @@ impl IntoData for Vec<Mark> {
             title: None,
             palette: None,
             selection: None,
+            legend: None,
+            tooltip: None,
         }
     }
 }
@@ -306,6 +341,39 @@ impl Data {
         self
     }
 
+    /// Configures the chart legend.
+    ///
+    /// ```
+    /// # use hyozu::{data, line, LegendPosition, LegendConfig};
+    /// // Short form — just position
+    /// data(line("Revenue", [(0, 10)])).legend(LegendPosition::Below);
+    ///
+    /// // Detailed form — builder
+    /// data(line("Revenue", [(0, 10)])).legend(LegendConfig::below().font_size(10.0));
+    /// ```
+    pub fn legend(mut self, legend: impl Into<legend::Legend>) -> Self {
+        self.legend = Some(legend.into());
+        self
+    }
+
+    /// Enables tooltips on the chart.
+    ///
+    /// Accepts a `Tooltip` directly or a closure `Fn(&TooltipEntry) -> String`
+    /// thanks to the `From` impl.
+    ///
+    /// # Examples
+    /// ```ignore
+    /// // Default tooltip (name: value)
+    /// data(line("Revenue", [(0, 10)])).tooltip(Tooltip::default())
+    ///
+    /// // Custom format
+    /// data(line("Revenue", [(0, 10)])).tooltip(|e: &TooltipEntry| format!("${:.2}", e.y))
+    /// ```
+    pub fn tooltip(mut self, tooltip: impl Into<tooltip::Tooltip>) -> Self {
+        self.tooltip = Some(tooltip.into());
+        self
+    }
+
     /// Returns the current palette override, if any.
     pub fn get_palette(&self) -> Option<&crate::palette::Palette> {
         self.palette.as_ref()
@@ -326,6 +394,72 @@ impl Data {
     /// Returns a reference to the primary plotting area.
     pub fn primary(&self) -> &Area {
         &self.primary
+    }
+
+    /// Returns a reference to the secondary plotting area.
+    pub fn secondary_area(&self) -> &Area {
+        &self.secondary
+    }
+
+    /// Appends marks to the secondary (top/right) axis area.
+    ///
+    /// By default the secondary area has no axes; call [`Data::right_axis`]
+    /// or [`Data::top_axis`] to configure them. Any marks whose default axis
+    /// pair is numeric (e.g. lines, areas, bars) will work out of the box
+    /// with a default right axis.
+    pub fn secondary(mut self, marks: impl Into<Vec<Mark>>) -> Self {
+        let mut new_marks = marks.into();
+        // Auto-configure only the right (secondary Y) axis. We do *not*
+        // auto-create a top X axis: in the Excel-style dual-axis case
+        // the x dimension is shared between primary and secondary, so
+        // the bottom x axis is enough and a duplicate top axis would
+        // just add noise. If a caller genuinely wants a separate top x
+        // axis (different x dimension for the secondary marks), they
+        // opt in explicitly via `.top_axis(|a| ...)` and take
+        // responsibility for its labels.
+        //
+        // When `top_axis` is `None`, `Scene::layout` falls back to the
+        // primary x bounds for the secondary plane, so secondary marks
+        // still plot against the same x range as the primary marks.
+        if self.secondary.y_axis.is_none() {
+            let (_, auto_y) = new_marks
+                .iter()
+                .find(|m| !matches!(m, Mark::Rule(_) | Mark::Band(_) | Mark::Tick(_)))
+                .or(new_marks.first())
+                .map(axes_for_mark)
+                .unwrap_or((None, None));
+            self.secondary.y_axis = auto_y.map(|a| a.with_orientation(Orientation::Right));
+        }
+        self.secondary.marks.append(&mut new_marks);
+        self
+    }
+
+    /// Configure the right (secondary Y) axis.
+    ///
+    /// Initializes the axis to a default `Kind::Scalar` oriented on the right
+    /// side if it hasn't been set yet, then applies `f` to it.
+    pub fn right_axis(mut self, f: impl FnOnce(Axis) -> Axis) -> Self {
+        let base = self
+            .secondary
+            .y_axis
+            .take()
+            .unwrap_or_else(|| Axis::new(Orientation::Right).with_kind(axis::Kind::Scalar));
+        self.secondary.y_axis = Some(f(base));
+        self
+    }
+
+    /// Configure the top (secondary X) axis.
+    ///
+    /// Initializes the axis to a default `Kind::Scalar` oriented on the top
+    /// edge if it hasn't been set yet, then applies `f` to it.
+    pub fn top_axis(mut self, f: impl FnOnce(Axis) -> Axis) -> Self {
+        let base = self
+            .secondary
+            .x_axis
+            .take()
+            .unwrap_or_else(|| Axis::new(Orientation::Top).with_kind(axis::Kind::Scalar));
+        self.secondary.x_axis = Some(f(base));
+        self
     }
 
     /// Returns a reference to the title.

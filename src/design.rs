@@ -64,6 +64,28 @@ pub trait Design {
     /// Returns the color for axis lines and ticks.
     fn axis_color(&self) -> Color;
 
+    /// Returns the color for major gridlines inside the plot area.
+    ///
+    /// Gridlines should sit visually *beneath* the axis frame, so the
+    /// default is a neutral gray at low opacity — clearly more muted than
+    /// [`axis_color()`]. Themes should override this to derive a color
+    /// from their own text/palette.
+    ///
+    /// [`axis_color()`]: Self::axis_color
+    fn grid_color(&self) -> Color {
+        Color::from_rgba(0.5, 0.5, 0.5, 0.12)
+    }
+
+    /// Returns the color for minor gridlines inside the plot area.
+    ///
+    /// Defaults to roughly half the weight of [`grid_color()`] so minor
+    /// lines read as subdivisions without competing with major lines.
+    ///
+    /// [`grid_color()`]: Self::grid_color
+    fn minor_grid_color(&self) -> Color {
+        Color::from_rgba(0.5, 0.5, 0.5, 0.06)
+    }
+
     /// Returns the default font for chart text.
     fn font(&self) -> Font;
 
@@ -127,6 +149,14 @@ impl<T: Design> Design for &T {
         (*self).axis_color()
     }
 
+    fn grid_color(&self) -> Color {
+        (*self).grid_color()
+    }
+
+    fn minor_grid_color(&self) -> Color {
+        (*self).minor_grid_color()
+    }
+
     fn font(&self) -> Font {
         (*self).font()
     }
@@ -156,24 +186,24 @@ impl Design for theme::Theme {
     }
 
     fn data_colors(&self) -> Vec<Color> {
-        let extended = self.extended_palette();
+        let palette = self.palette();
         vec![
-            extended.primary.strong.color.into(),
-            extended.primary.base.color.into(),
-            extended.success.base.color.into(),
-            extended.warning.base.color.into(),
-            extended.danger.base.color.into(),
+            palette.primary.strong.color.into(),
+            palette.primary.base.color.into(),
+            palette.success.base.color.into(),
+            palette.warning.base.color.into(),
+            palette.danger.base.color.into(),
         ]
     }
 
     fn palette_seed(&self) -> PaletteSeed {
-        let extended = self.extended_palette();
+        let palette = self.palette();
         PaletteSeed {
-            primary: extended.primary.base.color,
-            secondary: extended.secondary.base.color,
-            success: extended.success.base.color,
-            warning: extended.warning.base.color,
-            danger: extended.danger.base.color,
+            primary: palette.primary.base.color,
+            secondary: palette.secondary.base.color,
+            success: palette.success.base.color,
+            warning: palette.warning.base.color,
+            danger: palette.danger.base.color,
             background: self.background_color(),
         }
     }
@@ -186,6 +216,18 @@ impl Design for theme::Theme {
 
     fn axis_color(&self) -> Color {
         theme::Base::base(self).text_color.into()
+    }
+
+    fn grid_color(&self) -> Color {
+        // Major gridlines: subtle tint of the text color — sits clearly
+        // below `axis_color` (text_color at full opacity).
+        let text = theme::Base::base(self).text_color;
+        Color::from_rgba(text.r, text.g, text.b, 0.08)
+    }
+
+    fn minor_grid_color(&self) -> Color {
+        let text = theme::Base::base(self).text_color;
+        Color::from_rgba(text.r, text.g, text.b, 0.04)
     }
 
     fn font(&self) -> Font {

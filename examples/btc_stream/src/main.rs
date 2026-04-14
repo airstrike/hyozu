@@ -15,7 +15,9 @@ use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
 use serde::Deserialize;
 
+use hyozu::line::label::{Position, Show};
 use hyozu::{Data, chart, line};
+
 use iced::task::{self, sipper};
 use iced::widget::{Space, button, column, container, row, text};
 use iced::{Border, Element, Fill, Font, Shrink, Task, Theme};
@@ -246,10 +248,9 @@ impl App {
         // Create (timestamp, price) points for proper time-based x-axis
         let points: Vec<(f32, f32)> = self.points.iter().map(|p| (p.timestamp as f32, p.price)).collect();
 
-        self.data =
-            Data::from(line(points).data_labels(line::label::Show::LastOnly + line::label::Position::Right + currency))
-                .x_axis(|_| line::Line::time_axis())
-                .y_axis_labels(currency);
+        self.data = Data::from(line(points).data_labels(Show::LastOnly + Position::Right + currency))
+            .x_axis(|_| line::Line::time_axis())
+            .y_axis_labels(currency);
     }
 
     fn view(&self) -> Element<'_, Message> {
@@ -266,7 +267,7 @@ impl App {
             });
             container(row(buttons))
                 .style(|theme: &Theme| {
-                    let palette = theme.extended_palette();
+                    let palette = theme.palette();
                     container::Style {
                         background: Some(palette.background.weak.color.scale_alpha(0.3).into()),
                         ..Default::default()
@@ -319,7 +320,7 @@ impl App {
 
 /// Custom button style for segment picker
 fn segment_button(theme: &Theme, status: button::Status, selected: bool) -> button::Style {
-    let palette = theme.extended_palette();
+    let palette = theme.palette();
     let muted = palette.background.base.text.scale_alpha(0.5);
     let less_muted = palette.background.base.text.scale_alpha(0.8);
     let fill = palette.background.weak.color.scale_alpha(0.5);
@@ -499,7 +500,7 @@ async fn fetch_historical_prices(pair: TradingPair) -> Result<Vec<PricePoint>, S
 }
 
 // Helper function to format numbers with thousands separator
-fn currency(value: f32) -> String {
+fn currency(value: f64) -> String {
     let whole = value as i32;
     let s = whole.to_string();
     let mut result = String::new();

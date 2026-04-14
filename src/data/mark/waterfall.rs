@@ -119,10 +119,15 @@ impl Waterfall {
             .with_ticks(axis::tick::Ticks::categorical())
     }
 
-    /// Creates the appropriate y-axis for a waterfall chart (scalar, zero-anchored).
+    /// Creates the appropriate y-axis for a waterfall chart.
+    ///
+    /// Uses `Scalar` rather than `ScalarAnchored` so that when steps are small
+    /// relative to totals, the axis can zoom into the step range instead of
+    /// anchoring at zero.  The zero-anchor still happens naturally when the
+    /// data range returned by `find_range` includes zero.
     pub fn y_axis() -> Axis {
         Axis::new(Orientation::Left)
-            .with_kind(Kind::ScalarAnchored)
+            .with_kind(Kind::Scalar)
             .with_ticks(axis::tick::Ticks::continuous())
     }
 }

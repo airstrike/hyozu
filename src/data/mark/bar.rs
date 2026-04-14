@@ -132,6 +132,15 @@ pub struct Bars {
     pub(crate) spacing: Spacing,
     /// Direction of bar growth (vertical or horizontal).
     pub(crate) direction: Direction,
+    /// Radius for the bar's "end" corners (opposite the baseline).
+    ///
+    /// `0.0` uses a sharp rectangle (default). When positive, vertical bars
+    /// round the top corners and horizontal bars round the right corners.
+    /// The radius is clamped to `min(width, height) / 2.0` at draw time.
+    ///
+    /// Note: with `Layout::Stacked`, only the topmost segment of each stack
+    /// is rounded so that adjacent segments meet without gaps.
+    pub(crate) corner_radius: f32,
 }
 
 /// Creates a single bar series with styling options.
@@ -194,6 +203,7 @@ impl<T: IntoDatums> IntoBars for T {
             size: Size::default(),
             spacing: Spacing::default(),
             direction: Direction::default(),
+            corner_radius: 0.0,
         }
     }
 }
@@ -207,6 +217,7 @@ impl<const N: usize> IntoBars for [Series; N] {
             size: Size::default(),
             spacing: Spacing::default(),
             direction: Direction::default(),
+            corner_radius: 0.0,
         }
     }
 }
@@ -220,6 +231,7 @@ impl IntoBars for Vec<Series> {
             size: Size::default(),
             spacing: Spacing::default(),
             direction: Direction::default(),
+            corner_radius: 0.0,
         }
     }
 }
@@ -234,7 +246,19 @@ impl Bars {
             size: Size::default(),
             spacing: Spacing::default(),
             direction: Direction::default(),
+            corner_radius: 0.0,
         }
+    }
+
+    /// Sets the corner radius for the bar "end" corners.
+    ///
+    /// Vertical bars round top corners; horizontal bars round the right
+    /// corners. The radius is clamped to `min(width, height) / 2.0` at draw
+    /// time. For stacked layouts, only the topmost segment of each stack is
+    /// rounded.
+    pub fn corner_radius(mut self, radius: f32) -> Self {
+        self.corner_radius = radius.max(0.0);
+        self
     }
 
     /// Set the layout to grouped (side-by-side).

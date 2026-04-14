@@ -71,6 +71,10 @@ where
             wrapping: text::Wrapping::None,
             ellipsis: text::Ellipsis::default(),
             hint_factor: renderer.scale_factor(),
+            font_features: Vec::new(),
+            font_variations: Vec::new(),
+            letter_spacing: Default::default(),
+            weight: None,
         });
 
         let text_size = state.paragraph.min_bounds();
@@ -120,6 +124,10 @@ where
                 wrapping: crate::core::text::Wrapping::None,
                 ellipsis: crate::core::text::Ellipsis::default(),
                 hint_factor: renderer.scale_factor(),
+                font_features: Vec::new(),
+                font_variations: Vec::new(),
+                letter_spacing: Default::default(),
+                weight: None,
             },
             position,
             text_color,

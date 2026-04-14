@@ -1,4 +1,4 @@
-use crate::axis::{Alignment, Axis, Bounds, Kind, Orientation};
+use crate::axis::{Alignment, Axis, Bounds, Kind, Orientation, TextAlign};
 use crate::core::layout::{Limits, Node};
 use crate::core::text::{self, paragraph};
 use crate::core::widget::{Tree, tree};
@@ -28,14 +28,33 @@ impl Ord for OrderedFloat {
     }
 }
 
-/// Default label formatting function
-fn default_format(value: f64) -> String {
-    // For integers, show without decimal point
-    if value.fract() == 0.0 {
-        format!("{:.0}", value)
-    } else {
-        format!("{}", value)
+/// Format a tick value with an explicit decimal precision derived from
+/// the tick step size. This is the D3-style approach: if the step is 0.2
+/// we need 1 decimal place; if 0.05, 2 places; if 5, 0 places.
+fn default_format_with_precision(value: f64, precision: Option<usize>) -> String {
+    match precision {
+        Some(p) => format!("{:.prec$}", value, prec = p),
+        None => {
+            // Fallback: guess from the value itself
+            if value == 0.0 || (value.round() - value).abs() < 1e-9 {
+                format!("{:.0}", value)
+            } else {
+                // Show enough decimals to be meaningful, but not floating-point garbage
+                let s = format!("{:.10}", value);
+                s.trim_end_matches('0').trim_end_matches('.').to_string()
+            }
+        }
     }
+}
+
+/// Compute the number of decimal places needed to cleanly display a
+/// given tick step. E.g. step=0.2 → 1, step=0.05 → 2, step=5 → 0.
+fn precision_for_step(step: f64) -> usize {
+    if step <= 0.0 || !step.is_finite() {
+        return 1;
+    }
+    let p = (-step.log10()).ceil() as i32;
+    p.max(0) as usize
 }
 
 /// Compute a nice step size for a given range and target tick count
@@ -342,6 +361,9 @@ where
     pub tick_positions: Vec<f64>,
     /// Cached bounds from tick marks - for coordinate system
     pub bounds: Bounds,
+    /// Edge label insets to prevent overhang at axis boundaries.
+    /// For horizontal axes: (left, right). For vertical axes: (top, bottom).
+    pub label_insets: (f32, f32),
 }
 
 /// A Guide wraps an Axis and handles UI layout with proper text measurement.
@@ -370,6 +392,11 @@ where
             marks,
             _renderer: std::marker::PhantomData,
         }
+    }
+
+    /// Returns a reference to the underlying axis.
+    pub fn axis(&self) -> &'a Axis {
+        self.axis
     }
 
     /// Compute the axis bounds (visual range) for this axis.
@@ -406,7 +433,7 @@ where
 
         let (axis_min, axis_max) = (bounds.min(), bounds.max());
 
-        let data_positions = if is_categorical {
+        let (data_positions, nice_step) = if is_categorical {
             // Categorical: collect unique X positions from data
             use std::collections::BTreeSet;
             let mut values: BTreeSet<OrderedFloat> = BTreeSet::new();
@@ -459,21 +486,32 @@ where
                             values.insert(OrderedFloat(i as f64));
                         }
                     }
-                    crate::Mark::Rule(_) | crate::Mark::Tick(_) | crate::Mark::Pie(_) | crate::Mark::Gauge(_) => {}
+                    crate::Mark::Rule(_)
+                    | crate::Mark::Band(_)
+                    | crate::Mark::Tick(_)
+                    | crate::Mark::Pie(_)
+                    | crate::Mark::Gauge(_)
+                    | crate::Mark::Treemap(_)
+                    | crate::Mark::BubbleMap(_)
+                    | crate::Mark::Choropleth(_) => {}
                 }
             }
 
-            values.into_iter().map(|OrderedFloat(v)| v).collect()
+            (values.into_iter().map(|OrderedFloat(v)| v).collect(), None)
         } else {
             // Continuous: generate nice ticks WITHIN the bounds
             // Use time-aligned ticks for time-based axes
             let alignment = self.axis.ticks.alignment;
             if self.axis.kind() == Kind::Time {
-                nice_time_ticks(axis_min, axis_max, 6, alignment)
+                (nice_time_ticks(axis_min, axis_max, 6, alignment), None)
             } else {
-                self.nice_ticks(axis_min, axis_max, 6, alignment)
+                let (ticks, step) = self.nice_ticks(axis_min, axis_max, 6, alignment);
+                (ticks, Some(step))
             }
         };
+
+        // Derive format precision from the tick step (D3-style)
+        let step_precision = nice_step.map(precision_for_step);
 
         // For time axes, get the interval for smart formatting
         let time_interval = if self.axis.kind() == Kind::Time {
@@ -500,26 +538,23 @@ where
             Frequency::Custom(custom) => custom.clone(),
         };
 
-        // Create label formatting function based on Labels configuration
+        // Create label formatting function based on Labels configuration.
+        // When no custom format is provided, use step-derived precision
+        // so that floating-point noise is hidden (e.g. 0.6 not 0.600000001).
         let format_label = |pos: f64| -> String {
             if let Some(ref labels) = self.axis.labels.values {
-                // Custom categorical labels
                 let index = pos.round() as usize;
                 if index < labels.len() {
                     labels[index].clone()
                 } else {
-                    // Fallback if index out of bounds
-                    default_format(pos)
+                    default_format_with_precision(pos, step_precision)
                 }
             } else if let Some(ref format_fn) = self.axis.labels.format {
-                // Use the provided format function
                 format_fn(pos)
             } else if let Some(interval) = time_interval {
-                // Smart time formatting based on interval scale
                 interval.format(pos as i64)
             } else {
-                // Auto-generate labels
-                default_format(pos)
+                default_format_with_precision(pos, step_precision)
             }
         };
 
@@ -656,12 +691,19 @@ where
                     }
                 }
                 crate::Mark::Waterfall(wf) => {
-                    let mut running: f64 = 0.0;
-                    for (i, entry) in wf.entries.iter().enumerate() {
-                        if is_x_axis {
+                    if is_x_axis {
+                        for (i, _) in wf.entries.iter().enumerate() {
                             min = min.min(i as f64);
                             max = max.max(i as f64);
-                        } else {
+                        }
+                    } else {
+                        // Track the envelope of all running totals (steps + totals)
+                        // and decide whether to zoom into the step range.
+                        let mut running: f64 = 0.0;
+                        let mut envelope_min: f64 = f64::INFINITY;
+                        let mut envelope_max: f64 = f64::NEG_INFINITY;
+
+                        for entry in &wf.entries {
                             match entry.kind {
                                 crate::mark::waterfall::EntryKind::Total => {
                                     running = entry.value;
@@ -670,8 +712,23 @@ where
                                     running += entry.value;
                                 }
                             }
-                            min = min.min(running).min(0.0);
-                            max = max.max(running);
+                            envelope_min = envelope_min.min(running);
+                            envelope_max = envelope_max.max(running);
+                        }
+
+                        let envelope_range = envelope_max - envelope_min;
+                        let full_range = envelope_max.max(0.0) - envelope_min.min(0.0);
+
+                        if full_range > 0.0 && envelope_range / full_range < 0.4 {
+                            // Steps are small relative to the full 0-based range.
+                            // Zoom in so the steps occupy ~50 % of the chart height.
+                            let padding = envelope_range * 0.5;
+                            min = min.min(envelope_min - padding);
+                            max = max.max(envelope_max + padding);
+                        } else {
+                            // Steps are large enough — use normal 0-based range.
+                            min = min.min(envelope_min).min(0.0);
+                            max = max.max(envelope_max);
                         }
                     }
                 }
@@ -690,6 +747,17 @@ where
                     crate::mark::rule::RuleOrientation::Vertical if is_x_axis => {
                         min = min.min(rule.value);
                         max = max.max(rule.value);
+                    }
+                    _ => {}
+                },
+                crate::Mark::Band(band) => match band.orientation {
+                    crate::mark::band::BandOrientation::Horizontal if !is_x_axis => {
+                        min = min.min(band.lower);
+                        max = max.max(band.upper);
+                    }
+                    crate::mark::band::BandOrientation::Vertical if is_x_axis => {
+                        min = min.min(band.lower);
+                        max = max.max(band.upper);
                     }
                     _ => {}
                 },
@@ -794,7 +862,11 @@ where
                         }
                     }
                 },
-                crate::Mark::Pie(_) | crate::Mark::Gauge(_) => {}
+                crate::Mark::Pie(_)
+                | crate::Mark::Gauge(_)
+                | crate::Mark::Treemap(_)
+                | crate::Mark::BubbleMap(_)
+                | crate::Mark::Choropleth(_) => {}
             }
         }
 
@@ -803,7 +875,7 @@ where
         // For vertical bars: value axis is Y; for horizontal bars: value axis is X
         {
             let has_vertical_bars = self.marks.iter().any(|m| {
-                matches!(m, crate::Mark::Area(_) | crate::Mark::Waterfall(_))
+                matches!(m, crate::Mark::Area(_))
                     || matches!(m, crate::Mark::Bars(b) if b.direction() == crate::mark::bar::Direction::Vertical)
             });
             let has_horizontal_bars = self
@@ -825,11 +897,14 @@ where
         }
     }
 
-    /// Generate nice tick positions within [min, max]
-    /// Bounds are assumed to already be nice (from compute_axis_bounds)
-    fn nice_ticks(&self, min: f64, max: f64, target_count: usize, alignment: Alignment) -> Vec<f64> {
+    /// Generate nice tick positions within [min, max].
+    ///
+    /// Returns (ticks, step) so callers can derive format precision from the step.
+    /// Uses multiplication-based positioning (`start + i * step`) instead of
+    /// repeated addition to avoid floating-point error accumulation.
+    fn nice_ticks(&self, min: f64, max: f64, target_count: usize, alignment: Alignment) -> (Vec<f64>, f64) {
         if min >= max {
-            return vec![min];
+            return (vec![min], 0.0);
         }
 
         let range = max - min;
@@ -838,35 +913,24 @@ where
         let mut ticks = Vec::new();
 
         match alignment {
-            Alignment::Auto => {
-                // Generate ticks starting from min, stepping by nice_step
-                // Since bounds are already nice, ticks should align
-                let mut value = min;
-                while value <= max + nice_step * 0.001 {
-                    ticks.push(value);
-                    value += nice_step;
-                }
-            }
-            Alignment::SnapToStart => {
-                // Start exactly at min
-                let mut value = min;
-                while value <= max + nice_step * 0.001 {
-                    ticks.push(value);
-                    value += nice_step;
+            Alignment::Auto | Alignment::SnapToStart => {
+                // Use multiplication from the starting value to avoid
+                // floating-point drift: start + i * step
+                let n = ((max - min) / nice_step + 0.001).floor() as usize + 1;
+                for i in 0..n {
+                    ticks.push(min + i as f64 * nice_step);
                 }
             }
             Alignment::SnapToEnd => {
-                // Work backward from max
-                let mut value = max;
-                while value >= min - nice_step * 0.001 {
-                    ticks.push(value);
-                    value -= nice_step;
+                // Work backward from max using multiplication
+                let n = ((max - min) / nice_step + 0.001).floor() as usize + 1;
+                for i in (0..n).rev() {
+                    ticks.push(max - i as f64 * nice_step);
                 }
-                ticks.reverse();
             }
         }
 
-        ticks
+        (ticks, nice_step)
     }
 
     /// Returns the initial tree state for this Guide
@@ -885,6 +949,7 @@ where
                 label_info: Vec::new(),
                 tick_positions: Vec::new(),
                 bounds: Bounds::exact(0.0, 1.0),
+                label_insets: (0.0, 0.0),
             }),
             children,
         }
@@ -899,7 +964,22 @@ where
     }
 
     /// Layout the guide, measuring text labels and positioning ticks.
-    pub fn layout(&self, tree: &mut Tree, renderer: &Renderer, limits: &Limits) -> Node {
+    ///
+    /// `overflow` is the pixel budget available outside each end of the axis
+    /// for edge-label overhang (e.g. the sibling axis column). `.0` is the
+    /// start (left for horizontal, top for vertical); `.1` is the end.
+    ///
+    /// `min_inset` is a floor imposed by other chart elements (e.g. series
+    /// data labels that extend past bar ends). The final inset is computed
+    /// as `max(0, half_label - overflow, min_inset)`.
+    pub fn layout(
+        &self,
+        tree: &mut Tree,
+        renderer: &Renderer,
+        limits: &Limits,
+        overflow: (f32, f32),
+        min_inset: (f32, f32),
+    ) -> Node {
         // Compute bounds first, then generate ticks within those bounds
         let bounds = self.compute_axis_bounds();
         let (label_info, tick_positions) = self.compute_ticks_and_labels(bounds);
@@ -930,6 +1010,8 @@ where
                 label_offset,
                 min_value,
                 max_value,
+                overflow,
+                min_inset,
             ),
             Orientation::Bottom | Orientation::Top => self.layout_horizontal(
                 state,
@@ -939,6 +1021,8 @@ where
                 label_offset,
                 min_value,
                 max_value,
+                overflow,
+                min_inset,
             ),
         }
     }
@@ -954,6 +1038,8 @@ where
         label_offset: f32,
         min_value: f64,
         max_value: f64,
+        overflow: (f32, f32),
+        min_inset: (f32, f32),
     ) -> Node {
         // Use cached label info from state
         let label_data = &state.label_info;
@@ -968,7 +1054,8 @@ where
         let mut children = Vec::new();
         let mut max_label_width = 0.0f32;
 
-        for (i, (pos, label)) in label_data.iter().enumerate() {
+        // First pass: measure all labels
+        for (i, (_pos, label)) in label_data.iter().enumerate() {
             let paragraph = &mut state.labels[i];
 
             use crate::core::alignment;
@@ -984,31 +1071,74 @@ where
                 wrapping: text::Wrapping::None,
                 ellipsis: text::Ellipsis::default(),
                 hint_factor: renderer.scale_factor(),
+                font_features: Vec::new(),
+                font_variations: Vec::new(),
+                letter_spacing: Default::default(),
+                weight: None,
             });
 
-            let label_width = paragraph.min_bounds().width;
-            max_label_width = max_label_width.max(label_width);
+            max_label_width = max_label_width.max(paragraph.min_bounds().width);
+        }
 
-            // Calculate Y position for this tick within our height
-            let tick_value = *pos;
-            let label_height = paragraph.min_bounds().height;
-            let half_height = label_height / 2.0;
+        // Compute edge label insets (half-height of top/bottom center-aligned labels),
+        // reduced by the overflow budget available on each side, floored by min_inset.
+        // labels[last] = max value = top of axis, labels[0] = min value = bottom.
+        //
+        // The first/last tick is not necessarily at the plot's outer edge: a
+        // categorical axis with OnTicks placement and `Kind::Categorical` bounds
+        // (±0.5 padding) sits the first tick at `k_bottom * usable_height` above
+        // the plot's bottom edge, giving the bottom label that much free space
+        // inside the plot before any inset is needed. We credit that natural
+        // space against the half-label overhang so short categorical labels
+        // don't needlessly shrink the chart. For scalar axes the ticks sit at
+        // the data extrema (`k_* == 0`), so the formula collapses to the
+        // previous behavior.
+        let n = label_data.len();
+        let top_half = if n > 0 {
+            state.labels[n - 1].min_bounds().height / 2.0
+        } else {
+            0.0
+        };
+        let bottom_half = if n > 0 {
+            state.labels[0].min_bounds().height / 2.0
+        } else {
+            0.0
+        };
+        let (k_top, k_bottom) = if value_range > 0.0 && n > 0 {
+            let bottom_tick = label_data[0].0;
+            let top_tick = label_data[n - 1].0;
+            (
+                ((max_value - top_tick) / value_range) as f32,
+                ((bottom_tick - min_value) / value_range) as f32,
+            )
+        } else {
+            (0.0, 0.0)
+        };
+        let natural_top = k_top * max_size.height;
+        let natural_bottom = k_bottom * max_size.height;
+        let top_inset = (top_half - natural_top - overflow.0).max(0.0).max(min_inset.0);
+        let bottom_inset = (bottom_half - natural_bottom - overflow.1).max(0.0).max(min_inset.1);
+        let usable_height = (max_size.height - top_inset - bottom_inset).max(0.0);
 
-            // Skip if not enough room for the label
+        state.label_insets = (top_inset, bottom_inset);
+
+        // Second pass: position labels within the inset range
+        for (i, (pos, _label)) in label_data.iter().enumerate() {
+            let label_width = state.labels[i].min_bounds().width;
+            let label_height = state.labels[i].min_bounds().height;
+
             if max_size.height < label_height {
                 continue;
             }
 
+            let tick_value = *pos;
             let y = if value_range > 0.0 {
-                (max_size.height as f64 - ((tick_value - min_value) / value_range) * max_size.height as f64) as f32
+                let normalized = ((tick_value - min_value) / value_range) as f32;
+                top_inset + usable_height - normalized * usable_height
             } else {
                 max_size.height / 2.0
             };
 
-            // Clamp y so vertically-centered labels stay within bounds
-            let y = y.clamp(half_height, max_size.height - half_height);
-
-            // Create a node for this tick positioned at the calculated y
             children.push(
                 Node::new(Size::new(label_width, label_height))
                     .move_to(Point::ORIGIN + crate::core::Vector::new(0.0, y)),
@@ -1037,6 +1167,8 @@ where
         label_offset: f32,
         min_value: f64,
         max_value: f64,
+        overflow: (f32, f32),
+        min_inset: (f32, f32),
     ) -> Node {
         // Use cached label info from state
         let label_data = &state.label_info;
@@ -1049,81 +1181,134 @@ where
 
         // Position each label along the x-axis
         let mut children = Vec::new();
+        let n = label_data.len();
 
-        for (i, (pos, label)) in label_data.iter().enumerate() {
+        // Compute the allotted column width per label: the pixel distance
+        // between adjacent ticks in the axis's natural domain. The overflow
+        // strategy constrains labels to this width so they don't crowd each
+        // other. Using `max_size.width` (not post-inset `usable_width`) is a
+        // slight over-allocation when insets end up non-zero, but it lets us
+        // avoid a fixed-point iteration between label widths and inset sizes.
+        let tick_stride: f64 = if n >= 2 {
+            let mut min_stride = f64::INFINITY;
+            for pair in label_data.windows(2) {
+                let s = pair[1].0 - pair[0].0;
+                if s > 0.0 && s < min_stride {
+                    min_stride = s;
+                }
+            }
+            if min_stride.is_finite() {
+                min_stride
+            } else {
+                value_range.max(1.0)
+            }
+        } else {
+            value_range.max(1.0)
+        };
+        let column_width: f32 = if value_range > 0.0 {
+            (max_size.width as f64 * tick_stride / value_range) as f32
+        } else {
+            max_size.width
+        };
+
+        // Pick wrapping + ellipsis from the overflow strategy.
+        let (wrapping, ellipsis) = match self.axis.labels.overflow {
+            crate::data::axis::label::Overflow::Ellipsize => (text::Wrapping::None, text::Ellipsis::End),
+            crate::data::axis::label::Overflow::Wrap => (text::Wrapping::Word, text::Ellipsis::None),
+        };
+
+        // Measure all labels with bounds constrained to the column width so
+        // the overflow strategy engages automatically inside iced's paragraph
+        // update. If intrinsic < column_width, the paragraph's `min_bounds`
+        // shrinks to intrinsic (the bound is an upper limit). If intrinsic >
+        // column_width, the paragraph either wraps or ellipsizes at
+        // column_width.
+        for (i, (_pos, label)) in label_data.iter().enumerate() {
             let paragraph = &mut state.labels[i];
 
             use crate::core::alignment;
             let _ = paragraph.update(text::Text {
                 content: label,
-                bounds: Size::INFINITE,
+                bounds: Size::new(column_width, f32::INFINITY),
                 size: self.axis.label_size().unwrap_or(12.0.into()),
                 line_height: text::LineHeight::default(),
                 font: self.axis.font().unwrap_or_else(|| renderer.default_font()),
                 align_x: text::Alignment::Left,
                 align_y: alignment::Vertical::Top,
                 shaping: text::Shaping::Basic,
-                wrapping: text::Wrapping::None,
-                ellipsis: text::Ellipsis::default(),
+                wrapping,
+                ellipsis,
                 hint_factor: renderer.scale_factor(),
+                font_features: Vec::new(),
+                font_variations: Vec::new(),
+                letter_spacing: Default::default(),
+                weight: None,
             });
+        }
 
-            let label_width = paragraph.min_bounds().width;
+        // Compute edge label insets (half-width of first/last center-aligned labels),
+        // reduced by the overflow budget available on each side, floored by min_inset.
+        //
+        // The first/last tick is not necessarily at the plot's outer edge: a
+        // categorical axis with OnTicks placement and `Kind::Categorical` bounds
+        // (±0.5 padding) sits the first tick at `k_left * usable_width` inside
+        // the plot's left edge, giving the first label that much free space to
+        // extend leftward before any inset is needed. We credit that natural
+        // space against the half-label overhang so short categorical labels
+        // don't needlessly shrink the chart. For scalar axes the ticks sit at
+        // the data extrema (`k_* == 0`), so the formula collapses to the
+        // previous behavior.
+        let left_half = state.labels.first().map(|p| p.min_bounds().width / 2.0).unwrap_or(0.0);
+        let right_half = state
+            .labels
+            .get(label_data.len().saturating_sub(1))
+            .map(|p| p.min_bounds().width / 2.0)
+            .unwrap_or(0.0);
+        let (k_left, k_right) = if value_range > 0.0 && n > 0 {
+            let first_tick = label_data[0].0;
+            let last_tick = label_data[n - 1].0;
+            (
+                ((first_tick - min_value) / value_range) as f32,
+                ((max_value - last_tick) / value_range) as f32,
+            )
+        } else {
+            (0.0, 0.0)
+        };
+        let natural_left = k_left * max_size.width;
+        let natural_right = k_right * max_size.width;
+        let left_inset = (left_half - natural_left - overflow.0).max(0.0).max(min_inset.0);
+        let right_inset = (right_half - natural_right - overflow.1).max(0.0).max(min_inset.1);
+        let usable_width = (max_size.width - left_inset - right_inset).max(0.0);
 
-            // Calculate X position for this tick within our width
+        state.label_insets = (left_inset, right_inset);
+
+        // Track the tallest label so the axis area can grow vertically when
+        // `Wrap` produces multi-line labels. Single-line (Ellipsize) keeps the
+        // historical height (label_size + tick_length + label_offset).
+        let label_size = self.axis.label_size().unwrap_or(12.0.into());
+        let mut max_label_height: f32 = label_size.0;
+
+        // Second pass: position labels within the inset range
+        for (i, (pos, _label)) in label_data.iter().enumerate() {
+            let label_width = state.labels[i].min_bounds().width;
+            let label_height = state.labels[i].min_bounds().height;
+            max_label_height = max_label_height.max(label_height);
+
             let tick_value = *pos;
             let x = if value_range > 0.0 {
-                (((tick_value - min_value) / value_range) * max_size.width as f64) as f32
+                left_inset + (((tick_value - min_value) / value_range) * usable_width as f64) as f32
             } else {
                 max_size.width / 2.0
             };
 
-            // Create a node for this tick positioned at the calculated x
             children.push(
-                Node::new(Size::new(label_width, 20.0)).move_to(Point::ORIGIN + crate::core::Vector::new(x, 0.0)),
+                Node::new(Size::new(label_width, label_height))
+                    .move_to(Point::ORIGIN + crate::core::Vector::new(x, 0.0)),
             );
         }
 
-        let label_size = self.axis.label_size().unwrap_or(12.0.into());
-        let height = label_size.0 + tick_length + label_offset;
+        let height = max_label_height + tick_length + label_offset;
         Node::with_children(Size::new(max_size.width, height), children)
-    }
-
-    /// Draws the axis line only using canvas geometry so it composites
-    /// in the same pipeline as marks. Call after the plot area to ensure
-    /// axis lines render on top of marks (bars, areas, etc.).
-    pub fn draw_axis_line<D>(&self, renderer: &mut Renderer, design: &D, layout: crate::core::Layout<'_>)
-    where
-        D: crate::design::Design + ?Sized,
-        Renderer: crate::widget::renderer::geometry::Renderer,
-    {
-        use crate::widget::canvas::{Frame, Path, Stroke};
-
-        let bounds = layout.bounds();
-
-        let background = design.background_color();
-        let text_pair = design.text_pair();
-        let axis_color = self
-            .axis
-            .axis_color()
-            .unwrap_or(design.axis_color())
-            .resolve(background, text_pair, None);
-
-        let mut frame = Frame::new(renderer, bounds.size());
-        let path = match self.axis.orientation() {
-            Orientation::Bottom => Path::line(Point::new(0.0, 0.0), Point::new(bounds.width, 0.0)),
-            Orientation::Left => {
-                let x = bounds.width;
-                Path::line(Point::new(x, 0.0), Point::new(x, bounds.height))
-            }
-            _ => return, // TODO: Top and Right orientations
-        };
-
-        frame.stroke(&path, Stroke::default().with_width(1.0).with_color(axis_color));
-        let geometry = frame.into_geometry();
-        renderer.with_translation(crate::core::Vector::new(bounds.x, bounds.y), |renderer| {
-            renderer.draw_geometry(geometry);
-        });
     }
 
     /// Draws tick marks and labels at their laid-out positions.
@@ -1170,8 +1355,23 @@ where
 
         // Draw all tick marks using canvas geometry (same pipeline as marks)
         let tick_length = 5.0;
+        let (inset_start, inset_end) = state.label_insets;
         if !tick_positions.is_empty() {
             let mut frame = Frame::new(renderer, bounds.size());
+            // Pixel-snap perpendicular coordinates to a half-pixel row so a
+            // 1 px stroke renders as one crisp physical pixel (instead of
+            // straddling two rows at 50 % coverage) and clamp 0.5 px inside
+            // the frame. Guard against degenerate frames (`bounds < 1.0`)
+            // by floor-ing `hi` to `lo` so the clamp never panics with
+            // `min > max`.
+            let snap_h = |x: f32| {
+                let hi = (bounds.width - 0.5).max(0.5);
+                (x.round() + 0.5).clamp(0.5, hi)
+            };
+            let snap_v = |y: f32| {
+                let hi = (bounds.height - 0.5).max(0.5);
+                (y.round() + 0.5).clamp(0.5, hi)
+            };
             let path = Path::new(|builder| {
                 for &tick_pos in tick_positions {
                     let normalized = if value_range > 0.0 {
@@ -1182,16 +1382,51 @@ where
 
                     match self.axis.orientation() {
                         Orientation::Bottom => {
-                            let x = normalized * bounds.width;
-                            builder.move_to(Point::new(x, 0.0));
-                            builder.line_to(Point::new(x, tick_length));
+                            let usable = bounds.width - inset_start - inset_end;
+                            let x = snap_h(inset_start + normalized * usable);
+                            // The plot area's bottom border is drawn at
+                            // scene y = plot_top + plot_height - 0.5,
+                            // which is `frame y = -0.5` here. Start the
+                            // tick at that border so it visually meets
+                            // it, not 0.5 px below.
+                            builder.move_to(Point::new(x, -0.5));
+                            builder.line_to(Point::new(x, tick_length - 0.5));
+                        }
+                        Orientation::Top => {
+                            let usable = bounds.width - inset_start - inset_end;
+                            let x = snap_h(inset_start + normalized * usable);
+                            // The plot area's top border is drawn at
+                            // scene y = plot_top + 0.5, which is
+                            // `frame y = bounds.height + 0.5` here (just
+                            // past the bottom edge of the top-axis
+                            // frame). The tick extends upward from the
+                            // border into the axis frame, away from the
+                            // plot area.
+                            builder.move_to(Point::new(x, bounds.height + 0.5));
+                            builder.line_to(Point::new(x, bounds.height - tick_length + 0.5));
                         }
                         Orientation::Left => {
-                            let y = bounds.height - normalized * bounds.height;
-                            builder.move_to(Point::new(bounds.width - tick_length, y));
-                            builder.line_to(Point::new(bounds.width, y));
+                            let usable = bounds.height - inset_start - inset_end;
+                            let y = snap_v(inset_start + usable - normalized * usable);
+                            // The plot area's left border is drawn at
+                            // scene x = content_left + 0.5, which is
+                            // `frame x = bounds.width + 0.5` here. Extend
+                            // the tick to that border so it visually
+                            // meets it, not 0.5 px short.
+                            builder.move_to(Point::new(bounds.width - tick_length + 0.5, y));
+                            builder.line_to(Point::new(bounds.width + 0.5, y));
                         }
-                        _ => {}
+                        Orientation::Right => {
+                            let usable = bounds.height - inset_start - inset_end;
+                            let y = snap_v(inset_start + usable - normalized * usable);
+                            // The plot area's right border is drawn at
+                            // scene x = content_left + plot_width - 0.5,
+                            // which is `frame x = -0.5` here (just past
+                            // the left edge of the right-axis frame).
+                            // Tick extends rightward from the border.
+                            builder.move_to(Point::new(-0.5, y));
+                            builder.line_to(Point::new(tick_length - 0.5, y));
+                        }
                     }
                 }
             });
@@ -1214,35 +1449,51 @@ where
                 let tick_length = 5.0;
                 let label_offset = 8.0;
 
-                // Calculate anchor position based on axis orientation
-                // The paragraph is measured with Left/Top alignment, so we
-                // offset the anchor to achieve the desired visual alignment
-                let anchor = match self.axis.orientation() {
+                let orientation = self.axis.orientation();
+                let text_align = self.axis.labels.align.unwrap_or(match orientation {
+                    Orientation::Bottom | Orientation::Top => TextAlign::Center,
+                    Orientation::Left => TextAlign::Right,
+                    Orientation::Right => TextAlign::Left,
+                });
+
+                let w = paragraph_bounds.width;
+
+                let anchor = match orientation {
                     Orientation::Bottom => {
-                        // Center horizontally on tick, position below tick mark
-                        Point::new(
-                            child_bounds.x - paragraph_bounds.width / 2.0,
-                            bounds.y + tick_length + label_offset,
-                        )
+                        let x = match text_align {
+                            TextAlign::Left => child_bounds.x,
+                            TextAlign::Center => child_bounds.x - w / 2.0,
+                            TextAlign::Right => child_bounds.x - w,
+                        };
+                        Point::new(x, bounds.y + tick_length + label_offset)
                     }
                     Orientation::Left => {
-                        // Right align, vertically center on tick
-                        Point::new(
-                            bounds.x + bounds.width - tick_length - label_offset - paragraph_bounds.width,
-                            child_bounds.y - paragraph_bounds.height / 2.0,
-                        )
+                        let col_w = bounds.width - tick_length - label_offset;
+                        let x = match text_align {
+                            TextAlign::Left => bounds.x,
+                            TextAlign::Center => bounds.x + (col_w - w) / 2.0,
+                            TextAlign::Right => bounds.x + col_w - w,
+                        };
+                        Point::new(x, child_bounds.y - paragraph_bounds.height / 2.0)
                     }
                     Orientation::Right => {
-                        // Left align, vertically center on tick
-                        Point::new(
-                            bounds.x + tick_length + label_offset,
-                            child_bounds.y - paragraph_bounds.height / 2.0,
-                        )
+                        let col_start = bounds.x + tick_length + label_offset;
+                        let col_w = bounds.width - tick_length - label_offset;
+                        let x = match text_align {
+                            TextAlign::Left => col_start,
+                            TextAlign::Center => col_start + (col_w - w) / 2.0,
+                            TextAlign::Right => col_start + col_w - w,
+                        };
+                        Point::new(x, child_bounds.y - paragraph_bounds.height / 2.0)
                     }
                     Orientation::Top => {
-                        // Center horizontally on tick, position above tick mark
+                        let x = match text_align {
+                            TextAlign::Left => child_bounds.x,
+                            TextAlign::Center => child_bounds.x - w / 2.0,
+                            TextAlign::Right => child_bounds.x - w,
+                        };
                         Point::new(
-                            child_bounds.x - paragraph_bounds.width / 2.0,
+                            x,
                             bounds.y + bounds.height - tick_length - label_offset - paragraph_bounds.height,
                         )
                     }

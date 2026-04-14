@@ -8,10 +8,15 @@ use crate::widget::canvas::{Frame, Path, Stroke};
 use crate::core::text;
 use crate::widget::renderer::geometry;
 
-/// State for Xy — stores pixel positions of scatter points
+/// State for Xy — stores pixel positions and resolved per-point sizes
 pub struct State {
     /// Pixel coordinates for each point
     pub pixel_points: Vec<Point>,
+    /// Resolved marker diameter per point. Computed in `layout` so the
+    /// `size_by` encoding only re-runs when the layout invalidates, not on
+    /// every repaint. When no encoding is configured this is empty and the
+    /// renderer falls back to `marker.size` per point.
+    pub resolved_sizes: Vec<f32>,
 }
 
 /// An Xy series that renders scatter charts.
@@ -20,7 +25,7 @@ where
     Message: 'a,
     Renderer: text::Renderer + geometry::Renderer,
 {
-    pub(super) data: &'a crate::mark::xy::Xy,
+    pub(crate) data: &'a crate::mark::xy::Xy,
     _marker: std::marker::PhantomData<(Message, Renderer)>,
 }
 
@@ -43,6 +48,7 @@ where
             tag: tree::Tag::of::<State>(),
             state: tree::State::new(State {
                 pixel_points: Vec::new(),
+                resolved_sizes: Vec::new(),
             }),
             children: Vec::new(),
         }
@@ -53,11 +59,27 @@ where
         // No children to diff
     }
 
-    /// Layout the scatter — transform data to pixel coordinates
+    /// Layout the scatter — transform data to pixel coordinates and resolve
+    /// per-point marker diameters from the `size_by` encoding (if any).
+    /// Both vectors are stored on `State` so `draw` is a pure read.
     pub fn layout(&self, tree: &mut Tree, _renderer: &Renderer, _limits: &Limits, plane: &Plane) -> Node {
         let state = tree.state.downcast_mut::<State>();
 
         state.pixel_points = self.data.points.iter().map(|p| plane.to_pixel(*p)).collect();
+
+        // Resolve per-point sizes once per layout. Encoding misses (None)
+        // and the no-encoding case both fall back to `marker.size`, so the
+        // renderer can index `resolved_sizes` unconditionally without a
+        // per-point Option check.
+        let fallback = self.data.marker.size;
+        state.resolved_sizes = match &self.data.size_by {
+            Some(enc) => enc
+                .resolve_size(&self.data.points)
+                .into_iter()
+                .map(|s| s.unwrap_or(fallback))
+                .collect(),
+            None => vec![fallback; self.data.points.len()],
+        };
 
         Node::new(Size::ZERO)
     }
@@ -98,8 +120,9 @@ where
         let marker_config = &self.data.marker;
         let mut frame = Frame::new(renderer, layout_bounds.size());
 
-        for pixel_point in &state.pixel_points {
-            let size = marker_config.size;
+        // Per-point sizes were resolved in layout and cached on state.
+        for (i, pixel_point) in state.pixel_points.iter().enumerate() {
+            let size = state.resolved_sizes.get(i).copied().unwrap_or(marker_config.size);
             let half = size / 2.0;
 
             let path = Path::new(|builder| match marker_config.shape {

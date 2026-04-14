@@ -1,5 +1,4 @@
-use hyozu::axis::Ticks;
-use hyozu::{Action, Design, Function, Map, data, gauge, item, props};
+use hyozu::{Action, Function, Map, data, gauge, item, props};
 use iced::widget::{center, column, pick_list, row};
 use iced::{Center, Fill, Subscription, Task, Theme, keyboard, window};
 use std::time::Instant;
@@ -32,18 +31,22 @@ enum Message {
     LastTheme,
 }
 
-fn build_gauge(theme: &Theme) -> hyozu::Data {
-    let seed = theme.palette_seed();
+fn build_gauge(_theme: &Theme) -> hyozu::Data {
     data(
         gauge(0.0)
-            .range(0.0, 100.0)
-            .zone(0.0, 30.0, seed.danger)
-            .zone(30.0, 70.0, seed.warning)
-            .zone(70.0, 100.0, seed.success)
-            .format(|v| format!("{:.0}%", v))
-            .unit("efficiency")
-            .ticks(Ticks::default())
-            .gradient(true),
+            .range(0.0, 130.0)
+            .zones([
+                (50.0, 0x4CAF50),  // green
+                (90.0, 0xFFC107),  // yellow
+                (100.0, 0xFF9800), // amber
+                (130.0, 0xF44336), // red
+            ])
+            .format(|v| format!("{:.0}%", (v / 130.0 * 100.0)))
+            .subtitle("Budget: 97% · Prior Year: 96%")
+            .sweep(180.0)
+            .ticks([0.0, 50.0, 90.0, 100.0, 130.0])
+            .dim_by(0.0)
+            .needle(true),
     )
     .title("System Performance")
 }
@@ -78,9 +81,9 @@ impl App {
                 let dt = (now - self.last_frame).as_secs_f64();
                 self.last_frame = now;
 
-                self.value += self.direction * 30.0 * dt;
-                if self.value >= 100.0 {
-                    self.value = 100.0;
+                self.value += self.direction * 40.0 * dt;
+                if self.value >= 130.0 {
+                    self.value = 130.0;
                     self.direction = -1.0;
                 } else if self.value <= 0.0 {
                     self.value = 0.0;

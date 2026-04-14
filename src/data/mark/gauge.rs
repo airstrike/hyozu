@@ -10,15 +10,6 @@ pub struct Zone {
     pub(crate) color: Color,
 }
 
-/// Creates a gauge zone.
-pub fn zone(from: f64, to: f64, color: impl Into<Color>) -> Zone {
-    Zone {
-        from,
-        to,
-        color: color.into(),
-    }
-}
-
 /// Gauge chart specification.
 ///
 /// Displays a value on a partial arc, optionally with colored zones.
@@ -54,6 +45,20 @@ pub struct Gauge {
     pub(crate) color_stops: usize,
     /// Opacity of the dimming overlay on unfilled portion (default 0.55)
     pub(crate) dim_opacity: f32,
+    /// Whether to show a needle indicator (default false)
+    pub(crate) show_needle: bool,
+    /// Needle color (None = use text color)
+    pub(crate) needle_color: Option<Color>,
+    /// Needle line width in pixels (default 2.0)
+    pub(crate) needle_width: f32,
+    /// Needle length as proportion of inner radius (default 0.9)
+    pub(crate) needle_length: f32,
+    /// Pivot circle radius as proportion of gauge radius (default 0.03)
+    pub(crate) pivot_radius: f32,
+    /// Whether to show a dot at the needle tip (default true when needle shown)
+    pub(crate) show_needle_tip: bool,
+    /// Optional subtitle text below value/unit
+    pub(crate) subtitle: Option<String>,
 }
 
 impl std::fmt::Debug for Gauge {
@@ -74,6 +79,13 @@ impl std::fmt::Debug for Gauge {
             .field("gradient", &self.gradient)
             .field("color_stops", &self.color_stops)
             .field("dim_opacity", &self.dim_opacity)
+            .field("show_needle", &self.show_needle)
+            .field("needle_color", &self.needle_color)
+            .field("needle_width", &self.needle_width)
+            .field("needle_length", &self.needle_length)
+            .field("pivot_radius", &self.pivot_radius)
+            .field("show_needle_tip", &self.show_needle_tip)
+            .field("subtitle", &self.subtitle)
             .finish()
     }
 }
@@ -108,6 +120,13 @@ pub fn gauge(value: impl Into<f64>) -> Gauge {
         gradient: false,
         color_stops: 100,
         dim_opacity: 0.55,
+        show_needle: false,
+        needle_color: None,
+        needle_width: 2.0,
+        needle_length: 0.9,
+        pivot_radius: 0.03,
+        show_needle_tip: false,
+        subtitle: None,
     }
 }
 
@@ -120,12 +139,58 @@ impl Gauge {
     }
 
     /// Adds a colored zone to the gauge.
-    pub fn zone(mut self, from: f64, to: f64, color: impl Into<Color>) -> Self {
+    ///
+    /// Zones are sequential: the first starts at `min`, each subsequent zone
+    /// starts where the previous one ended.
+    ///
+    /// ```
+    /// # use hyozu::gauge;
+    /// gauge(75.0)
+    ///     .range(0.0, 130.0)
+    ///     .zone(50.0, "red")    // 0 to 50
+    ///     .zone(90.0, "green")  // 50 to 90
+    ///     .zone(100.0, "yellow") // 90 to 100
+    ///     .zone(130.0, "red");  // 100 to 130
+    /// ```
+    pub fn zone(mut self, to: f64, color: impl Into<Color>) -> Self {
+        let from = self.zones.last().map_or(self.min, |z| z.to);
         self.zones.push(Zone {
             from,
             to,
             color: color.into(),
         });
+        self
+    }
+
+    /// Adds multiple colored zones to the gauge.
+    ///
+    /// Zones are sequential: the first starts at `min`, each subsequent zone
+    /// starts where the previous one ended.
+    ///
+    /// ```
+    /// # use hyozu::gauge;
+    /// gauge(75.0)
+    ///     .range(0.0, 130.0)
+    ///     .zones([
+    ///         (50.0, 0x4CAF50),  // 0 to 50: green
+    ///         (90.0, 0xFFC107),  // 50 to 90: yellow
+    ///         (100.0, 0xFF9800), // 90 to 100: amber
+    ///         (130.0, 0xF44336), // 100 to 130: red
+    ///     ]);
+    /// ```
+    pub fn zones<C, I>(mut self, zones: I) -> Self
+    where
+        C: Into<Color>,
+        I: IntoIterator<Item = (f64, C)>,
+    {
+        for (to, color) in zones {
+            let from = self.zones.last().map_or(self.min, |z| z.to);
+            self.zones.push(Zone {
+                from,
+                to,
+                color: color.into(),
+            });
+        }
         self
     }
 
@@ -192,6 +257,48 @@ impl Gauge {
     /// Sets the dimming opacity for the unfilled arc portion (default 0.55).
     pub fn dim_by(mut self, opacity: f32) -> Self {
         self.dim_opacity = opacity.clamp(0.0, 1.0);
+        self
+    }
+
+    /// Whether to show a needle indicator (default false).
+    pub fn needle(mut self, show: bool) -> Self {
+        self.show_needle = show;
+        self
+    }
+
+    /// Sets the needle color (default: text color from theme).
+    pub fn needle_color(mut self, color: impl Into<Color>) -> Self {
+        self.needle_color = Some(color.into());
+        self
+    }
+
+    /// Sets the needle line width in pixels (default 2.0).
+    pub fn needle_width(mut self, width: f32) -> Self {
+        self.needle_width = width.max(0.5);
+        self
+    }
+
+    /// Sets the needle length as proportion of inner radius (default 0.9).
+    pub fn needle_length(mut self, length: f32) -> Self {
+        self.needle_length = length.clamp(0.3, 1.1);
+        self
+    }
+
+    /// Sets the pivot circle radius as proportion of gauge radius (default 0.03).
+    pub fn pivot_radius(mut self, radius: f32) -> Self {
+        self.pivot_radius = radius.clamp(0.0, 0.1);
+        self
+    }
+
+    /// Whether to show a dot at the needle tip (default true).
+    pub fn needle_tip(mut self, show: bool) -> Self {
+        self.show_needle_tip = show;
+        self
+    }
+
+    /// Sets the subtitle text displayed below value/unit.
+    pub fn subtitle(mut self, text: impl Into<String>) -> Self {
+        self.subtitle = Some(text.into());
         self
     }
 

@@ -23,6 +23,23 @@ impl<T: IntoDatums> IntoLines for T {
     }
 }
 
+/// Dash pattern for a line.
+///
+/// Patterns other than `Solid` are rendered using the underlying iced
+/// `Stroke::line_dash` field.
+#[derive(Debug, Clone, Default)]
+pub enum LineStyle {
+    /// Solid, continuous line (default).
+    #[default]
+    Solid,
+    /// Dashed pattern (`[8.0, 4.0]`).
+    Dashed,
+    /// Dotted pattern (`[1.0, 3.0]` with round caps for a dot look).
+    Dotted,
+    /// User-provided dash segments (alternating lengths of lines and gaps).
+    Custom { segments: Vec<f32> },
+}
+
 /// Line chart specification.
 #[derive(Debug, Clone)]
 pub struct Line {
@@ -35,6 +52,8 @@ pub struct Line {
     pub(crate) marker: Option<marker::Marker>,
     /// Optional name for this line (used in legends).
     pub(crate) name: Option<String>,
+    /// Dash pattern for the line stroke.
+    pub(crate) style: LineStyle,
 }
 
 /// Creates a line chart mark from data points.
@@ -63,6 +82,7 @@ pub fn line(data: impl IntoDatums) -> Line {
         label: None,
         marker: None,
         name: None,
+        style: LineStyle::Solid,
     }
 }
 
@@ -107,6 +127,12 @@ impl Line {
     /// Sets the line width.
     pub fn width(mut self, width: f32) -> Self {
         self.width = width;
+        self
+    }
+
+    /// Sets the dash pattern for this line.
+    pub fn style(mut self, style: LineStyle) -> Self {
+        self.style = style;
         self
     }
 

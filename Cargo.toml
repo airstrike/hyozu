@@ -7,6 +7,11 @@ edition = "2024"
 iced_core = "0.15.0-dev"
 iced_widget = { version = "0.15.0-dev", features = ["canvas"] }
 jiff = "0.2"
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+
+[features]
+geojson = ["dep:serde", "dep:serde_json"]
 
 [dev-dependencies]
 iced = { version = "0.15.0-dev", features = ["debug"] }
@@ -15,6 +20,14 @@ iced = { version = "0.15.0-dev", features = ["debug"] }
 members = ["examples/*"]
 
 [patch.crates-io]
-iced = { git = "https://github.com/iced-rs/iced.git", branch = "master" }
-iced_core = { git = "https://github.com/iced-rs/iced.git", branch = "master" }
-iced_widget = { git = "https://github.com/iced-rs/iced.git", branch = "master" }
+iced = { git = "https://github.com/airstrike/iced.git", branch = "dev" }
+iced_core = { git = "https://github.com/airstrike/iced.git", branch = "dev" }
+iced_graphics = { git = "https://github.com/airstrike/iced.git", branch = "dev" }
+iced_runtime = { git = "https://github.com/airstrike/iced.git", branch = "dev" }
+iced_widget = { git = "https://github.com/airstrike/iced.git", branch = "dev" }
+cosmic-text = { git = "https://github.com/airstrike/cosmic-text", branch = "dev" }
+# iced = { path = "../iced" }
+# iced_core = { path = "../iced/core" }
+# iced_graphics = { path = "../iced/graphics" }
+# iced_widget = { path = "../iced/widget" }
+# cosmic-text = { path = "../cosmic-text" }

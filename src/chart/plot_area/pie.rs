@@ -20,6 +20,8 @@ pub struct State {
     pub outer_radius: f32,
     /// Inner radius (0 for full pie, >0 for donut)
     pub inner_radius: f32,
+    /// Pixel rectangles for each label
+    pub label_rects: Vec<Option<crate::core::Rectangle>>,
 }
 
 /// A Pie series that renders pie/donut charts.
@@ -54,6 +56,7 @@ where
                 center: (0.0, 0.0),
                 outer_radius: 0.0,
                 inner_radius: 0.0,
+                label_rects: Vec::new(),
             }),
             children: Vec::new(),
         }
@@ -98,6 +101,48 @@ where
                 let end = current_angle + sweep;
                 current_angle = end;
                 (start, end)
+            })
+            .collect();
+
+        // Compute label rects for hit-testing
+        state.label_rects = state
+            .slice_angles
+            .iter()
+            .zip(self.data.slices.iter())
+            .map(|((start, end), slice)| {
+                let label = match &slice.label {
+                    Some(l) => l,
+                    None => return None,
+                };
+
+                let mid = (start + end) / 2.0;
+                let label_r = if inner_radius > 0.0 {
+                    inner_radius + (radius - inner_radius) * 0.5
+                } else {
+                    radius * 0.65
+                };
+
+                let lx = cx + label_r * mid.cos();
+                let ly = cy + label_r * mid.sin();
+
+                let pct = slice.value.max(0.0) / total;
+                let text = (label.format)(slice.value, pct);
+                if text.is_empty() {
+                    return None;
+                }
+
+                let font_size = label.size.map(|p| p.0).unwrap_or(12.0);
+                let char_width = font_size * 0.6;
+                let text_width = text.len() as f32 * char_width + 6.0;
+                let text_height = font_size * 1.2 + 4.0;
+
+                // Center-aligned
+                Some(crate::core::Rectangle {
+                    x: lx - text_width / 2.0,
+                    y: ly - text_height / 2.0,
+                    width: text_width,
+                    height: text_height,
+                })
             })
             .collect();
 
@@ -227,6 +272,22 @@ where
                 let pct = slice.value.max(0.0) / total;
                 let label_text = (label.format)(slice.value, pct);
 
+                let font_size = label.size.unwrap_or(crate::core::Pixels(theme.font_size()));
+
+                // Draw fill background if specified
+                if let Some(fill_color_spec) = label.fill
+                    && let Some(Some(lr)) = state.label_rects.get(i)
+                {
+                    let fill_resolved = fill_color_spec.resolve(background, text_pair, None);
+                    let fill_path = Path::new(|b| {
+                        b.rectangle(
+                            crate::core::Point::new(lr.x, lr.y),
+                            crate::core::Size::new(lr.width, lr.height),
+                        );
+                    });
+                    frame.fill(&fill_path, fill_resolved);
+                }
+
                 // Resolve label color for contrast against the slice
                 let slice_fill = slice_colors[i];
                 let label_color = if let Some(c) = label.color {
@@ -235,14 +296,21 @@ where
                     text_pair.resolve(slice_fill, Some(background))
                 };
 
-                let font_size = label.size.unwrap_or(crate::core::Pixels(theme.font_size()));
+                // Build font with weight/style overrides
+                let mut font = theme.font();
+                if let Some(w) = label.weight {
+                    font.weight = w;
+                }
+                if let Some(s) = label.style {
+                    font.style = s;
+                }
 
                 frame.fill_text(CanvasText {
                     content: label_text,
                     position: crate::core::Point::new(lx, ly),
                     color: label_color,
                     size: font_size,
-                    font: theme.font(),
+                    font,
                     align_x: crate::core::alignment::Horizontal::Center.into(),
                     align_y: crate::core::alignment::Vertical::Center,
                     line_height: crate::core::text::LineHeight::default(),
@@ -270,6 +338,44 @@ where
                     _ => false,
                 }
             };
+
+            let should_highlight_label = |slice_idx: usize| -> bool {
+                match target {
+                    Target::SeriesLabel { mark, .. } => *mark == mark_index,
+                    Target::EntryLabel { mark, index, .. } => *mark == mark_index && *index == slice_idx,
+                    _ => false,
+                }
+            };
+
+            // Label selection highlights
+            for (i, maybe_rect) in state.label_rects.iter().enumerate() {
+                if !should_highlight_label(i) {
+                    continue;
+                }
+                if let Some(lr) = maybe_rect {
+                    let outer_rect = crate::core::Rectangle {
+                        x: lr.x - 1.0,
+                        y: lr.y - 1.0,
+                        width: lr.width + 2.0,
+                        height: lr.height + 2.0,
+                    };
+                    let outer_path = Path::new(|b| {
+                        b.rectangle(
+                            crate::core::Point::new(outer_rect.x, outer_rect.y),
+                            crate::core::Size::new(outer_rect.width, outer_rect.height),
+                        );
+                    });
+                    selection_frame.stroke(&outer_path, Stroke::default().with_color(outer_color).with_width(1.0));
+
+                    let inner_path = Path::new(|b| {
+                        b.rectangle(
+                            crate::core::Point::new(lr.x, lr.y),
+                            crate::core::Size::new(lr.width, lr.height),
+                        );
+                    });
+                    selection_frame.stroke(&inner_path, Stroke::default().with_color(inner_color).with_width(1.0));
+                }
+            }
 
             for (i, (start_angle, end_angle)) in state.slice_angles.iter().enumerate() {
                 if !should_highlight(i) {

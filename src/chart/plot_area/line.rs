@@ -2,7 +2,8 @@ use super::Plane;
 use crate::core::Size;
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
-use crate::widget::canvas::{Frame, Path, Stroke};
+use crate::line::LineStyle;
+use crate::widget::canvas::{Frame, LineCap, LineDash, Path, Stroke, Text as CanvasText};
 
 use crate::core::text;
 use crate::widget::renderer::geometry;
@@ -31,7 +32,7 @@ where
     Message: 'a,
     Renderer: text::Renderer + geometry::Renderer,
 {
-    pub(super) data: &'a crate::line::Line,
+    pub(crate) data: &'a crate::line::Line,
     _marker: std::marker::PhantomData<(Message, Renderer)>,
 }
 
@@ -232,8 +233,27 @@ where
             }
         });
 
-        // Stroke the path
-        frame.stroke(&path, Stroke::default().with_width(thickness).with_color(color));
+        // Build the stroke with the configured dash pattern.
+        // The `LineDash::segments` field borrows `&[f32]` for the duration of
+        // the `frame.stroke()` call only, so we can point it at either a stack
+        // slice or the `Custom` vec via a local binding.
+        let dash_stack: &[f32] = match &self.data.style {
+            LineStyle::Solid => &[],
+            LineStyle::Dashed => &[8.0, 4.0],
+            LineStyle::Dotted => &[1.0, 3.0],
+            LineStyle::Custom { segments } => segments.as_slice(),
+        };
+
+        let mut stroke = Stroke::default().with_width(thickness).with_color(color);
+        stroke.line_dash = LineDash {
+            segments: dash_stack,
+            offset: 0,
+        };
+        if matches!(self.data.style, LineStyle::Dotted) {
+            stroke = stroke.with_line_cap(LineCap::Round);
+        }
+
+        frame.stroke(&path, stroke);
 
         // Draw the geometry at the layout position
         let geometry = frame.into_geometry();
@@ -412,60 +432,74 @@ where
                 color
             };
 
+            // Build the label font once per series, applying weight/style
+            // overrides from the label config. Same approach bar uses so that
+            // bold/italic data labels work consistently across mark types.
+            let mut label_font = theme.font();
+            if let Some(w) = label_config.weight {
+                label_font.weight = w;
+            }
+            if let Some(s) = label_config.style {
+                label_font.style = s;
+            }
+
+            let label_fill_color = label_config.fill.map(|spec| spec.resolve(background, text_pair, None));
+
+            let mut label_frame = Frame::new(renderer, layout_bounds.size());
+
             for ((label_rect, label_text), resolved_pos) in state
                 .label_rects
                 .iter()
                 .zip(state.label_texts.iter())
                 .zip(state.label_positions.iter())
             {
-                // Calculate alignment based on resolved position
+                // Background fill, if configured. The placement search already
+                // produced a tight rect for the text, so we just use it.
+                if let Some(fill_color) = label_fill_color {
+                    let fill_path = Path::new(|b| {
+                        b.rectangle(
+                            Point::new(label_rect.x, label_rect.y),
+                            crate::core::Size::new(label_rect.width, label_rect.height),
+                        );
+                    });
+                    label_frame.fill(&fill_path, fill_color);
+                }
+
                 let (align_x, align_y) = alignment_for_position(*resolved_pos);
 
-                // Calculate anchor point based on position
                 let (anchor_x, anchor_y) = match resolved_pos {
-                    Position::Auto | Position::Above => (
-                        layout_bounds.x + label_rect.x + label_rect.width / 2.0,
-                        layout_bounds.y + label_rect.y + label_rect.height,
-                    ),
-                    Position::Below => (
-                        layout_bounds.x + label_rect.x + label_rect.width / 2.0,
-                        layout_bounds.y + label_rect.y,
-                    ),
-                    Position::Left => (
-                        layout_bounds.x + label_rect.x + label_rect.width,
-                        layout_bounds.y + label_rect.y + label_rect.height / 2.0,
-                    ),
-                    Position::Right => (
-                        layout_bounds.x + label_rect.x,
-                        layout_bounds.y + label_rect.y + label_rect.height / 2.0,
-                    ),
+                    Position::Auto | Position::Above => {
+                        (label_rect.x + label_rect.width / 2.0, label_rect.y + label_rect.height)
+                    }
+                    Position::Below => (label_rect.x + label_rect.width / 2.0, label_rect.y),
+                    Position::Left => (label_rect.x + label_rect.width, label_rect.y + label_rect.height / 2.0),
+                    Position::Right => (label_rect.x, label_rect.y + label_rect.height / 2.0),
                 };
 
-                renderer.fill_text(
-                    crate::core::text::Text {
-                        content: label_text.clone(),
-                        bounds: crate::core::Size::new(1000.0, 1000.0),
-                        size: label_size.into(),
-                        font: renderer.default_font(),
-                        align_x: align_x.into(),
-                        align_y,
-                        line_height: crate::core::text::LineHeight::default(),
-                        shaping: crate::core::text::Shaping::Basic,
-                        wrapping: crate::core::text::Wrapping::None,
-                        ellipsis: crate::core::text::Ellipsis::default(),
-                        hint_factor: renderer.scale_factor(),
-                    },
-                    crate::core::Point::new(anchor_x, anchor_y),
-                    label_color,
-                    *_viewport,
-                );
+                label_frame.fill_text(CanvasText {
+                    content: label_text.clone(),
+                    position: Point::new(anchor_x, anchor_y),
+                    color: label_color,
+                    size: label_size.into(),
+                    font: label_font,
+                    align_x: align_x.into(),
+                    align_y,
+                    line_height: crate::core::text::LineHeight::default(),
+                    shaping: crate::core::text::Shaping::Basic,
+                    ..CanvasText::default()
+                });
             }
+
+            let label_geometry = label_frame.into_geometry();
+            renderer.with_translation(crate::core::Vector::new(layout_bounds.x, layout_bounds.y), |renderer| {
+                renderer.draw_geometry(label_geometry);
+            });
         }
     }
 }
 
 /// Compute label rectangle for a given position (pixel coordinates)
-fn compute_label_rect(point: Point, label_width: f32, label_height: f32, position: Position) -> Rectangle {
+pub(super) fn compute_label_rect(point: Point, label_width: f32, label_height: f32, position: Position) -> Rectangle {
     let padding = 6.0;
 
     match position {
@@ -489,7 +523,7 @@ fn compute_label_rect(point: Point, label_width: f32, label_height: f32, positio
 }
 
 /// Get text alignment for a position
-fn alignment_for_position(
+pub(super) fn alignment_for_position(
     position: Position,
 ) -> (crate::core::alignment::Horizontal, crate::core::alignment::Vertical) {
     match position {
@@ -607,7 +641,7 @@ fn search_from_position(
 }
 
 /// Find the best position for a label, returning both the position and final rect
-fn find_best_label_placement(
+pub(super) fn find_best_label_placement(
     point: Point,
     label_width: f32,
     label_height: f32,
