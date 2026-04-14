@@ -49,46 +49,37 @@ pub fn hyozu_dark() -> Theme {
     })
 }
 
-/// Creates a custom "shadcn" theme, using Nova's neutral base for
-/// background/text/primary and the canonical shadcn chart palette for the
-/// semantic accent slots.
-///
-/// shadcn/ui's Nova style is a component preset that layers on top of a base
-/// color (here: neutral). Neutral itself only defines one non-gray token
-/// (`destructive`), so a straight port produces near-identical pale grays in
-/// any categorical palette slot. To give hyozu a usable 5-way categorical
-/// palette we pull the three additional distinct hues from shadcn's published
-/// chart palette (`--chart-1`..`--chart-5`), which shipped with every v3 base
-/// color and is still the canonical "shadcn chart" color set.
-pub fn shadcn() -> Theme {
-    Theme::custom("shadcn", Seed {
-        background: color!(0xffffff), // Nova neutral background
-        text: color!(0x0a0a0a),       // Nova neutral foreground
-        primary: color!(0x171717),    // Nova neutral primary (Neutral 900)
-        success: color!(0x2a9d90),    // chart-2 light — teal
-        warning: color!(0xe8c468),    // chart-4 light — gold / amber
-        danger: color!(0xe76e50),     // chart-1 light — warm red
+/// Creates a custom "Basic Light" theme anchored to shadcn/ui's Nova palette:
+/// a near-white background with vivid violet primary and saturated
+/// green/amber/red semantic accents.
+pub fn basic_light() -> Theme {
+    Theme::custom("Basic Light", Seed {
+        background: color!(0xfafafa), // Nova background (near-white, Neutral 50)
+        text: color!(0x0a0a0a),       // Nova foreground (Neutral 950)
+        primary: color!(0x7c3aed),    // Nova primary — Violet 600
+        success: color!(0x16a34a),    // Green 600
+        warning: color!(0xf59e0b),    // Amber 500
+        danger: color!(0xdc2626),     // Red 600 (Nova destructive)
     })
 }
 
-/// Creates a custom "shadcn Dark" theme, using Nova's neutral base for
-/// background/text/primary and the canonical shadcn chart palette for the
-/// semantic accent slots. See [`shadcn`] for the rationale on sourcing the
-/// non-gray hues from shadcn's chart palette rather than from Nova itself.
-pub fn shadcn_dark() -> Theme {
-    Theme::custom("shadcn Dark", Seed {
-        background: color!(0x0a0a0a), // Nova neutral background
-        text: color!(0xfafafa),       // Nova neutral foreground
-        primary: color!(0xe5e5e5),    // Nova neutral primary (Neutral 200)
-        success: color!(0x2eb88a),    // chart-2 dark — green
-        warning: color!(0xe88c30),    // chart-3 dark — orange / amber
-        danger: color!(0xe23670),     // chart-5 dark — magenta-red
+/// Creates a custom "Basic" theme anchored to shadcn/ui's Nova palette:
+/// a near-black background with vivid violet primary and saturated
+/// green/amber/red semantic accents. See [`basic_light`] for the light variant.
+pub fn basic() -> Theme {
+    Theme::custom("Basic", Seed {
+        background: color!(0x0a0a0a), // Nova background (near-black, Neutral 950)
+        text: color!(0xfafafa),       // Nova foreground (Neutral 50)
+        primary: color!(0x8b5cf6),    // Nova primary — Violet 500
+        success: color!(0x22c55e),    // Green 500
+        warning: color!(0xf59e0b),    // Amber 500
+        danger: color!(0xef4444),     // Red 500 (Nova destructive)
     })
 }
 
 /// Returns all available themes, including iced's built-in themes and our custom themes.
 pub fn all_themes() -> impl Iterator<Item = Theme> {
-    [paper(), paper_dark(), hyozu(), hyozu_dark(), shadcn(), shadcn_dark()]
+    [paper(), paper_dark(), hyozu(), hyozu_dark(), basic(), basic_light()]
         .into_iter()
         .chain(Theme::ALL.iter().cloned())
 }
