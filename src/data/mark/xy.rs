@@ -58,9 +58,68 @@ impl Xy {
         self
     }
 
+    // === Property setters (in-place) ===
+
+    /// Sets the series color in place.
+    pub fn set_color(&mut self, color: Option<Color>) {
+        self.color = color;
+    }
+
+    /// Replaces the marker configuration.
+    pub fn set_marker(&mut self, marker: marker::Marker) {
+        self.marker = marker;
+    }
+
+    /// Sets the marker shape in place.
+    pub fn set_marker_shape(&mut self, shape: marker::Shape) {
+        self.marker.set_shape(shape);
+    }
+
+    /// Sets the marker show mode in place.
+    pub fn set_marker_show(&mut self, show: marker::Show) {
+        self.marker.set_show(show);
+    }
+
+    /// Sets the marker size in place.
+    pub fn set_marker_size(&mut self, size: f32) {
+        self.marker.set_size(size);
+    }
+
+    /// Sets the marker fill color in place. `None` falls back to the series color.
+    pub fn set_marker_color(&mut self, color: Option<Color>) {
+        self.marker.set_color(color);
+    }
+
+    /// Sets the marker stroke color in place. `None` removes the outline.
+    pub fn set_marker_stroke(&mut self, stroke: Option<Color>) {
+        self.marker.set_stroke(stroke);
+    }
+
+    /// Sets the marker stroke width in place.
+    pub fn set_marker_stroke_width(&mut self, width: f32) {
+        self.marker.set_stroke_width(width);
+    }
+
+    /// Returns a mutable reference to the marker configuration.
+    pub fn marker_mut(&mut self) -> &mut marker::Marker {
+        &mut self.marker
+    }
+
+    // === Property getters ===
+
     /// Returns the name of this scatter series.
     pub fn name(&self) -> Option<&str> {
         self.name.as_deref()
+    }
+
+    /// Returns the series color, if any.
+    pub fn color_value(&self) -> Option<&Color> {
+        self.color.as_ref()
+    }
+
+    /// Returns a reference to the marker configuration.
+    pub fn marker(&self) -> &marker::Marker {
+        &self.marker
     }
 
     /// Returns the points.
