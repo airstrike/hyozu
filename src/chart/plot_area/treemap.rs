@@ -210,6 +210,7 @@ where
 
         let background = theme.background_color();
         let text_pair = theme.text_pair();
+        let seed = theme.palette_seed();
 
         let layout_bounds = layout.bounds();
         let mut frame = Frame::new(renderer, layout_bounds.size());
@@ -229,12 +230,12 @@ where
 
             // Resolve color: item color > palette > default navy palette
             let color = if let Some(item_color) = item.color {
-                item_color.resolve(background, text_pair, None)
+                item_color.resolve(background, text_pair, &seed, None)
             } else {
                 // Try the palette first; if color_offset == 0 and no explicit palette,
                 // use the default navy palette for business dashboard look
                 let palette_color = palette.get(color_offset + i);
-                let resolved = palette_color.resolve(background, text_pair, None);
+                let resolved = palette_color.resolve(background, text_pair, &seed, None);
 
                 // Check if this is likely a default theme palette (not user-specified)
                 // If the item has no explicit color, use default navy palette as fallback

@@ -283,6 +283,8 @@ where
         }
 
         let background = theme.background_color();
+        let text_pair = theme.text_pair();
+        let seed = theme.palette_seed();
         let layout_bounds = layout.bounds();
 
         // ── Resolve color scale ───────────────────────────────────
@@ -291,7 +293,6 @@ where
         let color_stops: Vec<crate::core::Color> = if let Some(stops) = &self.data.color_stops {
             stops.clone()
         } else {
-            let seed = theme.palette_seed();
             vec![seed.success, seed.warning, seed.danger]
         };
 
@@ -302,8 +303,7 @@ where
             b: background.b * 0.92 + 0.08 * 0.74,
             a: 1.0,
         };
-        let text_pair = theme.text_pair();
-        let border_color = theme.divider_color().resolve(background, text_pair, None);
+        let border_color = theme.divider_color().resolve(background, text_pair, &seed, None);
 
         // ── Draw ocean background ────────────────────────────────
         let mut frame = Frame::new(renderer, layout_bounds.size());

@@ -96,6 +96,7 @@ where
 
         let background = theme.background_color();
         let text_pair = theme.text_pair();
+        let seed = theme.palette_seed();
 
         let layout_bounds = layout.bounds();
         let mut frame = Frame::new(renderer, layout_bounds.size());
@@ -149,7 +150,7 @@ where
         // Arc rendering
         if has_zones && self.data.gradient {
             // Gradient mode with zones: interpolate colors across mini-segments
-            let stops = build_zone_stops(self.data, range, background, text_pair);
+            let stops = build_zone_stops(self.data, range, background, text_pair, &seed);
             draw_gradient_arc(
                 &mut frame,
                 cx,
@@ -182,7 +183,7 @@ where
 
                 let zone_start = start_angle + zone_start_prop * state.sweep_rad;
                 let zone_end = start_angle + zone_end_prop * state.sweep_rad;
-                let zone_color = zone.color.resolve(background, text_pair, None);
+                let zone_color = zone.color.resolve(background, text_pair, &seed, None);
 
                 draw_arc_segment(
                     &mut frame,
@@ -210,7 +211,7 @@ where
             );
         } else if self.data.gradient {
             // Gradient mode without zones: interpolate from palette color to desaturated
-            let base = palette.get(color_offset).resolve(background, text_pair, None);
+            let base = palette.get(color_offset).resolve(background, text_pair, &seed, None);
             let light = crate::core::Color {
                 r: base.r * 0.4 + 0.6,
                 g: base.g * 0.4 + 0.6,
@@ -243,7 +244,7 @@ where
             );
         } else {
             // Simple value arc (original behavior)
-            let value_color = palette.get(color_offset).resolve(background, text_pair, None);
+            let value_color = palette.get(color_offset).resolve(background, text_pair, &seed, None);
             if state.value_angle > 0.001 {
                 draw_arc_segment(
                     &mut frame,
@@ -287,6 +288,7 @@ where
                 start_angle,
                 state.value_angle,
                 text_pair,
+                &seed,
                 background,
             );
         }
@@ -385,13 +387,14 @@ fn draw_needle<R: geometry::Renderer>(
     start_angle: f32,
     value_angle: f32,
     text_pair: crate::color::Pair,
+    seed: &crate::palette::PaletteSeed,
     background: crate::core::Color,
 ) {
     let angle = start_angle + value_angle;
     let needle_len = inner_radius * data.needle_length;
 
     let color = if let Some(ref c) = data.needle_color {
-        c.resolve(background, text_pair, None)
+        c.resolve(background, text_pair, seed, None)
     } else {
         text_pair.on_light
     };
@@ -478,13 +481,14 @@ fn build_zone_stops(
     range: f64,
     background: crate::core::Color,
     text_pair: crate::color::Pair,
+    seed: &crate::palette::PaletteSeed,
 ) -> Stops {
     let mut stops: Stops = Vec::new();
     for zone in &data.zones {
         let start_prop = ((zone.from - data.min) / range).clamp(0.0, 1.0) as f32;
         let end_prop = ((zone.to - data.min) / range).clamp(0.0, 1.0) as f32;
         let mid = (start_prop + end_prop) / 2.0;
-        let color = zone.color.resolve(background, text_pair, None);
+        let color = zone.color.resolve(background, text_pair, seed, None);
         stops.push((mid, color));
     }
     // Extend to arc edges using first/last zone colors

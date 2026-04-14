@@ -271,6 +271,7 @@ where
         let state = tree.state.downcast_ref::<State>();
         let background = theme.background_color();
         let text_pair = theme.text_pair();
+        let seed = theme.palette_seed();
         let layout_bounds = layout.bounds();
 
         let mut fill_frame = Frame::new(renderer, layout_bounds.size());
@@ -285,11 +286,11 @@ where
             }
 
             let base_color = if let Some(c) = series.color {
-                c.resolve(background, text_pair, None)
+                c.resolve(background, text_pair, &seed, None)
             } else {
                 palette
                     .get(color_offset + series_idx)
-                    .resolve(background, text_pair, None)
+                    .resolve(background, text_pair, &seed, None)
             };
 
             let fill_color = crate::core::Color {
@@ -368,15 +369,15 @@ where
             let label_size = label_config.size.map(|p| p.0).unwrap_or(12.0);
 
             let base_color = if let Some(c) = series.color {
-                c.resolve(background, text_pair, None)
+                c.resolve(background, text_pair, &seed, None)
             } else {
                 palette
                     .get(color_offset + series_idx)
-                    .resolve(background, text_pair, None)
+                    .resolve(background, text_pair, &seed, None)
             };
 
             let label_color = if let Some(label_color_spec) = label_config.color {
-                label_color_spec.resolve(background, text_pair, None)
+                label_color_spec.resolve(background, text_pair, &seed, None)
             } else {
                 base_color
             };
@@ -389,7 +390,9 @@ where
                 label_font.style = s;
             }
 
-            let label_fill_color = label_config.fill.map(|spec| spec.resolve(background, text_pair, None));
+            let label_fill_color = label_config
+                .fill
+                .map(|spec| spec.resolve(background, text_pair, &seed, None));
 
             let texts = &state.series_label_texts[series_idx];
             let positions = &state.series_label_positions[series_idx];

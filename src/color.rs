@@ -36,10 +36,10 @@
 //!
 //! ```ignore
 //! // Resolve bar color against chart background
-//! let bar_color = color_spec.resolve(chart_bg, text_pair, None);
+//! let bar_color = color_spec.resolve(chart_bg, text_pair, &seed, None);
 //!
 //! // Resolve label color against bar, with chart background as fallback
-//! let label_color = label_spec.resolve(bar_color, text_pair, Some(chart_bg));
+//! let label_color = label_spec.resolve(bar_color, text_pair, &seed, Some(chart_bg));
 //! ```
 //!
 //! # Key Functions
@@ -127,7 +127,14 @@ impl Pair {
     }
 }
 
-/// A color that can be either fixed or adaptive to its background.
+/// A color that can be a literal RGB value, an adaptive contrast value, or a
+/// reference to a slot in the design system's [`PaletteSeed`].
+///
+/// The semantic variants ([`Color::Primary`], [`Color::Secondary`],
+/// [`Color::Success`], [`Color::Warning`], [`Color::Danger`]) are resolved at
+/// draw time against the active theme's seed, so they automatically follow
+/// theme changes — a chart styled with `Color::Success` shows the current
+/// theme's "success" hue without the caller having to refetch the seed.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Color {
     /// A fixed color that doesn't change.
@@ -135,7 +142,21 @@ pub enum Color {
     /// An adaptive color that picks between light/dark variants based on
     /// background.  If None, uses the design system's default text pair.
     Contrast(Option<Pair>),
-    // Future: ContrastTint(Option<Pair>) - adapts hue to background like Material Design
+    /// The design system's primary brand color. Resolved from
+    /// [`PaletteSeed::primary`] at draw time.
+    Primary,
+    /// The design system's secondary brand color. Resolved from
+    /// [`PaletteSeed::secondary`] at draw time.
+    Secondary,
+    /// The design system's success / positive color (typically green).
+    /// Resolved from [`PaletteSeed::success`] at draw time.
+    Success,
+    /// The design system's warning color (typically amber/yellow).
+    /// Resolved from [`PaletteSeed::warning`] at draw time.
+    Warning,
+    /// The design system's danger / error color (typically red).
+    /// Resolved from [`PaletteSeed::danger`] at draw time.
+    Danger,
 }
 
 impl Color {
@@ -181,29 +202,43 @@ impl Color {
     /// A color with no opacity.
     pub const TRANSPARENT: Color = Color::Fixed(crate::core::Color::TRANSPARENT);
 
-    /// Resolve this color to a concrete iced Color given a background and design pair.
-    /// Optionally provide a fallback color to use if the pair options have poor contrast.
+    /// Resolve this color to a concrete iced Color.
+    ///
+    /// - `background` is the surface this color will sit on (used by
+    ///   adaptive contrast variants to pick the right light/dark value).
+    /// - `design_pair` is the design system's default text pair, used by
+    ///   `Color::Contrast(None)` to pull theme-aware text colors.
+    /// - `seed` is the design system's named-slot palette, used by the
+    ///   semantic variants ([`Color::Primary`], etc.) to look up their
+    ///   concrete value.
+    /// - `fallback` is the caller's preferred color, used by adaptive
+    ///   contrast variants when both pair options have poor contrast.
     pub fn resolve(
         self,
         background: crate::core::Color,
         design_pair: Pair,
+        seed: &crate::palette::PaletteSeed,
         fallback: Option<crate::core::Color>,
     ) -> crate::core::Color {
         match self {
             Color::Fixed(c) => c,
             Color::Contrast(Some(pair)) => pair.resolve(background, fallback),
             Color::Contrast(None) => design_pair.resolve(background, fallback),
+            Color::Primary => seed.primary,
+            Color::Secondary => seed.secondary,
+            Color::Success => seed.success,
+            Color::Warning => seed.warning,
+            Color::Danger => seed.danger,
         }
     }
 
-    // /// Convert to iced Color, using white background for contrast resolution if needed.
-    // /// For use when the background is unknown.
-    // pub fn to_iced(self, design_pair: impl Into<Pair>) -> crate::core::Color {
-    //     self.resolve(crate::core::Color::WHITE, design_pair.into(), None)
-    // }
-
     /// Crisper version of the color. Light colors are darkened, dark colors are lightened.
     /// The effect is very, very subtle. Hue and chroma are preserved using perceptually uniform HCL color space.
+    ///
+    /// Semantic variants pass through unchanged because crispening would
+    /// require resolving the seed, which `crisp` does not have access to.
+    /// Callers who need a crispened semantic color should resolve it first
+    /// (via [`Color::resolve`]) and wrap the result in [`Color::Fixed`].
     pub fn crisp(self) -> Color {
         match self {
             Color::Fixed(c) => Color::Fixed(adjust_lightness_hcl(c, true, 3.0)),
@@ -212,11 +247,15 @@ impl Color {
                 adjust_lightness_hcl(pair.on_dark, true, 3.0),
             ))),
             Color::Contrast(None) => Color::Contrast(None),
+            Color::Primary | Color::Secondary | Color::Success | Color::Warning | Color::Danger => self,
         }
     }
 
     /// Faded version of the color. Light colors are lightened, dark colors are darkened.
     /// The effect is very, very subtle. Hue and chroma are preserved using perceptually uniform HCL color space.
+    ///
+    /// Semantic variants pass through unchanged for the same reason as
+    /// [`Color::crisp`].
     pub fn faded(self) -> Color {
         match self {
             Color::Fixed(c) => Color::Fixed(adjust_lightness_hcl(c, false, 3.0)),
@@ -225,6 +264,7 @@ impl Color {
                 adjust_lightness_hcl(pair.on_dark, false, 3.0),
             ))),
             Color::Contrast(None) => Color::Contrast(None),
+            Color::Primary | Color::Secondary | Color::Success | Color::Warning | Color::Danger => self,
         }
     }
 }

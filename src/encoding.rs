@@ -168,7 +168,7 @@ impl Encoding<Fill> {
     /// so it follows the theme.
     ///
     /// Default is [`Palette::Categorical`] (distinct hues). Use
-    /// [`Palette::Sequential`] for shades of the theme's primary color, or
+    /// [`Palette::SEQUENTIAL`] for shades of the theme's primary color, or
     /// [`Palette::Gradient`] with explicit stops for a custom interpolated
     /// gradient.
     ///
@@ -183,7 +183,7 @@ impl Encoding<Fill> {
     ///
     /// const MONTHS: [&str; 6] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun"];
     /// // Each month gets a shade of the theme's primary color.
-    /// let enc = encoding::key(|i, _| MONTHS[i]).palette(Palette::Sequential);
+    /// let enc = encoding::key(|i, _| MONTHS[i]).palette(Palette::SEQUENTIAL);
     /// ```
     pub fn palette(mut self, flavor: Palette) -> Self {
         self.kind = FillKind::Ordinal {
@@ -304,7 +304,7 @@ impl Encoding<Fill> {
     /// sized to the number of distinct keys when the encoding has no explicit
     /// `range`. The encoding deliberately does NOT share the chart's main
     /// resolved palette (D15): single-series bar charts default to
-    /// `Palette::Sequential` of length 1, which would collapse every bar to a
+    /// `Palette::SEQUENTIAL` of length 1, which would collapse every bar to a
     /// single color.
     ///
     /// `chart_default` is the user's `Data::palette(...)` setting (if any),
@@ -660,7 +660,7 @@ mod tests {
         let enc = key(move |i, _| labels[i]);
 
         let pts = points(&[1.0, 2.0, 3.0, 4.0]);
-        let inherited = enc.resolve_fill(&pts, &test_seed(), Some(&Palette::Sequential));
+        let inherited = enc.resolve_fill(&pts, &test_seed(), Some(&Palette::SEQUENTIAL));
         let default = enc.resolve_fill(&pts, &test_seed(), None);
 
         // Both paths must produce 4 colors and at least two distinct shades,
@@ -687,8 +687,8 @@ mod tests {
         let inheriting = key(move |i, _| labels[i]);
 
         let pts = points(&[1.0, 2.0, 3.0, 4.0]);
-        let explicit_colors = explicit.resolve_fill(&pts, &test_seed(), Some(&Palette::Sequential));
-        let inheriting_colors = inheriting.resolve_fill(&pts, &test_seed(), Some(&Palette::Sequential));
+        let explicit_colors = explicit.resolve_fill(&pts, &test_seed(), Some(&Palette::SEQUENTIAL));
+        let inheriting_colors = inheriting.resolve_fill(&pts, &test_seed(), Some(&Palette::SEQUENTIAL));
 
         // The explicit-Categorical encoding must differ from the inheriting
         // (Sequential) encoding — i.e. the explicit .palette() override
@@ -701,13 +701,13 @@ mod tests {
 
     #[test]
     fn ordinal_palette_sequential_produces_varied_shades() {
-        // `.palette(Palette::Sequential)` builds a Sequential palette (shades
+        // `.palette(Palette::SEQUENTIAL)` builds a Sequential palette (shades
         // of the seed's primary color) at draw time. With four distinct keys
         // we expect four slot lookups and not-all-identical colors — guards
         // against the method silently falling back to Categorical or to a
         // broken one-color Sequential.
         let labels = ["a", "b", "c", "d"];
-        let enc = key(move |i, _| labels[i]).palette(Palette::Sequential);
+        let enc = key(move |i, _| labels[i]).palette(Palette::SEQUENTIAL);
 
         let pts = points(&[1.0, 2.0, 3.0, 4.0]);
         let got = enc.resolve_fill(&pts, &test_seed(), None);
@@ -730,7 +730,7 @@ mod tests {
         let sentinel = Color::from_rgb8(123, 45, 67);
         let enc = key(move |i, _| labels[i])
             .range([sentinel, sentinel])
-            .palette(Palette::Sequential);
+            .palette(Palette::SEQUENTIAL);
 
         let pts = points(&[1.0, 2.0]);
         let got = enc.resolve_fill(&pts, &test_seed(), None);
@@ -749,7 +749,7 @@ mod tests {
         let labels = ["a", "b"];
         let c0 = Color::from_rgb8(10, 20, 30);
         let c1 = Color::from_rgb8(40, 50, 60);
-        let enc = key(move |i, _| labels[i]).palette(Palette::Sequential).range([c0, c1]);
+        let enc = key(move |i, _| labels[i]).palette(Palette::SEQUENTIAL).range([c0, c1]);
 
         let pts = points(&[1.0, 2.0]);
         let got = enc.resolve_fill(&pts, &test_seed(), None);

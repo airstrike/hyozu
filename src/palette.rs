@@ -6,10 +6,23 @@ use crate::data::mark::Mark;
 pub enum Palette {
     /// Distinct hues for categorical data (pie, multi-series).
     Categorical,
-    /// Shades of theme's primary color (1-2 series bars, gauge).
-    Sequential,
+    /// Shades of a single hue. The inner [`Color`] picks which hue:
+    /// pass [`Color::Primary`] (the historical default) for shades of
+    /// the theme's primary, [`Color::Success`] for a green sequence,
+    /// [`Color::Fixed`] for an explicit hex color, or any of the other
+    /// semantic seed slots. Adaptive variants like [`Color::Contrast`]
+    /// don't carry a meaningful single hue and fall back to the theme's
+    /// primary at resolve time.
+    Sequential(Color),
     /// Interpolate between 2+ color stops in OKLch.
     Gradient(Vec<crate::core::Color>),
+}
+
+impl Palette {
+    /// Convenience constant for the historical default sequential
+    /// palette: shades of the theme's primary color. Equivalent to
+    /// `Palette::Sequential(Color::Primary)`.
+    pub const SEQUENTIAL: Palette = Palette::Sequential(Color::Primary);
 }
 
 /// Seed colors extracted from a theme, used to generate palettes.
@@ -35,7 +48,10 @@ impl Resolved {
         let n = n.max(1);
         let colors = match palette {
             Palette::Categorical => generate_categorical(seed, n),
-            Palette::Sequential => generate_sequential(seed.primary, seed.background, n),
+            Palette::Sequential(source) => {
+                let hue = sequential_hue(source, seed);
+                generate_sequential(hue, seed.background, n)
+            }
             Palette::Gradient(stops) => generate_gradient(stops, n),
         };
         Self { colors }
@@ -72,46 +88,63 @@ impl Palette {
                     if area.series.len() >= 3 {
                         Palette::Categorical
                     } else {
-                        Palette::Sequential
+                        Palette::SEQUENTIAL
                     }
                 }
                 Mark::Pie(_) => Palette::Categorical,
-                Mark::Gauge(_) => Palette::Sequential,
-                Mark::Waterfall(_) => Palette::Sequential,
+                Mark::Gauge(_) => Palette::SEQUENTIAL,
+                Mark::Waterfall(_) => Palette::SEQUENTIAL,
                 Mark::Bars(bars) => {
                     if bars.series.len() >= 3 {
                         Palette::Categorical
                     } else {
-                        Palette::Sequential
+                        Palette::SEQUENTIAL
                     }
                 }
                 Mark::BoxPlot(bp) => {
                     if bp.entries.len() >= 3 {
                         Palette::Categorical
                     } else {
-                        Palette::Sequential
+                        Palette::SEQUENTIAL
                     }
                 }
                 Mark::Treemap(_) => Palette::Categorical,
                 Mark::BubbleMap(_) => Palette::Categorical,
-                Mark::Choropleth(_) => Palette::Sequential,
-                Mark::Line(_) | Mark::Xy(_) => Palette::Sequential,
-                Mark::Heatmap(_) => Palette::Sequential,
+                Mark::Choropleth(_) => Palette::SEQUENTIAL,
+                Mark::Line(_) | Mark::Xy(_) => Palette::SEQUENTIAL,
+                Mark::Heatmap(_) => Palette::SEQUENTIAL,
                 Mark::Violin(v) => {
                     if v.entries.len() >= 3 {
                         Palette::Categorical
                     } else {
-                        Palette::Sequential
+                        Palette::SEQUENTIAL
                     }
                 }
-                Mark::Tick(_) => Palette::Sequential,
-                Mark::Rule(_) => Palette::Sequential,
-                Mark::Band(_) => Palette::Sequential,
+                Mark::Tick(_) => Palette::SEQUENTIAL,
+                Mark::Rule(_) => Palette::SEQUENTIAL,
+                Mark::Band(_) => Palette::SEQUENTIAL,
             };
         }
 
         // Multiple marks: use categorical for distinct series
         Palette::Categorical
+    }
+}
+
+/// Resolve a [`Color`] reference to a concrete RGB hue source for
+/// sequential palette generation. Only the `Fixed` and semantic seed
+/// variants make sense here; adaptive `Contrast` falls back to
+/// `seed.primary` because there's no meaningful single-hue interpretation
+/// of a contrast pair.
+fn sequential_hue(source: &Color, seed: &PaletteSeed) -> crate::core::Color {
+    match source {
+        Color::Fixed(c) => *c,
+        Color::Primary => seed.primary,
+        Color::Secondary => seed.secondary,
+        Color::Success => seed.success,
+        Color::Warning => seed.warning,
+        Color::Danger => seed.danger,
+        Color::Contrast(_) => seed.primary,
     }
 }
 
@@ -376,15 +409,48 @@ mod tests {
     #[test]
     fn sequential_1_returns_primary() {
         let seed = test_seed();
-        let resolved = Resolved::resolve(&Palette::Sequential, &seed, 1);
+        let resolved = Resolved::resolve(&Palette::SEQUENTIAL, &seed, 1);
         assert_eq!(resolved.len(), 1);
     }
 
     #[test]
     fn sequential_5_has_varying_lightness() {
         let seed = test_seed();
-        let resolved = Resolved::resolve(&Palette::Sequential, &seed, 5);
+        let resolved = Resolved::resolve(&Palette::SEQUENTIAL, &seed, 5);
         assert_eq!(resolved.len(), 5);
+    }
+
+    #[test]
+    fn sequential_of_success_uses_seed_success_hue() {
+        // Sequential(Color::Success) should generate shades of seed.success
+        // (a green in the test seed), distinct from Sequential(Color::Primary)
+        // which uses seed.primary (a blue). Verify the two produce different
+        // first-slot colors so the hue source is actually being honored.
+        let seed = test_seed();
+        let primary = Resolved::resolve(&Palette::Sequential(Color::Primary), &seed, 3);
+        let success = Resolved::resolve(&Palette::Sequential(Color::Success), &seed, 3);
+        assert_eq!(primary.len(), 3);
+        assert_eq!(success.len(), 3);
+        assert_ne!(
+            primary.get(0),
+            success.get(0),
+            "Sequential(Primary) and Sequential(Success) should produce different hues"
+        );
+    }
+
+    #[test]
+    fn sequential_of_fixed_color_uses_explicit_hue() {
+        // Sequential(Color::Fixed(...)) should generate shades of the explicit
+        // color, ignoring the seed's primary entirely.
+        let seed = test_seed();
+        let red = crate::core::Color::from_rgb(0.9, 0.1, 0.1);
+        let resolved = Resolved::resolve(&Palette::Sequential(Color::Fixed(red)), &seed, 4);
+        assert_eq!(resolved.len(), 4);
+        // First slot won't be exactly red because generate_sequential
+        // remaps lightness; just verify it's distinguishable from a
+        // primary-based sequence.
+        let primary_resolved = Resolved::resolve(&Palette::SEQUENTIAL, &seed, 4);
+        assert_ne!(resolved.get(0), primary_resolved.get(0));
     }
 
     #[test]
@@ -418,7 +484,10 @@ mod tests {
     fn default_for_single_bars_is_sequential() {
         let bars = crate::bars([100, 200, 300]);
         let marks = vec![Mark::Bars(bars)];
-        assert!(matches!(Palette::default_for(&marks), Palette::Sequential));
+        assert!(matches!(
+            Palette::default_for(&marks),
+            Palette::Sequential(Color::Primary)
+        ));
     }
 
     #[test]

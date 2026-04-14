@@ -108,13 +108,14 @@ where
 
         let background = theme.background_color();
         let text_pair = theme.text_pair();
+        let seed = theme.palette_seed();
 
         let layout_bounds = layout.bounds();
 
         let color = if let Some(data_color) = self.data.color {
-            data_color.resolve(background, text_pair, None)
+            data_color.resolve(background, text_pair, &seed, None)
         } else {
-            palette.get(color_offset).resolve(background, text_pair, None)
+            palette.get(color_offset).resolve(background, text_pair, &seed, None)
         };
 
         let marker_config = &self.data.marker;
@@ -181,7 +182,7 @@ where
 
             // Fill (except X shape)
             let marker_color = if let Some(color_spec) = marker_config.color {
-                color_spec.resolve(background, text_pair, None)
+                color_spec.resolve(background, text_pair, &seed, None)
             } else {
                 color
             };
@@ -192,7 +193,7 @@ where
 
             // Stroke
             if let Some(stroke_color_spec) = marker_config.stroke {
-                let stroke_color = stroke_color_spec.resolve(background, text_pair, None);
+                let stroke_color = stroke_color_spec.resolve(background, text_pair, &seed, None);
                 frame.stroke(
                     &path,
                     Stroke::default()

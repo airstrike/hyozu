@@ -428,7 +428,7 @@ impl App {
         let on_palette = |p: String| {
             let palette = match p.as_str() {
                 "Categorical" => Palette::Categorical,
-                "Sequential" => Palette::Sequential,
+                "Sequential" => Palette::SEQUENTIAL,
                 _ => return Message::Set(item::Palette(Palette::Categorical)),
             };
             Message::Set(item::Palette(palette))
@@ -436,7 +436,7 @@ impl App {
 
         let current_palette = match data.get_palette() {
             Some(Palette::Categorical) => "Categorical",
-            Some(Palette::Sequential) => "Sequential",
+            Some(Palette::Sequential(_)) => "Sequential",
             Some(Palette::Gradient(_)) => "Gradient",
             None => "Auto",
         };

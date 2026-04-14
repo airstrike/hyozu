@@ -41,7 +41,7 @@ impl App {
         .gap(2.0);
 
         Self {
-            data: data(chart).title("Monthly Expenses").palette(Palette::Sequential),
+            data: data(chart).title("Monthly Expenses").palette(Palette::SEQUENTIAL),
             theme: hyozu::theme::paper(),
             all_themes: hyozu::theme::all_themes().collect(),
         }

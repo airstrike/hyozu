@@ -652,11 +652,11 @@ where
             let round_this_series = radius > 0.0 && (!is_stacked || series_idx + 1 == total_series);
             // Determine base color for this series
             let base_color = if let Some(series_color) = series.color {
-                series_color.resolve(background, text_pair, None)
+                series_color.resolve(background, text_pair, &seed, None)
             } else {
                 palette
                     .get(color_offset + series_idx)
-                    .resolve(background, text_pair, None)
+                    .resolve(background, text_pair, &seed, None)
             };
 
             // Materialize the cached fill plan for this series. The expensive
@@ -685,7 +685,7 @@ where
                     } else {
                         palette.get(color_offset + series_idx)
                     };
-                    resolved.resolve(background, text_pair, None)
+                    resolved.resolve(background, text_pair, &seed, None)
                 })
                 .collect();
 
@@ -735,7 +735,7 @@ where
                     if let Some(fill_color_spec) = effective_fill
                         && let Some(Some(lr)) = state.label_rects.get(series_idx).and_then(|rects| rects.get(bar_idx))
                     {
-                        let fill_resolved = fill_color_spec.resolve(background, text_pair, None);
+                        let fill_resolved = fill_color_spec.resolve(background, text_pair, &seed, None);
                         let fill_path = Path::new(|b| {
                             b.rectangle(
                                 crate::core::Point::new(lr.x, lr.y),
@@ -769,12 +769,12 @@ where
                             );
 
                             if let Some(other_color) = containing_bar {
-                                label_color_spec.resolve(other_color, text_pair, Some(background))
+                                label_color_spec.resolve(other_color, text_pair, &seed, Some(background))
                             } else {
-                                label_color_spec.resolve(background, text_pair, None)
+                                label_color_spec.resolve(background, text_pair, &seed, None)
                             }
                         }
-                        _ => label_color_spec.resolve(this_bar_color, text_pair, Some(background)),
+                        _ => label_color_spec.resolve(this_bar_color, text_pair, &seed, Some(background)),
                     };
 
                     // Build font with weight/style overrides

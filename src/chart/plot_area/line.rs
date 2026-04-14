@@ -207,15 +207,16 @@ where
 
         let background = theme.background_color();
         let text_pair = theme.text_pair();
+        let seed = theme.palette_seed();
 
         // Get the layout bounds to offset the line to its actual screen position
         let layout_bounds = layout.bounds();
 
         // Determine color for this line
         let color = if let Some(data_color) = self.data.color {
-            data_color.resolve(background, text_pair, None)
+            data_color.resolve(background, text_pair, &seed, None)
         } else {
-            palette.get(color_offset).resolve(background, text_pair, None)
+            palette.get(color_offset).resolve(background, text_pair, &seed, None)
         };
 
         let thickness = 1.5;
@@ -264,7 +265,7 @@ where
         // Draw markers if configured
         if let Some(marker_config) = &self.data.marker {
             let marker_color = if let Some(marker_color_spec) = marker_config.color {
-                marker_color_spec.resolve(background, text_pair, None)
+                marker_color_spec.resolve(background, text_pair, &seed, None)
             } else {
                 color
             };
@@ -397,7 +398,7 @@ where
 
                 // Stroke the marker if configured
                 if let Some(stroke_color_spec) = marker_config.stroke {
-                    let stroke_color = stroke_color_spec.resolve(background, text_pair, None);
+                    let stroke_color = stroke_color_spec.resolve(background, text_pair, &seed, None);
                     marker_frame.stroke(
                         &path,
                         Stroke::default()
@@ -427,7 +428,7 @@ where
 
             // Resolve label color (defaults to line color)
             let label_color = if let Some(label_color_spec) = label_config.color {
-                label_color_spec.resolve(background, text_pair, None)
+                label_color_spec.resolve(background, text_pair, &seed, None)
             } else {
                 color
             };
@@ -443,7 +444,9 @@ where
                 label_font.style = s;
             }
 
-            let label_fill_color = label_config.fill.map(|spec| spec.resolve(background, text_pair, None));
+            let label_fill_color = label_config
+                .fill
+                .map(|spec| spec.resolve(background, text_pair, &seed, None));
 
             let mut label_frame = Frame::new(renderer, layout_bounds.size());
 

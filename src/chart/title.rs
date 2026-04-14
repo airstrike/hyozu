@@ -106,7 +106,8 @@ where
         // Get text color from theme, resolved relative to background
         let background = design.background_color();
         let text_pair = design.text_pair();
-        let text_color = design.text_color().resolve(background, text_pair, None);
+        let seed = design.palette_seed();
+        let text_color = design.text_color().resolve(background, text_pair, &seed, None);
 
         // Draw title text centered at top with padding
         let position = Point::new(bounds.x + bounds.width / 2.0, bounds.y + padding);

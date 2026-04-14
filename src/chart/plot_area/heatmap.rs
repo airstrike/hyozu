@@ -104,6 +104,7 @@ where
         let layout_bounds = layout.bounds();
         let background = theme.background_color();
         let text_pair = theme.text_pair();
+        let seed = theme.palette_seed();
 
         let (v_min, v_max) = self.data.compute_range();
         let rows = self.data.rows();
@@ -138,7 +139,8 @@ where
                     let label_text = (self.data.label_format)(value);
 
                     // Determine contrast color for label
-                    let label_color = crate::color::Color::CONTRAST.resolve(cell_color, text_pair, Some(background));
+                    let label_color =
+                        crate::color::Color::CONTRAST.resolve(cell_color, text_pair, &seed, Some(background));
 
                     label_frame.fill_text(CanvasText {
                         content: label_text,

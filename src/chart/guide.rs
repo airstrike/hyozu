@@ -1337,17 +1337,18 @@ where
 
         let background = design.background_color();
         let text_pair = design.text_pair();
+        let seed = design.palette_seed();
 
         let axis_color = self
             .axis
             .axis_color()
             .unwrap_or(design.axis_color())
-            .resolve(background, text_pair, None);
+            .resolve(background, text_pair, &seed, None);
         let label_color = self
             .axis
             .label_color()
             .unwrap_or(design.text_color())
-            .resolve(background, text_pair, None);
+            .resolve(background, text_pair, &seed, None);
 
         // Get bounds for coordinate mapping
         let (min_value, max_value) = (state.bounds.min(), state.bounds.max());

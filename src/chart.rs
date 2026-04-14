@@ -763,7 +763,8 @@ fn draw_tooltip_overlay<Message>(
 
     let background = design.background_color();
     let text_pair = design.text_pair();
-    let text_color = design.text_color().resolve(background, text_pair, None);
+    let seed = design.palette_seed();
+    let text_color = design.text_color().resolve(background, text_pair, &seed, None);
     let palette = scene.resolve_palette(design);
 
     // Compute the tracking pixel x from data_x
@@ -842,11 +843,10 @@ fn draw_tooltip_overlay<Message>(
                 // Resolve the bar's displayed color via the full priority
                 // chain (point_colors > color_by > series.color > palette)
                 // so the tooltip swatch matches the actual bar color.
-                let seed = design.palette_seed();
                 let color_idx = plot_area.color_offset_for(mark_idx, series_idx);
                 let fallback = palette.get(color_idx);
                 let resolved = bar_series.resolved_color_at(pt_idx, &seed, scene.user_palette(), fallback);
-                bars_resolved_color = Some(resolved.resolve(background, text_pair, None));
+                bars_resolved_color = Some(resolved.resolve(background, text_pair, &seed, None));
 
                 (
                     crate::data::Datum { x: pt.x, y: pt.y },
@@ -868,10 +868,10 @@ fn draw_tooltip_overlay<Message>(
         let series_color = if let Some(c) = bars_resolved_color {
             c
         } else if let Some(c) = explicit_color {
-            c.resolve(background, text_pair, None)
+            c.resolve(background, text_pair, &seed, None)
         } else {
             let color_idx = plot_area.color_offset_for(mark_idx, series_idx);
-            palette.get(color_idx).resolve(background, text_pair, None)
+            palette.get(color_idx).resolve(background, text_pair, &seed, None)
         };
 
         entries.push(hover::Entry {
@@ -987,7 +987,7 @@ fn draw_tooltip_overlay<Message>(
 
         // Tooltip background — opaque by default (ensures readability on transparent charts)
         let tooltip_bg = crate::core::Color { a: 1.0, ..background };
-        let divider_color = design.divider_color().resolve(background, text_pair, None);
+        let divider_color = design.divider_color().resolve(background, text_pair, &seed, None);
 
         renderer.fill_quad(
             crate::core::renderer::Quad {
@@ -1086,9 +1086,12 @@ pub fn default(design: &dyn design::Design) -> Style {
         border: crate::core::Border {
             width: 1.0,
             radius: 5.0.into(),
-            color: design
-                .divider_color()
-                .resolve(design.background_color(), design.text_pair(), None),
+            color: design.divider_color().resolve(
+                design.background_color(),
+                design.text_pair(),
+                &design.palette_seed(),
+                None,
+            ),
         },
     }
 }
@@ -1105,9 +1108,12 @@ pub fn bordered(design: &dyn design::Design) -> Style {
         border: crate::core::Border {
             width: 1.0,
             radius: 0.0.into(),
-            color: design
-                .divider_color()
-                .resolve(design.background_color(), design.text_pair(), None),
+            color: design.divider_color().resolve(
+                design.background_color(),
+                design.text_pair(),
+                &design.palette_seed(),
+                None,
+            ),
         },
     }
 }
@@ -1119,9 +1125,12 @@ pub fn filled(design: &dyn design::Design) -> Style {
         border: crate::core::Border {
             width: 1.0,
             radius: 5.0.into(),
-            color: design
-                .divider_color()
-                .resolve(design.background_color(), design.text_pair(), None),
+            color: design.divider_color().resolve(
+                design.background_color(),
+                design.text_pair(),
+                &design.palette_seed(),
+                None,
+            ),
         },
     }
 }

@@ -258,10 +258,11 @@ where
         let bounds = layout.bounds();
         let background = design.background_color();
         let text_pair = design.text_pair();
+        let seed = design.palette_seed();
         let font = design.font();
         let font_size = self.font_size;
         let swatch_size = font_size * SWATCH_SCALE;
-        let text_color = design.text_color().resolve(background, text_pair, None);
+        let text_color = design.text_color().resolve(background, text_pair, &seed, None);
         let row_height = font_size + PADDING_V * 2.0;
 
         for (row_idx, row) in state.rows.iter().enumerate() {
@@ -290,9 +291,9 @@ where
 
                 // Resolve swatch color
                 let raw_swatch = if let Some(entry_color) = entry.color {
-                    entry_color.resolve(background, text_pair, None)
+                    entry_color.resolve(background, text_pair, &seed, None)
                 } else {
-                    palette.get(entry_idx).resolve(background, text_pair, None)
+                    palette.get(entry_idx).resolve(background, text_pair, &seed, None)
                 };
                 let swatch_color = dim(raw_swatch);
 

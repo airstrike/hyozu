@@ -144,13 +144,13 @@ impl Gauge {
     /// starts where the previous one ended.
     ///
     /// ```
-    /// # use hyozu::gauge;
+    /// # use hyozu::{gauge, Color};
     /// gauge(75.0)
     ///     .range(0.0, 130.0)
-    ///     .zone(50.0, "red")    // 0 to 50
-    ///     .zone(90.0, "green")  // 50 to 90
-    ///     .zone(100.0, "yellow") // 90 to 100
-    ///     .zone(130.0, "red");  // 100 to 130
+    ///     .zone(50.0, Color::Danger)   // 0 to 50
+    ///     .zone(90.0, Color::Success)  // 50 to 90
+    ///     .zone(100.0, Color::Warning) // 90 to 100
+    ///     .zone(130.0, Color::Danger); // 100 to 130
     /// ```
     pub fn zone(mut self, to: f64, color: impl Into<Color>) -> Self {
         let from = self.zones.last().map_or(self.min, |z| z.to);
