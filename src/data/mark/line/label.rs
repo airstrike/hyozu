@@ -102,7 +102,7 @@ pub fn default(value: f64) -> String {
 impl Default for Label {
     fn default() -> Self {
         Self {
-            position: Position::Above,
+            position: Position::default(),
             show: Show::default(),
             format: Arc::new(default),
             color: None,

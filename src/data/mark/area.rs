@@ -1,7 +1,10 @@
 use crate::color::Color;
 use crate::data::axis::{self, Axis, Kind, Orientation, Placement};
-use crate::data::mark::line::label;
 use crate::data::{Datum, IntoDatums};
+
+pub mod label {
+    pub use crate::data::mark::line::label::*;
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Layout {
