@@ -49,29 +49,40 @@ pub fn hyozu_dark() -> Theme {
     })
 }
 
-/// Creates a custom "shadcn" theme, ported from icedxdy's shadcn/ui-derived
-/// light palette (Neutral variant, OKLCH values converted to sRGB).
+/// Creates a custom "shadcn" theme, using Nova's neutral base for
+/// background/text/primary and the canonical shadcn chart palette for the
+/// semantic accent slots.
+///
+/// shadcn/ui's Nova style is a component preset that layers on top of a base
+/// color (here: neutral). Neutral itself only defines one non-gray token
+/// (`destructive`), so a straight port produces near-identical pale grays in
+/// any categorical palette slot. To give hyozu a usable 5-way categorical
+/// palette we pull the three additional distinct hues from shadcn's published
+/// chart palette (`--chart-1`..`--chart-5`), which shipped with every v3 base
+/// color and is still the canonical "shadcn chart" color set.
 pub fn shadcn() -> Theme {
     Theme::custom("shadcn", Seed {
-        background: color!(0xffffff), // Near-white
-        text: color!(0x0a0a0a),       // Near-black foreground
-        primary: color!(0x171717),    // Neutral 900 primary
-        success: color!(0xf5f5f5),    // Neutral 50 accent
-        warning: color!(0xf5f5f5),    // Neutral 50 secondary
-        danger: color!(0xdf2225),     // Destructive red
+        background: color!(0xffffff), // Nova neutral background
+        text: color!(0x0a0a0a),       // Nova neutral foreground
+        primary: color!(0x171717),    // Nova neutral primary (Neutral 900)
+        success: color!(0x2a9d90),    // chart-2 light — teal
+        warning: color!(0xe8c468),    // chart-4 light — gold / amber
+        danger: color!(0xe76e50),     // chart-1 light — warm red
     })
 }
 
-/// Creates a custom "shadcn Dark" theme, ported from icedxdy's shadcn/ui-derived
-/// dark palette (Neutral variant, OKLCH values converted to sRGB).
+/// Creates a custom "shadcn Dark" theme, using Nova's neutral base for
+/// background/text/primary and the canonical shadcn chart palette for the
+/// semantic accent slots. See [`shadcn`] for the rationale on sourcing the
+/// non-gray hues from shadcn's chart palette rather than from Nova itself.
 pub fn shadcn_dark() -> Theme {
     Theme::custom("shadcn Dark", Seed {
-        background: color!(0x0a0a0a), // Near-black
-        text: color!(0xfafafa),       // Near-white foreground
-        primary: color!(0xe5e5e5),    // Neutral 200 primary
-        success: color!(0x404040),    // Neutral 700 accent
-        warning: color!(0x262626),    // Neutral 800 secondary
-        danger: color!(0xff6467),     // Destructive red
+        background: color!(0x0a0a0a), // Nova neutral background
+        text: color!(0xfafafa),       // Nova neutral foreground
+        primary: color!(0xe5e5e5),    // Nova neutral primary (Neutral 200)
+        success: color!(0x2eb88a),    // chart-2 dark — green
+        warning: color!(0xe88c30),    // chart-3 dark — orange / amber
+        danger: color!(0xe23670),     // chart-5 dark — magenta-red
     })
 }
 
