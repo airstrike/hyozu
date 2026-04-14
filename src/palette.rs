@@ -25,6 +25,49 @@ impl Palette {
     pub const SEQUENTIAL: Palette = Palette::Sequential(Color::Primary);
 }
 
+/// Convenience constructor for [`Palette::Sequential`]. Accepts any value
+/// that can be converted into a [`Color`] — semantic seed slots, fixed RGB,
+/// hex `u32`, raw `iced::Color`, or a [`Pair`](crate::color::Pair).
+///
+/// # Examples
+///
+/// ```
+/// use hyozu::{palette, Color};
+///
+/// // Theme primary (the historical default)
+/// let p = palette::sequential(Color::Primary);
+///
+/// // Shades of the theme's success color
+/// let p = palette::sequential(Color::Success);
+///
+/// // Explicit hex (via `From<u32> for Color`)
+/// let p = palette::sequential(0x35_70_B0_u32);
+/// ```
+pub fn sequential(hue: impl Into<Color>) -> Palette {
+    Palette::Sequential(hue.into())
+}
+
+/// Convenience constructor for [`Palette::Categorical`]. Symmetric counterpart
+/// to [`sequential`] for code that prefers function-call construction over
+/// the bare variant name.
+///
+/// `Palette::Categorical` is a unit variant (it sources its colors from the
+/// theme's [`PaletteSeed`] at draw time), so this helper takes no arguments.
+/// If you want an explicit color list for categorical assignment, see
+/// [`crate::encoding::Encoding::range`] on the fill channel — that's the
+/// grammar-of-graphics path for "use these specific colors in order."
+///
+/// # Examples
+///
+/// ```
+/// use hyozu::palette;
+///
+/// let p = palette::categorical();
+/// ```
+pub fn categorical() -> Palette {
+    Palette::Categorical
+}
+
 /// Seed colors extracted from a theme, used to generate palettes.
 #[derive(Debug, Clone, Copy)]
 pub struct PaletteSeed {
@@ -451,6 +494,21 @@ mod tests {
         // primary-based sequence.
         let primary_resolved = Resolved::resolve(&Palette::SEQUENTIAL, &seed, 4);
         assert_ne!(resolved.get(0), primary_resolved.get(0));
+    }
+
+    #[test]
+    fn helper_sequential_wraps_into_color() {
+        // Verify the free function builds the same Palette as the bare
+        // variant constructor, both for explicit semantic variants and for
+        // values that need to flow through `Into<Color>` (here a hex u32).
+        assert_eq!(sequential(Color::Success), Palette::Sequential(Color::Success));
+        let red_hex: u32 = 0xFF_00_00;
+        assert_eq!(sequential(red_hex), Palette::Sequential(Color::from(red_hex)));
+    }
+
+    #[test]
+    fn helper_categorical_returns_unit_variant() {
+        assert_eq!(categorical(), Palette::Categorical);
     }
 
     #[test]
