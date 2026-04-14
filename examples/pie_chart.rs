@@ -1,5 +1,5 @@
 use hyozu::mark::pie;
-use hyozu::{Color, data, palette, pie as pie_fn};
+use hyozu::{data, palette, pie as pie_fn};
 use iced::widget::{center, column, pick_list, row};
 use iced::{Center, Fill, Subscription, Task, Theme, keyboard};
 
@@ -42,7 +42,7 @@ impl App {
         Self {
             data: data(chart)
                 .title("Browser Market Share")
-                .palette(palette::sequential(Color::Success)),
+                .palette(palette::categorical()),
             theme: hyozu::theme::paper(),
             all_themes: hyozu::theme::all_themes().collect(),
         }
