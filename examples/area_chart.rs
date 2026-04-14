@@ -1,7 +1,8 @@
 use iced::Task;
 use iced::widget::center;
 
-use hyozu::{area, areas, chart, data};
+use hyozu::mark::area::label::{Label, Position, Show};
+use hyozu::{area, areas, chart, data, palette};
 
 pub fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
@@ -26,13 +27,18 @@ impl App {
         Self {
             data: data(
                 areas([
-                    area([2, 4, 3, 5, 4, 6, 5]).with_name("Revenue"),
-                    area([1, 2, 2, 3, 2, 4, 3]).with_name("Expenses"),
+                    area([218, 250, 230, 270, 240, 280, 260])
+                        .with_name("Revenue")
+                        .data_labels(Label::new().show(Show::FirstAndLast)),
+                    area([150, 180, 160, 200, 170, 210, 190])
+                        .with_name("Expenses")
+                        .data_labels(Label::new().show(Show::Any) + Position::Below),
                 ])
                 .stacked()
                 .gradient(true),
             )
-            .title("Revenue vs Expenses"),
+            .title("Revenue vs Expenses")
+            .palette(palette::categorical()),
         }
     }
 

@@ -839,6 +839,7 @@ where
 
         let bg = design.background_color();
         let text_pair = design.text_pair();
+        let seed = design.palette_seed();
 
         let shows_major_x = x_axis.map(|a| a.shows_grid()).unwrap_or(false);
         let shows_major_y = y_axis.map(|a| a.shows_grid()).unwrap_or(false);
@@ -880,7 +881,7 @@ where
             let color = x_axis
                 .and_then(|a| a.minor_grid_color())
                 .unwrap_or_else(|| design.minor_grid_color())
-                .resolve(bg, text_pair, None);
+                .resolve(bg, text_pair, &seed, None);
             let y0 = snap_v(top);
             let y1 = snap_v(bottom);
             let path = Path::new(|b| {
@@ -905,7 +906,7 @@ where
             let color = y_axis
                 .and_then(|a| a.minor_grid_color())
                 .unwrap_or_else(|| design.minor_grid_color())
-                .resolve(bg, text_pair, None);
+                .resolve(bg, text_pair, &seed, None);
             let x0 = snap_h(left);
             let x1 = snap_h(right);
             let path = Path::new(|b| {
@@ -931,7 +932,7 @@ where
             let color = x_axis
                 .and_then(|a| a.grid_color())
                 .unwrap_or_else(|| design.grid_color())
-                .resolve(bg, text_pair, None);
+                .resolve(bg, text_pair, &seed, None);
             let y0 = snap_v(top);
             let y1 = snap_v(bottom);
             let path = Path::new(|b| {
@@ -951,7 +952,7 @@ where
             let color = y_axis
                 .and_then(|a| a.grid_color())
                 .unwrap_or_else(|| design.grid_color())
-                .resolve(bg, text_pair, None);
+                .resolve(bg, text_pair, &seed, None);
             let x0 = snap_h(left);
             let x1 = snap_h(right);
             let path = Path::new(|b| {
@@ -1024,6 +1025,7 @@ where
 
         let bg = design.background_color();
         let text_pair = design.text_pair();
+        let seed = design.palette_seed();
 
         // Same snap functions as `draw_gridlines` — this is what makes the
         // border lines structurally coincide with the extreme gridlines.
@@ -1048,7 +1050,7 @@ where
         let resolve = |axis: Option<&crate::data::Axis>| {
             axis.and_then(|a| a.axis_color())
                 .unwrap_or_else(|| design.axis_color())
-                .resolve(bg, text_pair, None)
+                .resolve(bg, text_pair, &seed, None)
         };
 
         let mut frame = Frame::new(renderer, size);
@@ -1100,6 +1102,7 @@ where
 
     /// Draws the plot area by delegating to each series
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     pub fn draw<D>(
         &self,
         tree: &crate::core::widget::Tree,
@@ -1110,6 +1113,7 @@ where
         cursor: crate::core::mouse::Cursor,
         viewport: &crate::core::Rectangle,
         palette: &crate::palette::Resolved,
+        chart_user_palette: Option<&crate::palette::Palette>,
         selection: &Option<crate::target::Target>,
         hidden_series: &std::collections::HashSet<String>,
     ) where
@@ -1164,6 +1168,7 @@ where
                         viewport,
                         color_offset,
                         palette,
+                        chart_user_palette,
                         i,
                         selection,
                     );

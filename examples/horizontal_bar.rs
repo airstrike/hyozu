@@ -1,7 +1,9 @@
 use iced::widget::center;
-use iced::{Task, Theme};
+use iced::{Element, Theme};
 
-use hyozu::{bars, data};
+use hyozu::{bar, bars, data, encoding};
+
+const REGIONS: [&str; 5] = ["North", "South", "East", "West", "Central"];
 
 pub fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
@@ -19,20 +21,19 @@ pub type Message = ();
 impl App {
     fn new() -> Self {
         Self {
-            data: data(bars([120, 190, 150, 80, 210]).horizontal())
+            data: data(bars([bar([120, 190, 150, 80, 210]).color_by(encoding::key(|i, _| REGIONS[i]))]).horizontal())
+                .palette(hyozu::Palette::Categorical)
                 .title("Sales by Region")
                 .x_axis_labels(|v: f64| format!("{:.0}", v))
-                .y_axis_labels(["North", "South", "East", "West", "Central"]),
+                .y_axis_labels(REGIONS),
         }
     }
 
-    fn view(&self) -> iced::Element<'_, Message> {
-        center(hyozu::chart(&self.data).design(&Theme::Light).padding(40))
+    fn view(&self) -> Element<'_, Message> {
+        center(hyozu::chart(&self.data).design(&Theme::Light))
             .padding(20)
             .into()
     }
 
-    fn update(&mut self, _: Message) -> Task<Message> {
-        Task::none()
-    }
+    fn update(&mut self, _: Message) {}
 }

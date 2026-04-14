@@ -3,7 +3,7 @@ use crate::core::Size;
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
 use crate::line::LineStyle;
-use crate::widget::canvas::{Frame, LineCap, LineDash, Path, Stroke};
+use crate::widget::canvas::{Frame, LineCap, LineDash, Path, Stroke, Text as CanvasText};
 
 use crate::core::text;
 use crate::widget::renderer::geometry;
@@ -159,8 +159,7 @@ where
                     other => {
                         // For fixed positions, use pathfinding too to avoid obstacles
                         let start_rect = compute_label_rect(*pixel_point, label_width, label_height, other);
-                        // Search from the fixed position to find valid placement
-                        search_from_position(
+                        let rect = search_from_position(
                             start_rect,
                             &segments,
                             &state.label_rects,
@@ -168,8 +167,10 @@ where
                             Some(plane.bounds),
                             10,
                         )
-                        .map(|(rect, _)| (other, rect))
-                        .unwrap_or((other, start_rect))
+                        .map(|(rect, _)| rect)
+                        .unwrap_or(start_rect);
+                        // Guarantee visibility at edges even if no valid slot exists.
+                        (other, clamp_rect_to_bounds(rect, plane.bounds))
                     }
                 };
 
@@ -207,15 +208,16 @@ where
 
         let background = theme.background_color();
         let text_pair = theme.text_pair();
+        let seed = theme.palette_seed();
 
         // Get the layout bounds to offset the line to its actual screen position
         let layout_bounds = layout.bounds();
 
         // Determine color for this line
         let color = if let Some(data_color) = self.data.color {
-            data_color.resolve(background, text_pair, None)
+            data_color.resolve(background, text_pair, &seed, None)
         } else {
-            palette.get(color_offset).resolve(background, text_pair, None)
+            palette.get(color_offset).resolve(background, text_pair, &seed, None)
         };
 
         let thickness = 1.5;
@@ -264,7 +266,7 @@ where
         // Draw markers if configured
         if let Some(marker_config) = &self.data.marker {
             let marker_color = if let Some(marker_color_spec) = marker_config.color {
-                marker_color_spec.resolve(background, text_pair, None)
+                marker_color_spec.resolve(background, text_pair, &seed, None)
             } else {
                 color
             };
@@ -397,7 +399,7 @@ where
 
                 // Stroke the marker if configured
                 if let Some(stroke_color_spec) = marker_config.stroke {
-                    let stroke_color = stroke_color_spec.resolve(background, text_pair, None);
+                    let stroke_color = stroke_color_spec.resolve(background, text_pair, &seed, None);
                     marker_frame.stroke(
                         &path,
                         Stroke::default()
@@ -427,10 +429,27 @@ where
 
             // Resolve label color (defaults to line color)
             let label_color = if let Some(label_color_spec) = label_config.color {
-                label_color_spec.resolve(background, text_pair, None)
+                label_color_spec.resolve(background, text_pair, &seed, None)
             } else {
                 color
             };
+
+            // Build the label font once per series, applying weight/style
+            // overrides from the label config. Same approach bar uses so that
+            // bold/italic data labels work consistently across mark types.
+            let mut label_font = theme.font();
+            if let Some(w) = label_config.weight {
+                label_font.weight = w;
+            }
+            if let Some(s) = label_config.style {
+                label_font.style = s;
+            }
+
+            let label_fill_color = label_config
+                .fill
+                .map(|spec| spec.resolve(background, text_pair, &seed, None));
+
+            let mut label_frame = Frame::new(renderer, layout_bounds.size());
 
             for ((label_rect, label_text), resolved_pos) in state
                 .label_rects
@@ -438,58 +457,53 @@ where
                 .zip(state.label_texts.iter())
                 .zip(state.label_positions.iter())
             {
-                // Calculate alignment based on resolved position
+                // Background fill, if configured. The placement search already
+                // produced a tight rect for the text, so we just use it.
+                if let Some(fill_color) = label_fill_color {
+                    let fill_path = Path::new(|b| {
+                        b.rectangle(
+                            Point::new(label_rect.x, label_rect.y),
+                            crate::core::Size::new(label_rect.width, label_rect.height),
+                        );
+                    });
+                    label_frame.fill(&fill_path, fill_color);
+                }
+
                 let (align_x, align_y) = alignment_for_position(*resolved_pos);
 
-                // Calculate anchor point based on position
                 let (anchor_x, anchor_y) = match resolved_pos {
-                    Position::Auto | Position::Above => (
-                        layout_bounds.x + label_rect.x + label_rect.width / 2.0,
-                        layout_bounds.y + label_rect.y + label_rect.height,
-                    ),
-                    Position::Below => (
-                        layout_bounds.x + label_rect.x + label_rect.width / 2.0,
-                        layout_bounds.y + label_rect.y,
-                    ),
-                    Position::Left => (
-                        layout_bounds.x + label_rect.x + label_rect.width,
-                        layout_bounds.y + label_rect.y + label_rect.height / 2.0,
-                    ),
-                    Position::Right => (
-                        layout_bounds.x + label_rect.x,
-                        layout_bounds.y + label_rect.y + label_rect.height / 2.0,
-                    ),
+                    Position::Auto | Position::Above => {
+                        (label_rect.x + label_rect.width / 2.0, label_rect.y + label_rect.height)
+                    }
+                    Position::Below => (label_rect.x + label_rect.width / 2.0, label_rect.y),
+                    Position::Left => (label_rect.x + label_rect.width, label_rect.y + label_rect.height / 2.0),
+                    Position::Right => (label_rect.x, label_rect.y + label_rect.height / 2.0),
                 };
 
-                renderer.fill_text(
-                    crate::core::text::Text {
-                        content: label_text.clone(),
-                        bounds: crate::core::Size::new(1000.0, 1000.0),
-                        size: label_size.into(),
-                        font: renderer.default_font(),
-                        align_x: align_x.into(),
-                        align_y,
-                        line_height: crate::core::text::LineHeight::default(),
-                        shaping: crate::core::text::Shaping::Basic,
-                        wrapping: crate::core::text::Wrapping::None,
-                        ellipsis: crate::core::text::Ellipsis::default(),
-                        hint_factor: renderer.scale_factor(),
-                        font_features: Vec::new(),
-                        font_variations: Vec::new(),
-                        letter_spacing: Default::default(),
-                        weight: None,
-                    },
-                    crate::core::Point::new(anchor_x, anchor_y),
-                    label_color,
-                    *_viewport,
-                );
+                label_frame.fill_text(CanvasText {
+                    content: label_text.clone(),
+                    position: Point::new(anchor_x, anchor_y),
+                    color: label_color,
+                    size: label_size.into(),
+                    font: label_font,
+                    align_x: align_x.into(),
+                    align_y,
+                    line_height: crate::core::text::LineHeight::default(),
+                    shaping: crate::core::text::Shaping::Basic,
+                    ..CanvasText::default()
+                });
             }
+
+            let label_geometry = label_frame.into_geometry();
+            renderer.with_translation(crate::core::Vector::new(layout_bounds.x, layout_bounds.y), |renderer| {
+                renderer.draw_geometry(label_geometry);
+            });
         }
     }
 }
 
 /// Compute label rectangle for a given position (pixel coordinates)
-fn compute_label_rect(point: Point, label_width: f32, label_height: f32, position: Position) -> Rectangle {
+pub(super) fn compute_label_rect(point: Point, label_width: f32, label_height: f32, position: Position) -> Rectangle {
     let padding = 6.0;
 
     match position {
@@ -513,7 +527,7 @@ fn compute_label_rect(point: Point, label_width: f32, label_height: f32, positio
 }
 
 /// Get text alignment for a position
-fn alignment_for_position(
+pub(super) fn alignment_for_position(
     position: Position,
 ) -> (crate::core::alignment::Horizontal, crate::core::alignment::Vertical) {
     match position {
@@ -630,8 +644,29 @@ fn search_from_position(
     None
 }
 
+/// Shift `rect` so it fits inside `bounds` without resizing. If the rect is
+/// larger than the bounds on an axis, that axis is left anchored at the
+/// bounds origin (prefers showing the left/top portion of the text).
+pub(super) fn clamp_rect_to_bounds(rect: Rectangle, bounds: Rectangle) -> Rectangle {
+    let mut x = rect.x;
+    if x + rect.width > bounds.x + bounds.width {
+        x = bounds.x + bounds.width - rect.width;
+    }
+    if x < bounds.x {
+        x = bounds.x;
+    }
+    let mut y = rect.y;
+    if y + rect.height > bounds.y + bounds.height {
+        y = bounds.y + bounds.height - rect.height;
+    }
+    if y < bounds.y {
+        y = bounds.y;
+    }
+    Rectangle::new(Point::new(x, y), crate::core::Size::new(rect.width, rect.height))
+}
+
 /// Find the best position for a label, returning both the position and final rect
-fn find_best_label_placement(
+pub(super) fn find_best_label_placement(
     point: Point,
     label_width: f32,
     label_height: f32,
@@ -673,11 +708,22 @@ fn find_best_label_placement(
         }
     }
 
-    // Return best found, or fallback to Above at origin
-    best_result.map(|(pos, rect, _)| (pos, rect)).unwrap_or_else(|| {
+    // Return best found, or fallback to Above clamped into bounds. Clamping
+    // guarantees that edge-of-plot labels (first/last point) stay visible
+    // even when the spiral search couldn't find a valid slot within its
+    // step budget — we'd rather accept a small overlap with a line than
+    // render "190" as "19".
+    let (pos, rect) = best_result.map(|(pos, rect, _)| (pos, rect)).unwrap_or_else(|| {
         let rect = compute_label_rect(point, label_width, label_height, Position::Above);
         (Position::Above, rect)
-    })
+    });
+
+    let rect = match plot_bounds {
+        Some(bounds) => clamp_rect_to_bounds(rect, bounds),
+        None => rect,
+    };
+
+    (pos, rect)
 }
 
 #[cfg(test)]
@@ -878,6 +924,113 @@ mod tests {
             !crate::geometry::intersect::line_rect(Point::new(0.0, 0.0), Point::new(20.0, 20.0), rect),
             "rect should not intersect line"
         );
+    }
+
+    #[test]
+    fn find_best_placement_falls_back_clamped_when_search_fails() {
+        // Force the spiral to fail for every candidate by making the label
+        // wider than the plot bounds. Before clamping, the fallback returned
+        // an Above rect centered on the data point, bleeding off the left
+        // edge. Now the returned rect is clamped into bounds so the text
+        // stays visible (even though it's no longer centered on the point).
+        let bounds = plot_bounds();
+        let point = Point::new(bounds.x + 5.0, 100.0);
+        let wide_label = bounds.width + 20.0;
+        let segments: Vec<(Point, Point)> = vec![];
+        let existing: Vec<Rectangle> = vec![];
+        let obstacles: Vec<Rectangle> = vec![];
+
+        let (_pos, rect) = find_best_label_placement(
+            point,
+            wide_label,
+            LABEL_HEIGHT,
+            &segments,
+            &existing,
+            &obstacles,
+            Some(bounds),
+        );
+
+        // Label wider than bounds: clamp leaves it anchored at bounds.x.
+        assert_eq!(rect.x, bounds.x);
+        assert!(rect.y >= bounds.y);
+        assert!(rect.y + rect.height <= bounds.y + bounds.height);
+    }
+
+    #[test]
+    fn find_best_placement_at_left_edge_stays_in_bounds() {
+        // Repro of the area_chart example: first data point of a stacked
+        // series sits at plot_bounds.x = 0, and the label "150" needs to fit
+        // inside bounds without bleeding off the left edge. The returned rect
+        // must satisfy `rect.x >= bounds.x` so the text isn't clipped.
+        let point = Point::new(0.0, 100.0);
+        let label_width = 18.0; // "150" / "190" at ~6px per char
+        let label_height = 14.0;
+        // Two series' worth of segments, as area.rs builds via `all_segments`
+        let segments = vec![
+            (Point::new(0.0, 100.0), Point::new(60.0, 90.0)),
+            (Point::new(0.0, 50.0), Point::new(60.0, 45.0)),
+        ];
+        let existing: Vec<Rectangle> = vec![];
+        let obstacles: Vec<Rectangle> = vec![];
+        let bounds = plot_bounds();
+
+        let (_pos, rect) = find_best_label_placement(
+            point,
+            label_width,
+            label_height,
+            &segments,
+            &existing,
+            &obstacles,
+            Some(bounds),
+        );
+
+        assert!(
+            rect.x >= bounds.x,
+            "left edge label bled outside plot bounds: rect.x={}, bounds.x={}",
+            rect.x,
+            bounds.x
+        );
+        assert!(
+            rect.x + rect.width <= bounds.x + bounds.width,
+            "right edge of label bled outside plot bounds"
+        );
+    }
+
+    #[test]
+    fn find_best_placement_at_right_edge_stays_in_bounds() {
+        // Mirror of the left-edge test for the last data point.
+        let bounds = plot_bounds();
+        let point = Point::new(bounds.x + bounds.width, 100.0);
+        let label_width = 18.0;
+        let label_height = 14.0;
+        let segments = vec![
+            (Point::new(bounds.x + bounds.width - 60.0, 90.0), point),
+            (
+                Point::new(bounds.x + bounds.width - 60.0, 45.0),
+                Point::new(bounds.x + bounds.width, 50.0),
+            ),
+        ];
+        let existing: Vec<Rectangle> = vec![];
+        let obstacles: Vec<Rectangle> = vec![];
+
+        let (_pos, rect) = find_best_label_placement(
+            point,
+            label_width,
+            label_height,
+            &segments,
+            &existing,
+            &obstacles,
+            Some(bounds),
+        );
+
+        assert!(
+            rect.x + rect.width <= bounds.x + bounds.width,
+            "right edge label bled outside plot bounds: rect.x={}, rect.width={}, bounds right={}",
+            rect.x,
+            rect.width,
+            bounds.x + bounds.width
+        );
+        assert!(rect.x >= bounds.x, "left edge of label bled outside plot bounds");
     }
 
     #[test]

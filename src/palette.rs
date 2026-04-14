@@ -6,10 +6,101 @@ use crate::data::mark::Mark;
 pub enum Palette {
     /// Distinct hues for categorical data (pie, multi-series).
     Categorical,
-    /// Shades of theme's primary color (1-2 series bars, gauge).
-    Sequential,
-    /// Interpolate between 2+ color stops in OKLch.
-    Gradient(Vec<crate::core::Color>),
+    /// Shades of a single hue. The inner [`Color`] picks which hue:
+    /// pass [`Color::Primary`] (the historical default) for shades of
+    /// the theme's primary, [`Color::Success`] for a green sequence,
+    /// [`Color::Fixed`] for an explicit hex color, or any of the other
+    /// semantic seed slots. Adaptive variants like [`Color::Contrast`]
+    /// don't carry a meaningful single hue and fall back to the theme's
+    /// primary at resolve time.
+    Sequential(Color),
+    /// Interpolate between 2+ color stops in OKLch. Each stop can be a
+    /// fixed RGB value or a semantic seed reference (e.g.
+    /// `[Color::Success, Color::Danger]` interpolates from the theme's
+    /// success hue to its danger hue). Resolved against the design seed
+    /// at draw time so theme changes flow through automatically.
+    Gradient(Vec<Color>),
+}
+
+impl Palette {
+    /// Convenience constant for the historical default sequential
+    /// palette: shades of the theme's primary color. Equivalent to
+    /// `Palette::Sequential(Color::Primary)`.
+    pub const SEQUENTIAL: Palette = Palette::Sequential(Color::Primary);
+}
+
+/// Convenience constructor for [`Palette::Sequential`]. Accepts any value
+/// that can be converted into a [`Color`] — semantic seed slots, fixed RGB,
+/// hex `u32`, raw `iced::Color`, or a [`Pair`](crate::color::Pair).
+///
+/// # Examples
+///
+/// ```
+/// use hyozu::{palette, Color};
+///
+/// // Theme primary (the historical default)
+/// let p = palette::sequential(Color::Primary);
+///
+/// // Shades of the theme's success color
+/// let p = palette::sequential(Color::Success);
+///
+/// // Explicit hex (via `From<u32> for Color`)
+/// let p = palette::sequential(0x3570B0);
+/// ```
+pub fn sequential(hue: impl Into<Color>) -> Palette {
+    Palette::Sequential(hue.into())
+}
+
+/// Convenience constructor for [`Palette::Categorical`]. Symmetric counterpart
+/// to [`sequential`] for code that prefers function-call construction over
+/// the bare variant name.
+///
+/// `Palette::Categorical` is a unit variant (it sources its colors from the
+/// theme's [`PaletteSeed`] at draw time), so this helper takes no arguments.
+/// If you want an explicit color list for categorical assignment, see
+/// [`crate::encoding::Encoding::range`] on the fill channel — that's the
+/// grammar-of-graphics path for "use these specific colors in order."
+///
+/// # Examples
+///
+/// ```
+/// use hyozu::palette;
+///
+/// let p = palette::categorical();
+/// ```
+pub fn categorical() -> Palette {
+    Palette::Categorical
+}
+
+/// Convenience constructor for [`Palette::Gradient`]. Accepts any iterable
+/// of values that convert into [`Color`], so semantic seed slots, fixed
+/// RGB, hex `u32`, and adaptive `Pair`s all flow through naturally.
+///
+/// Stops are interpolated in OKLch at draw time; semantic variants like
+/// [`Color::Success`] are resolved against the active theme's seed, so a
+/// `[Color::Success, Color::Danger]` gradient automatically tracks
+/// theme changes.
+///
+/// # Examples
+///
+/// ```
+/// use hyozu::{palette, Color};
+///
+/// // Theme-driven semantic gradient — success → danger
+/// let p = palette::gradient([Color::Success, Color::Danger]);
+///
+/// // Explicit hex stops via `From<u32> for Color`
+/// let p = palette::gradient([0xff0000, 0xffff00, 0x00ff00]);
+///
+/// // Mix-and-match (semantic + hex)
+/// let p = palette::gradient([Color::from(0xffffff), Color::Primary]);
+/// ```
+pub fn gradient<I, C>(stops: I) -> Palette
+where
+    I: IntoIterator<Item = C>,
+    C: Into<Color>,
+{
+    Palette::Gradient(stops.into_iter().map(Into::into).collect())
 }
 
 /// Seed colors extracted from a theme, used to generate palettes.
@@ -35,8 +126,11 @@ impl Resolved {
         let n = n.max(1);
         let colors = match palette {
             Palette::Categorical => generate_categorical(seed, n),
-            Palette::Sequential => generate_sequential(seed.primary, seed.background, n),
-            Palette::Gradient(stops) => generate_gradient(stops, n),
+            Palette::Sequential(source) => {
+                let hue = source.resolve_seed(seed);
+                generate_sequential(hue, seed.background, n)
+            }
+            Palette::Gradient(stops) => generate_gradient(stops, seed, n),
         };
         Self { colors }
     }
@@ -72,41 +166,41 @@ impl Palette {
                     if area.series.len() >= 3 {
                         Palette::Categorical
                     } else {
-                        Palette::Sequential
+                        Palette::SEQUENTIAL
                     }
                 }
                 Mark::Pie(_) => Palette::Categorical,
-                Mark::Gauge(_) => Palette::Sequential,
-                Mark::Waterfall(_) => Palette::Sequential,
+                Mark::Gauge(_) => Palette::SEQUENTIAL,
+                Mark::Waterfall(_) => Palette::SEQUENTIAL,
                 Mark::Bars(bars) => {
                     if bars.series.len() >= 3 {
                         Palette::Categorical
                     } else {
-                        Palette::Sequential
+                        Palette::SEQUENTIAL
                     }
                 }
                 Mark::BoxPlot(bp) => {
                     if bp.entries.len() >= 3 {
                         Palette::Categorical
                     } else {
-                        Palette::Sequential
+                        Palette::SEQUENTIAL
                     }
                 }
                 Mark::Treemap(_) => Palette::Categorical,
                 Mark::BubbleMap(_) => Palette::Categorical,
-                Mark::Choropleth(_) => Palette::Sequential,
-                Mark::Line(_) | Mark::Xy(_) => Palette::Sequential,
-                Mark::Heatmap(_) => Palette::Sequential,
+                Mark::Choropleth(_) => Palette::SEQUENTIAL,
+                Mark::Line(_) | Mark::Xy(_) => Palette::SEQUENTIAL,
+                Mark::Heatmap(_) => Palette::SEQUENTIAL,
                 Mark::Violin(v) => {
                     if v.entries.len() >= 3 {
                         Palette::Categorical
                     } else {
-                        Palette::Sequential
+                        Palette::SEQUENTIAL
                     }
                 }
-                Mark::Tick(_) => Palette::Sequential,
-                Mark::Rule(_) => Palette::Sequential,
-                Mark::Band(_) => Palette::Sequential,
+                Mark::Tick(_) => Palette::SEQUENTIAL,
+                Mark::Rule(_) => Palette::SEQUENTIAL,
+                Mark::Band(_) => Palette::SEQUENTIAL,
             };
         }
 
@@ -249,6 +343,26 @@ fn generate_categorical(seed: &PaletteSeed, n: usize) -> Vec<Color> {
 }
 
 /// Generate sequential colors: shades of one hue.
+///
+/// Targets the same perceptual envelope as ColorBrewer-class single-hue
+/// palettes (Blues, Greens, Reds, etc.) which D3, Vega, matplotlib,
+/// Bokeh, Plotly, and Observable Plot all ship verbatim. Two principles:
+///
+/// 1. **Wide lightness range (~0.57 ΔL in OKLch)** — the lightest slot
+///    is nearly paper-white (L≈0.95) and the deepest is a saturated
+///    near-navy (L≈0.38). Earlier hyozu builds used a 0.40 range which
+///    put the per-step ΔL right at the perceptual discrimination
+///    threshold, so adjacent shades looked "basically identical".
+/// 2. **Chroma tapers as lightness approaches 1.0** — saturated colors
+///    at very high L look unnaturally pastel and exceed the sRGB gamut
+///    edge for most hues. ColorBrewer's empirical profile drops chroma
+///    by ~75% between L=0.7 and L=1.0 while keeping it at full strength
+///    for darker stops. Matched here with a piecewise-linear taper.
+///
+/// Direction (which slot is darkest vs lightest) is preserved from the
+/// pre-widen behavior: `palette[0]` is the most prominent shade for
+/// the active background — darkest on light backgrounds, brightest on
+/// dark backgrounds — so existing call sites' visual order is unchanged.
 fn generate_sequential(primary: crate::core::Color, background: crate::core::Color, n: usize) -> Vec<Color> {
     if n == 1 {
         return vec![Color::Fixed(primary)];
@@ -257,19 +371,30 @@ fn generate_sequential(primary: crate::core::Color, background: crate::core::Col
     let oklch = to_oklch(primary);
     let dark_bg = is_dark_background(background);
 
+    // ColorBrewer-class span. ΔL ≈ 0.57 on light bg, 0.52 on dark.
     let (l_start, l_end) = if dark_bg {
-        (0.80_f32, 0.45_f32)
+        (0.92_f32, 0.40_f32) // bright → deep on dark backgrounds
     } else {
-        (0.35_f32, 0.75_f32)
+        (0.38_f32, 0.95_f32) // deep → light on light backgrounds
     };
 
     (0..n)
         .map(|i| {
             let t = i as f32 / (n - 1).max(1) as f32;
             let l = l_start + (l_end - l_start) * t;
+            // Chroma stays at full strength for L ≤ 0.70, then linearly
+            // tapers to 25% as L approaches 1.0. Direction-agnostic
+            // (depends on output lightness, not on `t`), so dark and
+            // light backgrounds get the same physical treatment.
+            let c = if l <= 0.70 {
+                oklch.c
+            } else {
+                let taper = (l - 0.70) / 0.30; // 0..1 across L=0.70..1.0
+                oklch.c * (1.0 - 0.75 * taper)
+            };
             Color::Fixed(from_oklch(Oklch {
                 l,
-                c: oklch.c,
+                c,
                 h: oklch.h,
                 a: oklch.a,
             }))
@@ -309,18 +434,23 @@ pub(crate) fn sample_gradient(stops: &[crate::core::Color], t: f32) -> crate::co
 }
 
 /// Generate gradient colors: interpolate between stops in OKLch.
-fn generate_gradient(stops: &[crate::core::Color], n: usize) -> Vec<Color> {
+///
+/// Stops are wrapper [`Color`]s — semantic seed slots are resolved
+/// through `seed`, and adaptive `Contrast` stops fall back to
+/// `seed.primary` (same rule as [`Color::resolve_seed`]).
+fn generate_gradient(stops: &[Color], seed: &PaletteSeed, n: usize) -> Vec<Color> {
     if stops.is_empty() {
         return vec![Color::Fixed(crate::core::Color::BLACK); n];
     }
-    if stops.len() == 1 || n == 1 {
-        return vec![Color::Fixed(stops[0]); n];
+    let resolved: Vec<crate::core::Color> = stops.iter().map(|c| c.resolve_seed(seed)).collect();
+    if resolved.len() == 1 || n == 1 {
+        return vec![Color::Fixed(resolved[0]); n];
     }
 
     (0..n)
         .map(|i| {
             let t = i as f32 / (n - 1).max(1) as f32;
-            Color::Fixed(sample_gradient(stops, t))
+            Color::Fixed(sample_gradient(&resolved, t))
         })
         .collect()
 }
@@ -376,25 +506,156 @@ mod tests {
     #[test]
     fn sequential_1_returns_primary() {
         let seed = test_seed();
-        let resolved = Resolved::resolve(&Palette::Sequential, &seed, 1);
+        let resolved = Resolved::resolve(&Palette::SEQUENTIAL, &seed, 1);
         assert_eq!(resolved.len(), 1);
     }
 
     #[test]
     fn sequential_5_has_varying_lightness() {
         let seed = test_seed();
-        let resolved = Resolved::resolve(&Palette::Sequential, &seed, 5);
+        let resolved = Resolved::resolve(&Palette::SEQUENTIAL, &seed, 5);
         assert_eq!(resolved.len(), 5);
     }
 
     #[test]
+    fn sequential_5_spans_colorbrewer_class_lightness_range() {
+        // Sequential N=5 should span at least 0.45 of OKLch lightness so
+        // the shades are visually distinct. ColorBrewer-class palettes
+        // (Blues, Greens, etc.) use ~0.53; we target similar to avoid the
+        // "basically identical" perceptual flatness that the earlier 0.40
+        // range produced. Property test, not exact numbers, so future
+        // tweaks within the safe band don't need to update the test.
+        let primary = crate::core::Color::from_rgb(0.20, 0.40, 0.80);
+        let on_light = generate_sequential(primary, crate::core::Color::WHITE, 5);
+        let on_dark = generate_sequential(primary, crate::core::Color::BLACK, 5);
+
+        for (label, palette) in [("light", &on_light), ("dark", &on_dark)] {
+            let lightnesses: Vec<f32> = palette
+                .iter()
+                .map(|c| {
+                    let Color::Fixed(rgb) = c else {
+                        panic!("expected Fixed color from generate_sequential");
+                    };
+                    to_oklch(*rgb).l
+                })
+                .collect();
+            let l_min = lightnesses.iter().copied().fold(f32::INFINITY, f32::min);
+            let l_max = lightnesses.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            assert!(
+                l_max - l_min >= 0.45,
+                "{label} bg: sequential N=5 should span ≥ 0.45 OKLch L, got {l_max} - {l_min} = {}",
+                l_max - l_min
+            );
+        }
+    }
+
+    #[test]
+    fn sequential_chroma_tapers_at_light_end() {
+        // The slot with the highest output lightness should have noticeably
+        // reduced chroma compared to the slot at the deep end. Matches
+        // ColorBrewer's empirical profile (lightest stop ≈ paper-white,
+        // dark stops at full saturation) and avoids the unnatural
+        // pastel-saturated look of constant-chroma sequentials.
+        let primary = crate::core::Color::from_rgb(0.20, 0.40, 0.80);
+        let palette = generate_sequential(primary, crate::core::Color::WHITE, 5);
+
+        let oklchs: Vec<Oklch> = palette
+            .iter()
+            .map(|c| {
+                let Color::Fixed(rgb) = c else {
+                    panic!("expected Fixed color from generate_sequential");
+                };
+                to_oklch(*rgb)
+            })
+            .collect();
+        let lightest = oklchs.iter().max_by(|a, b| a.l.total_cmp(&b.l)).unwrap();
+        let darkest = oklchs.iter().min_by(|a, b| a.l.total_cmp(&b.l)).unwrap();
+        assert!(
+            lightest.c < darkest.c,
+            "chroma at lightest slot ({}) should be < chroma at darkest slot ({})",
+            lightest.c,
+            darkest.c
+        );
+    }
+
+    #[test]
+    fn sequential_of_success_uses_seed_success_hue() {
+        // Sequential(Color::Success) should generate shades of seed.success
+        // (a green in the test seed), distinct from Sequential(Color::Primary)
+        // which uses seed.primary (a blue). Verify the two produce different
+        // first-slot colors so the hue source is actually being honored.
+        let seed = test_seed();
+        let primary = Resolved::resolve(&Palette::Sequential(Color::Primary), &seed, 3);
+        let success = Resolved::resolve(&Palette::Sequential(Color::Success), &seed, 3);
+        assert_eq!(primary.len(), 3);
+        assert_eq!(success.len(), 3);
+        assert_ne!(
+            primary.get(0),
+            success.get(0),
+            "Sequential(Primary) and Sequential(Success) should produce different hues"
+        );
+    }
+
+    #[test]
+    fn sequential_of_fixed_color_uses_explicit_hue() {
+        // Sequential(Color::Fixed(...)) should generate shades of the explicit
+        // color, ignoring the seed's primary entirely.
+        let seed = test_seed();
+        let red = crate::core::Color::from_rgb(0.9, 0.1, 0.1);
+        let resolved = Resolved::resolve(&Palette::Sequential(Color::Fixed(red)), &seed, 4);
+        assert_eq!(resolved.len(), 4);
+        // First slot won't be exactly red because generate_sequential
+        // remaps lightness; just verify it's distinguishable from a
+        // primary-based sequence.
+        let primary_resolved = Resolved::resolve(&Palette::SEQUENTIAL, &seed, 4);
+        assert_ne!(resolved.get(0), primary_resolved.get(0));
+    }
+
+    #[test]
+    fn helper_sequential_wraps_into_color() {
+        // Verify the free function builds the same Palette as the bare
+        // variant constructor, both for explicit semantic variants and for
+        // values that need to flow through `Into<Color>` (here a hex u32).
+        assert_eq!(sequential(Color::Success), Palette::Sequential(Color::Success));
+        let red_hex: u32 = 0xFF_00_00;
+        assert_eq!(sequential(red_hex), Palette::Sequential(Color::from(red_hex)));
+    }
+
+    #[test]
+    fn helper_categorical_returns_unit_variant() {
+        assert_eq!(categorical(), Palette::Categorical);
+    }
+
+    #[test]
     fn gradient_2_stops_3_samples() {
+        let seed = test_seed();
         let stops = vec![
-            crate::core::Color::from_rgb(1.0, 0.0, 0.0),
-            crate::core::Color::from_rgb(0.0, 0.0, 1.0),
+            Color::Fixed(crate::core::Color::from_rgb(1.0, 0.0, 0.0)),
+            Color::Fixed(crate::core::Color::from_rgb(0.0, 0.0, 1.0)),
         ];
-        let colors = generate_gradient(&stops, 3);
+        let colors = generate_gradient(&stops, &seed, 3);
         assert_eq!(colors.len(), 3);
+    }
+
+    #[test]
+    fn gradient_resolves_semantic_stops_through_seed() {
+        // A gradient with semantic stops should produce N colors and the
+        // endpoints should match the seed slot values (modulo the conversion
+        // through the `Color::Fixed` wrapping done by `generate_gradient`).
+        let seed = test_seed();
+        let stops = vec![Color::Success, Color::Danger];
+        let colors = generate_gradient(&stops, &seed, 5);
+        assert_eq!(colors.len(), 5);
+        // First slot should be exactly the success color.
+        let Color::Fixed(first) = colors[0] else {
+            panic!("expected Fixed color");
+        };
+        assert_eq!(first, seed.success);
+        // Last slot should be exactly the danger color.
+        let Color::Fixed(last) = colors[4] else {
+            panic!("expected Fixed color");
+        };
+        assert_eq!(last, seed.danger);
     }
 
     #[test]
@@ -418,7 +679,10 @@ mod tests {
     fn default_for_single_bars_is_sequential() {
         let bars = crate::bars([100, 200, 300]);
         let marks = vec![Mark::Bars(bars)];
-        assert!(matches!(Palette::default_for(&marks), Palette::Sequential));
+        assert!(matches!(
+            Palette::default_for(&marks),
+            Palette::Sequential(Color::Primary)
+        ));
     }
 
     #[test]

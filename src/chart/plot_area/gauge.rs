@@ -3,7 +3,7 @@ use crate::core::Size;
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
 use crate::data::axis::tick;
-use crate::widget::canvas::{Frame, Path, Text as CanvasText};
+use crate::widget::canvas::{Frame, Path, Text};
 
 use crate::core::text;
 use crate::widget::renderer::geometry;
@@ -96,6 +96,7 @@ where
 
         let background = theme.background_color();
         let text_pair = theme.text_pair();
+        let seed = theme.palette_seed();
 
         let layout_bounds = layout.bounds();
         let mut frame = Frame::new(renderer, layout_bounds.size());
@@ -129,7 +130,7 @@ where
         let range = self.data.max - self.data.min;
         let has_zones = !self.data.zones.is_empty() && range > 0.0;
 
-        // --- Background track ---
+        // Background track
         let track_color = crate::core::Color {
             a: 0.12,
             ..text_pair.on_light
@@ -146,10 +147,10 @@ where
             track_color,
         );
 
-        // --- Arc rendering ---
+        // Arc rendering
         if has_zones && self.data.gradient {
             // Gradient mode with zones: interpolate colors across mini-segments
-            let stops = build_zone_stops(self.data, range, background, text_pair);
+            let stops = build_zone_stops(self.data, range, background, text_pair, &seed);
             draw_gradient_arc(
                 &mut frame,
                 cx,
@@ -182,7 +183,7 @@ where
 
                 let zone_start = start_angle + zone_start_prop * state.sweep_rad;
                 let zone_end = start_angle + zone_end_prop * state.sweep_rad;
-                let zone_color = zone.color.resolve(background, text_pair, None);
+                let zone_color = zone.color.resolve(background, text_pair, &seed, None);
 
                 draw_arc_segment(
                     &mut frame,
@@ -210,7 +211,7 @@ where
             );
         } else if self.data.gradient {
             // Gradient mode without zones: interpolate from palette color to desaturated
-            let base = palette.get(color_offset).resolve(background, text_pair, None);
+            let base = palette.get(color_offset).resolve(background, text_pair, &seed, None);
             let light = crate::core::Color {
                 r: base.r * 0.4 + 0.6,
                 g: base.g * 0.4 + 0.6,
@@ -243,7 +244,7 @@ where
             );
         } else {
             // Simple value arc (original behavior)
-            let value_color = palette.get(color_offset).resolve(background, text_pair, None);
+            let value_color = palette.get(color_offset).resolve(background, text_pair, &seed, None);
             if state.value_angle > 0.001 {
                 draw_arc_segment(
                     &mut frame,
@@ -258,7 +259,6 @@ where
             }
         }
 
-        // --- Tick marks ---
         if let Some(ticks) = &self.data.ticks {
             draw_ticks(
                 &mut frame,
@@ -289,6 +289,7 @@ where
                 start_angle,
                 state.value_angle,
                 text_pair,
+                &seed,
                 background,
             );
         }
@@ -315,7 +316,7 @@ where
                 format!("{}", self.data.value)
             };
 
-            frame.fill_text(CanvasText {
+            frame.fill_text(Text {
                 content: value_text,
                 position: crate::core::Point::new(cx, text_cy),
                 color: text_color,
@@ -325,7 +326,7 @@ where
                 align_y: crate::core::alignment::Vertical::Center,
                 line_height: crate::core::text::LineHeight::default(),
                 shaping: crate::core::text::Shaping::Basic,
-                ..CanvasText::default()
+                ..Text::default()
             });
 
             label_bottom = text_cy + font_size * 0.5 + self.data.label_spacing;
@@ -333,7 +334,7 @@ where
             // Draw unit label below value
             if let Some(unit) = &self.data.unit {
                 let unit_size = font_size * 0.5;
-                frame.fill_text(CanvasText {
+                frame.fill_text(Text {
                     content: unit.clone(),
                     position: crate::core::Point::new(cx, label_bottom),
                     color: crate::core::Color { a: 0.6, ..text_color },
@@ -343,7 +344,7 @@ where
                     align_y: crate::core::alignment::Vertical::Center,
                     line_height: crate::core::text::LineHeight::default(),
                     shaping: crate::core::text::Shaping::Basic,
-                    ..CanvasText::default()
+                    ..Text::default()
                 });
 
                 label_bottom += unit_size * 0.5 + self.data.label_spacing;
@@ -353,7 +354,7 @@ where
         // --- Subtitle ---
         if let Some(subtitle) = &self.data.subtitle {
             let sub_size = font_size * 0.3;
-            frame.fill_text(CanvasText {
+            frame.fill_text(Text {
                 content: subtitle.clone(),
                 position: crate::core::Point::new(cx, label_bottom),
                 color: crate::core::Color { a: 0.5, ..text_color },
@@ -363,7 +364,7 @@ where
                 align_y: crate::core::alignment::Vertical::Center,
                 line_height: crate::core::text::LineHeight::default(),
                 shaping: crate::core::text::Shaping::Basic,
-                ..CanvasText::default()
+                ..Text::default()
             });
         }
 
@@ -391,13 +392,14 @@ fn draw_needle<R: geometry::Renderer>(
     start_angle: f32,
     value_angle: f32,
     text_pair: crate::color::Pair,
+    seed: &crate::palette::PaletteSeed,
     background: crate::core::Color,
 ) {
     let angle = start_angle + value_angle;
     let needle_len = inner_radius * data.needle_length;
 
     let color = if let Some(ref c) = data.needle_color {
-        c.resolve(background, text_pair, None)
+        c.resolve(background, text_pair, seed, None)
     } else {
         text_pair.on_light
     };
@@ -475,12 +477,8 @@ fn draw_dimming_overlay<R: geometry::Renderer>(
     );
 }
 
-// ---------------------------------------------------------------------------
-// Helper: gradient arc
-// ---------------------------------------------------------------------------
-
 /// Color stops: (proportion 0..1, color)
-type ColorStops = Vec<(f32, crate::core::Color)>;
+type Stops = Vec<(f32, crate::core::Color)>;
 
 /// Build color stops from zone definitions.
 ///
@@ -492,13 +490,14 @@ fn build_zone_stops(
     range: f64,
     background: crate::core::Color,
     text_pair: crate::color::Pair,
-) -> ColorStops {
-    let mut stops: ColorStops = Vec::new();
+    seed: &crate::palette::PaletteSeed,
+) -> Stops {
+    let mut stops: Stops = Vec::new();
     for zone in &data.zones {
         let start_prop = ((zone.from - data.min) / range).clamp(0.0, 1.0) as f32;
         let end_prop = ((zone.to - data.min) / range).clamp(0.0, 1.0) as f32;
         let mid = (start_prop + end_prop) / 2.0;
-        let color = zone.color.resolve(background, text_pair, None);
+        let color = zone.color.resolve(background, text_pair, seed, None);
         stops.push((mid, color));
     }
     // Extend to arc edges using first/last zone colors
@@ -516,7 +515,7 @@ fn build_zone_stops(
 }
 
 /// Interpolate a color at the given proportion from sorted color stops (OKLCh).
-fn interpolate_color(stops: &ColorStops, t: f32) -> crate::core::Color {
+fn interpolate_color(stops: &Stops, t: f32) -> crate::core::Color {
     use crate::palette::{Oklch, from_oklch, to_oklch};
 
     if stops.is_empty() {
@@ -569,7 +568,7 @@ fn draw_gradient_arc<R: geometry::Renderer>(
     outer_radius: f32,
     start_angle: f32,
     sweep_rad: f32,
-    stops: &ColorStops,
+    stops: &Stops,
     segments: usize,
 ) {
     for i in 0..segments {
@@ -584,10 +583,6 @@ fn draw_gradient_arc<R: geometry::Renderer>(
         draw_arc_segment(frame, cx, cy, inner_radius, outer_radius, a0, a1, color);
     }
 }
-
-// ---------------------------------------------------------------------------
-// Helper: tick marks
-// ---------------------------------------------------------------------------
 
 /// Compute tick positions as data values.
 fn compute_tick_values(data: &crate::mark::gauge::Gauge, ticks: &tick::Ticks, range: f64) -> Vec<f64> {
@@ -703,7 +698,7 @@ fn draw_ticks<R, Theme>(
             };
             let label_pos = crate::core::Point::new(cx + label_r * angle.cos(), cy + label_r * angle.sin());
 
-            frame.fill_text(CanvasText {
+            frame.fill_text(Text {
                 content: format_tick_value(*v),
                 position: label_pos,
                 color: crate::core::Color {
@@ -716,15 +711,11 @@ fn draw_ticks<R, Theme>(
                 align_y: crate::core::alignment::Vertical::Center,
                 line_height: crate::core::text::LineHeight::default(),
                 shaping: crate::core::text::Shaping::Basic,
-                ..CanvasText::default()
+                ..Text::default()
             });
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// Core arc drawing primitives
-// ---------------------------------------------------------------------------
 
 /// Draw a filled arc segment (wedge between inner and outer radius) using line segments.
 #[allow(clippy::too_many_arguments)]

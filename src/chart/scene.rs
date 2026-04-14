@@ -25,6 +25,11 @@ where
     left_axis: Option<Guide<'a, Message, Renderer>>,   // y_axis_primary
     plot_area: PlotArea<'a, Message, Renderer>,        // plot area with series
     palette: Palette,
+    /// The user's explicit `Data::palette` choice, if any. Preserved
+    /// separately from `palette` (which carries the effective, defaulted
+    /// strategy) so encoded series can distinguish "user set it" from "we
+    /// defaulted it". See GOG.md D17.
+    user_palette: Option<Palette>,
     color_slots: usize,
     /// Plot area offset within the scene, computed during layout.
     plot_area_offset: crate::core::Point,
@@ -235,6 +240,7 @@ where
                 PlotArea::new(primary_marks).with_secondary(secondary_marks)
             },
             palette: palette_strategy,
+            user_palette: data.palette.clone(),
             color_slots,
             plot_area_offset: crate::core::Point::ORIGIN,
             legend_bounds: None,
@@ -277,6 +283,12 @@ where
     pub(crate) fn resolve_palette(&self, design: &dyn crate::design::Design) -> palette::Resolved {
         let seed = design.palette_seed();
         palette::Resolved::resolve(&self.palette, &seed, self.color_slots)
+    }
+
+    /// Returns the user's explicit `Data::palette` choice (if any), used by
+    /// encoded series to inherit the chart's flavor. See GOG.md D17.
+    pub(crate) fn user_palette(&self) -> Option<&Palette> {
+        self.user_palette.as_ref()
     }
 
     /// Layout the scene with proper tree delegation to 7 pieces.
@@ -780,6 +792,7 @@ where
             cursor,
             viewport,
             &resolved,
+            self.user_palette.as_ref(),
             self.selection,
             hidden_series,
         );

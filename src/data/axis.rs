@@ -326,6 +326,16 @@ impl Axis {
         self
     }
 
+    /// Set the overflow strategy for labels that exceed their column width.
+    /// Defaults to [`label::Overflow::Ellipsize`]. Pass [`label::Overflow::Wrap`]
+    /// to let labels wrap at word boundaries instead (axis height grows).
+    ///
+    /// Applies to horizontal (bottom/top) axes; vertical axes ignore this.
+    pub fn label_overflow(mut self, overflow: label::Overflow) -> Self {
+        self.labels.overflow = overflow;
+        self
+    }
+
     /// Set bounds for this axis.
     ///
     /// Pass `None` to auto-scale that bound from data.

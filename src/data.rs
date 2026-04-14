@@ -346,10 +346,10 @@ impl Data {
     /// ```
     /// # use hyozu::{data, line, LegendPosition, LegendConfig};
     /// // Short form — just position
-    /// data(line("Revenue", [(0, 10)])).legend(LegendPosition::Below);
+    /// data(line([(0, 10)]).with_name("Revenue")).legend(LegendPosition::Below);
     ///
     /// // Detailed form — builder
-    /// data(line("Revenue", [(0, 10)])).legend(LegendConfig::below().font_size(10.0));
+    /// data(line([(0, 10)]).with_name("Revenue")).legend(LegendConfig::below().font_size(10.0));
     /// ```
     pub fn legend(mut self, legend: impl Into<legend::Legend>) -> Self {
         self.legend = Some(legend.into());

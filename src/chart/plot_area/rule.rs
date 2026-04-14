@@ -88,12 +88,13 @@ where
 
         let background = theme.background_color();
         let text_pair = theme.text_pair();
+        let seed = theme.palette_seed();
 
         let layout_bounds = layout.bounds();
         let mut frame = Frame::new(renderer, layout_bounds.size());
 
         let line_color = if let Some(color) = self.data.color {
-            color.resolve(background, text_pair, None)
+            color.resolve(background, text_pair, &seed, None)
         } else {
             text_pair.on_light
         };

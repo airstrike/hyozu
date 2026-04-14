@@ -169,15 +169,15 @@ where
         let layout_bounds = layout.bounds();
         let mut frame = Frame::new(renderer, layout_bounds.size());
 
-        // Waterfall uses semantic colors directly from the seed
-        let increase_color = crate::color::Color::Fixed(seed.success).resolve(background, text_pair, None);
-        let decrease_color = crate::color::Color::Fixed(seed.danger).resolve(background, text_pair, None);
-        let total_color = crate::color::Color::Fixed(seed.primary).resolve(background, text_pair, None);
+        // Waterfall uses semantic colors directly from the design system.
+        let increase_color = crate::color::Color::Success.resolve(background, text_pair, &seed, None);
+        let decrease_color = crate::color::Color::Danger.resolve(background, text_pair, &seed, None);
+        let total_color = crate::color::Color::Primary.resolve(background, text_pair, &seed, None);
 
         // Draw bars
         for (i, (rect, entry)) in state.rects.iter().zip(self.data.entries.iter()).enumerate() {
             let color = if let Some(entry_color) = entry.color {
-                entry_color.resolve(background, text_pair, None)
+                entry_color.resolve(background, text_pair, &seed, None)
             } else {
                 match state.kinds[i] {
                     EntryKind::Increase => increase_color,
@@ -220,7 +220,7 @@ where
 
         // Draw labels above bars
         let label_size = theme.font_size();
-        let label_color = theme.text_color().resolve(background, text_pair, None);
+        let label_color = theme.text_color().resolve(background, text_pair, &seed, None);
 
         for (rect, entry) in state.rects.iter().zip(self.data.entries.iter()) {
             if let Some(label_text) = &entry.label {

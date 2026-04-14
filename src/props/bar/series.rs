@@ -57,6 +57,7 @@ impl Property {
             Property::Color(c) => {
                 series.color = *c;
                 series.point_colors.clear();
+                series.color_by = None;
             }
             Property::PointColor { index, color } => {
                 if let Some(c) = color {

@@ -203,6 +203,7 @@ where
         let state = tree.state.downcast_ref::<State>();
         let background = theme.background_color();
         let text_pair = theme.text_pair();
+        let seed = theme.palette_seed();
         let layout_bounds = layout.bounds();
 
         // ── Land polygons ──────────────────────────────────────────
@@ -215,7 +216,7 @@ where
                 b: background.b * 0.92 + 0.08 * 0.74,
                 a: 1.0,
             };
-            let border_color = theme.divider_color().resolve(background, text_pair, None);
+            let border_color = theme.divider_color().resolve(background, text_pair, &seed, None);
             let border_stroke = Stroke::default().with_color(border_color).with_width(0.5);
 
             for rings in &state.projected_polygons {
@@ -248,9 +249,11 @@ where
             let (center, radius) = state.bubble_circles[i];
 
             let base_color = if let Some(c) = pt.color {
-                c.resolve(background, text_pair, None)
+                c.resolve(background, text_pair, &seed, None)
             } else {
-                palette.get(color_offset + i).resolve(background, text_pair, None)
+                palette
+                    .get(color_offset + i)
+                    .resolve(background, text_pair, &seed, None)
             };
 
             let fill_color = crate::core::Color {

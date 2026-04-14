@@ -34,10 +34,11 @@ fn test_all_themes_bar_labels_comprehensive() {
     for theme in &themes {
         let background = theme.background_color();
         let text_pair = theme.text_pair();
+        let seed = theme.palette_seed();
         let data_colors = theme.data_colors();
 
         for (i, color_spec) in data_colors.iter().enumerate().take(5) {
-            let bar_color = color_spec.resolve(background, text_pair, None);
+            let bar_color = color_spec.resolve(background, text_pair, &seed, None);
             let label_color = text_pair.resolve(bar_color, Some(background));
             let contrast = bar_color.relative_contrast(label_color);
 
@@ -115,6 +116,7 @@ fn test_dark_theme_debug() {
     let theme = Theme::Dark;
     let background = theme.background_color();
     let text_pair = theme.text_pair();
+    let seed = theme.palette_seed();
     let data_colors = theme.data_colors();
 
     println!("\n=== Theme::Dark Debug ===");
@@ -123,7 +125,7 @@ fn test_dark_theme_debug() {
     println!("text_pair.on_dark: lum={:.3}", text_pair.on_dark.relative_luminance());
 
     for (i, color_spec) in data_colors.iter().enumerate().take(3) {
-        let bar_color = color_spec.resolve(background, text_pair, None);
+        let bar_color = color_spec.resolve(background, text_pair, &seed, None);
         let label_color = text_pair.resolve(bar_color, Some(background));
         let contrast = bar_color.relative_contrast(label_color);
 
@@ -153,6 +155,7 @@ fn test_solarized_light_debug() {
     let theme = Theme::SolarizedLight;
     let background = theme.background_color();
     let text_pair = theme.text_pair();
+    let seed = theme.palette_seed();
     let data_colors = theme.data_colors();
 
     println!("\n=== Solarized Light Debug ===");
@@ -161,7 +164,7 @@ fn test_solarized_light_debug() {
     println!("text_pair.on_dark: lum={:.3}", text_pair.on_dark.relative_luminance());
 
     for (i, color_spec) in data_colors.iter().enumerate().take(5) {
-        let bar_color = color_spec.resolve(background, text_pair, None);
+        let bar_color = color_spec.resolve(background, text_pair, &seed, None);
         let label_color = text_pair.resolve(bar_color, Some(background));
         let contrast = bar_color.relative_contrast(label_color);
 
@@ -191,6 +194,7 @@ fn test_gruvbox_light_debug() {
     let theme = Theme::GruvboxLight;
     let background = theme.background_color();
     let text_pair = theme.text_pair();
+    let seed = theme.palette_seed();
     let data_colors = theme.data_colors();
 
     println!("\n=== GruvboxLight Debug ===");
@@ -199,7 +203,7 @@ fn test_gruvbox_light_debug() {
     println!("text_pair.on_dark: lum={:.3}", text_pair.on_dark.relative_luminance());
 
     for (i, color_spec) in data_colors.iter().enumerate().take(5) {
-        let bar_color = color_spec.resolve(background, text_pair, None);
+        let bar_color = color_spec.resolve(background, text_pair, &seed, None);
         let label_color = text_pair.resolve(bar_color, Some(background));
         let contrast = bar_color.relative_contrast(label_color);
 

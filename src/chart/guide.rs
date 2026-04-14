@@ -994,6 +994,13 @@ where
         let (min_value, max_value) = (state.bounds.min(), state.bounds.max());
 
         if labels.is_empty() || (!self.axis.has_ticks() && !self.axis.has_labels()) {
+            // Hidden axes (e.g. a y-axis muted via `.none()` to show only
+            // gridlines) still need to propagate the `min_inset` floor so
+            // series-driven insets — bar data labels extending past the
+            // plot area top, etc. — reach the plot area. Without this the
+            // scene reads `(0, 0)` from `state.label_insets` and lays the
+            // plot area flush against the chart edge, clipping the labels.
+            state.label_insets = min_inset;
             return Node::new(Size::ZERO);
         }
 
@@ -1083,6 +1090,16 @@ where
         // Compute edge label insets (half-height of top/bottom center-aligned labels),
         // reduced by the overflow budget available on each side, floored by min_inset.
         // labels[last] = max value = top of axis, labels[0] = min value = bottom.
+        //
+        // The first/last tick is not necessarily at the plot's outer edge: a
+        // categorical axis with OnTicks placement and `Kind::Categorical` bounds
+        // (±0.5 padding) sits the first tick at `k_bottom * usable_height` above
+        // the plot's bottom edge, giving the bottom label that much free space
+        // inside the plot before any inset is needed. We credit that natural
+        // space against the half-label overhang so short categorical labels
+        // don't needlessly shrink the chart. For scalar axes the ticks sit at
+        // the data extrema (`k_* == 0`), so the formula collapses to the
+        // previous behavior.
         let n = label_data.len();
         let top_half = if n > 0 {
             state.labels[n - 1].min_bounds().height / 2.0
@@ -1094,8 +1111,20 @@ where
         } else {
             0.0
         };
-        let top_inset = (top_half - overflow.0).max(0.0).max(min_inset.0);
-        let bottom_inset = (bottom_half - overflow.1).max(0.0).max(min_inset.1);
+        let (k_top, k_bottom) = if value_range > 0.0 && n > 0 {
+            let bottom_tick = label_data[0].0;
+            let top_tick = label_data[n - 1].0;
+            (
+                ((max_value - top_tick) / value_range) as f32,
+                ((bottom_tick - min_value) / value_range) as f32,
+            )
+        } else {
+            (0.0, 0.0)
+        };
+        let natural_top = k_top * max_size.height;
+        let natural_bottom = k_bottom * max_size.height;
+        let top_inset = (top_half - natural_top - overflow.0).max(0.0).max(min_inset.0);
+        let bottom_inset = (bottom_half - natural_bottom - overflow.1).max(0.0).max(min_inset.1);
         let usable_height = (max_size.height - top_inset - bottom_inset).max(0.0);
 
         state.label_insets = (top_inset, bottom_inset);
@@ -1159,23 +1188,65 @@ where
 
         // Position each label along the x-axis
         let mut children = Vec::new();
+        let n = label_data.len();
 
-        // First pass: measure all labels
+        // First pass: measure all labels.
+        //
+        // Compute the allotted column width per label: the pixel distance
+        // between adjacent ticks in the axis's natural domain. The overflow
+        // strategy constrains labels to this width so they don't crowd each
+        // other. Using `max_size.width` (not post-inset `usable_width`) is a
+        // slight over-allocation when insets end up non-zero, but it lets us
+        // avoid a fixed-point iteration between label widths and inset sizes.
+        let tick_stride: f64 = if n >= 2 {
+            let mut min_stride = f64::INFINITY;
+            for pair in label_data.windows(2) {
+                let s = pair[1].0 - pair[0].0;
+                if s > 0.0 && s < min_stride {
+                    min_stride = s;
+                }
+            }
+            if min_stride.is_finite() {
+                min_stride
+            } else {
+                value_range.max(1.0)
+            }
+        } else {
+            value_range.max(1.0)
+        };
+        let column_width: f32 = if value_range > 0.0 {
+            (max_size.width as f64 * tick_stride / value_range) as f32
+        } else {
+            max_size.width
+        };
+
+        // Pick wrapping + ellipsis from the overflow strategy.
+        let (wrapping, ellipsis) = match self.axis.labels.overflow {
+            crate::data::axis::label::Overflow::Ellipsize => (text::Wrapping::None, text::Ellipsis::End),
+            crate::data::axis::label::Overflow::Wrap => (text::Wrapping::Word, text::Ellipsis::None),
+        };
+
+        // Measure all labels with bounds constrained to the column width so
+        // the overflow strategy engages automatically inside iced's paragraph
+        // update. If intrinsic < column_width, the paragraph's `min_bounds`
+        // shrinks to intrinsic (the bound is an upper limit). If intrinsic >
+        // column_width, the paragraph either wraps or ellipsizes at
+        // column_width.
         for (i, (_pos, label)) in label_data.iter().enumerate() {
             let paragraph = &mut state.labels[i];
 
             use crate::core::alignment;
             let _ = paragraph.update(text::Text {
                 content: label,
-                bounds: Size::INFINITE,
+                bounds: Size::new(column_width, f32::INFINITY),
                 size: self.axis.label_size().unwrap_or(12.0.into()),
                 line_height: text::LineHeight::default(),
                 font: self.axis.font().unwrap_or_else(|| renderer.default_font()),
                 align_x: text::Alignment::Left,
                 align_y: alignment::Vertical::Top,
                 shaping: text::Shaping::Basic,
-                wrapping: text::Wrapping::None,
-                ellipsis: text::Ellipsis::default(),
+                wrapping,
+                ellipsis,
                 hint_factor: renderer.scale_factor(),
                 font_features: Vec::new(),
                 font_variations: Vec::new(),
@@ -1186,21 +1257,51 @@ where
 
         // Compute edge label insets (half-width of first/last center-aligned labels),
         // reduced by the overflow budget available on each side, floored by min_inset.
+        //
+        // The first/last tick is not necessarily at the plot's outer edge: a
+        // categorical axis with OnTicks placement and `Kind::Categorical` bounds
+        // (±0.5 padding) sits the first tick at `k_left * usable_width` inside
+        // the plot's left edge, giving the first label that much free space to
+        // extend leftward before any inset is needed. We credit that natural
+        // space against the half-label overhang so short categorical labels
+        // don't needlessly shrink the chart. For scalar axes the ticks sit at
+        // the data extrema (`k_* == 0`), so the formula collapses to the
+        // previous behavior.
         let left_half = state.labels.first().map(|p| p.min_bounds().width / 2.0).unwrap_or(0.0);
         let right_half = state
             .labels
             .get(label_data.len().saturating_sub(1))
             .map(|p| p.min_bounds().width / 2.0)
             .unwrap_or(0.0);
-        let left_inset = (left_half - overflow.0).max(0.0).max(min_inset.0);
-        let right_inset = (right_half - overflow.1).max(0.0).max(min_inset.1);
+        let (k_left, k_right) = if value_range > 0.0 && n > 0 {
+            let first_tick = label_data[0].0;
+            let last_tick = label_data[n - 1].0;
+            (
+                ((first_tick - min_value) / value_range) as f32,
+                ((max_value - last_tick) / value_range) as f32,
+            )
+        } else {
+            (0.0, 0.0)
+        };
+        let natural_left = k_left * max_size.width;
+        let natural_right = k_right * max_size.width;
+        let left_inset = (left_half - natural_left - overflow.0).max(0.0).max(min_inset.0);
+        let right_inset = (right_half - natural_right - overflow.1).max(0.0).max(min_inset.1);
         let usable_width = (max_size.width - left_inset - right_inset).max(0.0);
 
         state.label_insets = (left_inset, right_inset);
 
+        // Track the tallest label so the axis area can grow vertically when
+        // `Wrap` produces multi-line labels. Single-line (Ellipsize) keeps the
+        // historical height (label_size + tick_length + label_offset).
+        let label_size = self.axis.label_size().unwrap_or(12.0.into());
+        let mut max_label_height: f32 = label_size.0;
+
         // Second pass: position labels within the inset range
         for (i, (pos, _label)) in label_data.iter().enumerate() {
             let label_width = state.labels[i].min_bounds().width;
+            let label_height = state.labels[i].min_bounds().height;
+            max_label_height = max_label_height.max(label_height);
 
             let tick_value = *pos;
             let x = if value_range > 0.0 {
@@ -1210,12 +1311,12 @@ where
             };
 
             children.push(
-                Node::new(Size::new(label_width, 20.0)).move_to(Point::ORIGIN + crate::core::Vector::new(x, 0.0)),
+                Node::new(Size::new(label_width, label_height))
+                    .move_to(Point::ORIGIN + crate::core::Vector::new(x, 0.0)),
             );
         }
 
-        let label_size = self.axis.label_size().unwrap_or(12.0.into());
-        let height = label_size.0 + tick_length + label_offset;
+        let height = max_label_height + tick_length + label_offset;
         Node::with_children(Size::new(max_size.width, height), children)
     }
 
@@ -1245,17 +1346,18 @@ where
 
         let background = design.background_color();
         let text_pair = design.text_pair();
+        let seed = design.palette_seed();
 
         let axis_color = self
             .axis
             .axis_color()
             .unwrap_or(design.axis_color())
-            .resolve(background, text_pair, None);
+            .resolve(background, text_pair, &seed, None);
         let label_color = self
             .axis
             .label_color()
             .unwrap_or(design.text_color())
-            .resolve(background, text_pair, None);
+            .resolve(background, text_pair, &seed, None);
 
         // Get bounds for coordinate mapping
         let (min_value, max_value) = (state.bounds.min(), state.bounds.max());

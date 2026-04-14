@@ -3,6 +3,8 @@ use crate::color::Color;
 use crate::core::Pixels;
 use crate::core::font::{Style, Weight};
 use crate::data::{Datum, IntoDatums};
+use crate::encoding::{Encoding, channel};
+use crate::palette::{Palette, PaletteSeed};
 
 /// A single series of bars within a bar chart.
 #[derive(Debug, Clone)]
@@ -14,6 +16,9 @@ pub struct Series {
     /// Per-point color overrides. Empty = no overrides.
     /// When `point_colors[i]` is `Some(color)`, that bar uses it instead of the series color.
     pub(crate) point_colors: Vec<Option<Color>>,
+    /// Optional fill-channel encoding: binds each bar's color to a closure over
+    /// its datum. See [`crate::encoding`] and `GOG.md` § 7 for priority.
+    pub(crate) color_by: Option<Encoding<channel::Fill>>,
     /// Per-point label overrides. Empty = no overrides.
     pub(crate) point_labels: Vec<Option<Label>>,
     /// Optional data labels for this series.
@@ -29,6 +34,7 @@ impl Series {
             points: data.into_datums(),
             color: None,
             point_colors: Vec::new(),
+            color_by: None,
             point_labels: Vec::new(),
             label: Some(Label::default()),
             name: None,
@@ -39,6 +45,60 @@ impl Series {
     pub fn with_color(mut self, color: impl Into<Color>) -> Self {
         self.color = Some(color.into());
         self
+    }
+
+    /// Encode the color channel: compute each bar's color from its datum via
+    /// the given [`Encoding`]. Replaces any previous encoding.
+    ///
+    /// See `GOG.md` § 7 for how this interacts with [`with_color`](Self::with_color),
+    /// [`set_point_color`](Self::set_point_color), and the theme palette.
+    pub fn color_by(mut self, encoding: Encoding<channel::Fill>) -> Self {
+        self.color_by = Some(encoding);
+        self
+    }
+
+    /// Resolve the displayed color for a single bar, following the priority
+    /// chain in `GOG.md` § 7:
+    ///
+    /// 1. `point_colors[i]` override (imperative)
+    /// 2. `color_by` encoding
+    /// 3. `series.color`
+    /// 4. caller-provided fallback (typically the chart's palette slot)
+    ///
+    /// Used by both the bar-rendering path and the tooltip path so they agree
+    /// on what color a given bar shows. Single-shot: re-resolves the whole
+    /// encoding on each call — N is small in practice and this is intentionally
+    /// not optimized for v1.
+    ///
+    /// `chart_default` is the user's `Data::palette(...)` setting (if any),
+    /// threaded through so encodings built without an explicit `.palette(...)`
+    /// override can inherit the chart's flavor. See `GOG.md` D17.
+    pub fn resolved_color_at(
+        &self,
+        i: usize,
+        seed: &PaletteSeed,
+        chart_default: Option<&Palette>,
+        fallback: Color,
+    ) -> Color {
+        // 1. point_colors override
+        if let Some(pc) = self.point_color(i) {
+            return *pc;
+        }
+
+        // 2. fill encoding
+        if let Some(enc) = &self.color_by
+            && let Some(Some(c)) = enc.resolve_fill(&self.points, seed, chart_default).get(i).copied()
+        {
+            return c;
+        }
+
+        // 3. series color
+        if let Some(c) = self.color {
+            return c;
+        }
+
+        // 4. caller-provided fallback (chart palette slot)
+        fallback
     }
 
     /// Configure data labels for this series.
@@ -227,5 +287,94 @@ impl Series {
 impl<T: IntoDatums> From<T> for Series {
     fn from(data: T) -> Self {
         Series::new(data)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::encoding;
+
+    fn test_seed() -> PaletteSeed {
+        PaletteSeed {
+            primary: crate::core::Color::from_rgb8(50, 100, 200),
+            secondary: crate::core::Color::from_rgb8(200, 50, 100),
+            success: crate::core::Color::from_rgb8(100, 200, 50),
+            warning: crate::core::Color::from_rgb8(220, 180, 40),
+            danger: crate::core::Color::from_rgb8(220, 40, 40),
+            background: crate::core::Color::WHITE,
+        }
+    }
+
+    // Concrete test colors — kept distinct so any confusion between slots is
+    // caught by the assertions below.
+    const RED: Color = Color::from_rgb8(255, 0, 0);
+    const GREEN: Color = Color::from_rgb8(0, 255, 0);
+    const BLUE: Color = Color::from_rgb8(0, 0, 255);
+    const YELLOW: Color = Color::from_rgb8(255, 255, 0);
+
+    #[test]
+    fn point_color_wins_over_encoding_series_color_and_fallback() {
+        // Priority 1: explicit per-point override beats every other source.
+        // All four sources are set so that if the priority order were wrong
+        // the test would pick a different color.
+        let mut series = Series::new([1.0, 2.0, 3.0])
+            .with_color(GREEN)
+            .color_by(encoding::key(|_, _| "k").manual([("k", YELLOW)]));
+        series.set_point_color(0, RED);
+
+        let got = series.resolved_color_at(0, &test_seed(), None, BLUE);
+
+        assert_eq!(got, RED);
+    }
+
+    #[test]
+    fn encoding_wins_over_series_color_and_fallback() {
+        // Priority 2: encoding beats series.color and the caller fallback
+        // when no point_colors override is set.
+        let series = Series::new([1.0, 2.0, 3.0])
+            .with_color(GREEN)
+            .color_by(encoding::key(|_, _| "k").manual([("k", YELLOW)]));
+
+        let got = series.resolved_color_at(0, &test_seed(), None, BLUE);
+
+        assert_eq!(got, YELLOW);
+    }
+
+    #[test]
+    fn series_color_wins_over_fallback() {
+        // Priority 3: with no point_colors and no encoding, series.color
+        // beats the caller-supplied fallback.
+        let series = Series::new([1.0, 2.0, 3.0]).with_color(GREEN);
+
+        let got = series.resolved_color_at(0, &test_seed(), None, BLUE);
+
+        assert_eq!(got, GREEN);
+    }
+
+    #[test]
+    fn fallback_returned_when_nothing_is_set() {
+        // Priority 4: with no sources at all, the caller-supplied fallback
+        // color is what the series renders as.
+        let series = Series::new([1.0, 2.0, 3.0]);
+
+        let got = series.resolved_color_at(0, &test_seed(), None, BLUE);
+
+        assert_eq!(got, BLUE);
+    }
+
+    #[test]
+    fn encoding_miss_falls_through_to_series_color() {
+        // The encoding extracts key "zz" which has no manual mapping — the
+        // encoding returns None for that slot, and resolved_color_at must
+        // fall through to the next priority step (series.color = GREEN),
+        // NOT return RED from the unrelated manual entry.
+        let series = Series::new([1.0, 2.0, 3.0])
+            .with_color(GREEN)
+            .color_by(encoding::key(|_, _| "zz").manual([("a", RED)]));
+
+        let got = series.resolved_color_at(0, &test_seed(), None, BLUE);
+
+        assert_eq!(got, GREEN);
     }
 }

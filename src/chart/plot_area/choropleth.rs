@@ -11,11 +11,29 @@ use crate::widget::renderer::geometry;
 
 use super::Plane;
 
-/// State for Choropleth -- stores projected polygon geometry, feature IDs, and bounding boxes.
+/// State for Choropleth -- stores projected polygon geometry, feature IDs,
+/// bounding boxes, and pre-computed value normalization for each feature.
+///
+/// The per-feature `feature_t` values, the legend min/max strings, and the
+/// data value range are all theme-independent and computed in `layout` so
+/// `draw` doesn't re-walk `self.data.entries` or rebuild the value lookup
+/// HashMap on every repaint. See the `iced layout-vs-draw discipline` note
+/// for the broader principle.
 pub struct State {
     pub projected_polygons: Vec<Vec<Vec<(f32, f32)>>>,
     pub filtered_ids: Vec<String>,
     pub feature_bboxes: Vec<crate::core::Rectangle>,
+    /// Normalized [0,1] value for each filtered feature, in `filtered_ids`
+    /// order. `None` for features without an entry in `self.data.entries`
+    /// (those render as land-fill).
+    pub feature_t: Vec<Option<f32>>,
+    /// Min/max of the entry values, used by the legend. Cached so the
+    /// legend strings don't need to re-walk entries each draw.
+    pub value_range: (f64, f64),
+    /// Pre-formatted legend min/max labels. Result of `format_legend_value`,
+    /// which is theme-free.
+    pub legend_min_text: String,
+    pub legend_max_text: String,
     prev_size: (f32, f32),
     prev_scope: crate::geo::MapScope,
     prev_geo: Option<Arc<crate::geo::GeoData>>,
@@ -98,6 +116,10 @@ where
                 projected_polygons: Vec::new(),
                 filtered_ids: Vec::new(),
                 feature_bboxes: Vec::new(),
+                feature_t: Vec::new(),
+                value_range: (0.0, 1.0),
+                legend_min_text: String::new(),
+                legend_max_text: String::new(),
                 prev_size: (0.0, 0.0),
                 prev_scope: crate::geo::MapScope::World,
                 prev_geo: None,
@@ -113,80 +135,128 @@ where
         let size = limits.max();
         let current_size = (size.width, size.height);
 
-        // Dirty check: skip re-projection if nothing changed.
+        // Dirty check for the EXPENSIVE projection step: skip re-projection
+        // if size, scope, and geo are unchanged. The cheaper entry-derived
+        // state (value range, normalized t, legend strings) is recomputed
+        // unconditionally below — entries can change without triggering the
+        // projection-level dirty bits, and the entry walk is O(n) on a
+        // small collection.
         let geo_changed = match (&state.prev_geo, &self.data.geo) {
             (Some(prev), Some(cur)) => !Arc::ptr_eq(prev, cur),
             (None, None) => false,
             _ => true,
         };
+        let needs_reproject = geo_changed || state.prev_size != current_size || state.prev_scope != self.data.scope;
 
-        if !geo_changed && state.prev_size == current_size && state.prev_scope == self.data.scope {
-            return Node::new(Size::ZERO);
+        if needs_reproject {
+            // Update dirty-check fields.
+            state.prev_size = current_size;
+            state.prev_scope = self.data.scope;
+            state.prev_geo = self.data.geo.clone();
+
+            match &self.data.geo {
+                None => {
+                    state.projected_polygons.clear();
+                    state.filtered_ids.clear();
+                    state.feature_bboxes.clear();
+                }
+                Some(geo) => {
+                    // Filter features by scope and build projection.
+                    let filtered = geo.filter_by_scope(self.data.scope);
+                    let scope_bounds = self.data.scope.bounds();
+                    let projection = crate::geo::Projection::new(self.data.projection).fit_size(
+                        size.width,
+                        size.height,
+                        scope_bounds,
+                    );
+
+                    // Project all filtered-feature polygons into pixel space.
+                    state.projected_polygons = filtered
+                        .features
+                        .iter()
+                        .map(|feature| {
+                            feature
+                                .polygons
+                                .iter()
+                                .map(|ring| ring.iter().map(|&(lon, lat)| projection.project(lon, lat)).collect())
+                                .collect()
+                        })
+                        .collect();
+
+                    // Store the ID of each filtered feature in the same order.
+                    state.filtered_ids = filtered.features.iter().map(|f| f.id.clone()).collect();
+
+                    // Compute bounding boxes for each feature.
+                    state.feature_bboxes = state
+                        .projected_polygons
+                        .iter()
+                        .map(|rings| {
+                            let mut min_x = f32::INFINITY;
+                            let mut min_y = f32::INFINITY;
+                            let mut max_x = f32::NEG_INFINITY;
+                            let mut max_y = f32::NEG_INFINITY;
+                            for ring in rings {
+                                for &(x, y) in ring {
+                                    min_x = min_x.min(x);
+                                    min_y = min_y.min(y);
+                                    max_x = max_x.max(x);
+                                    max_y = max_y.max(y);
+                                }
+                            }
+                            crate::core::Rectangle {
+                                x: min_x,
+                                y: min_y,
+                                width: (max_x - min_x).max(0.0),
+                                height: (max_y - min_y).max(0.0),
+                            }
+                        })
+                        .collect();
+                }
+            }
         }
 
-        // Update dirty-check fields.
-        state.prev_size = current_size;
-        state.prev_scope = self.data.scope;
-        state.prev_geo = self.data.geo.clone();
-
-        // If no geo data, clear state and bail.
-        let geo = match &self.data.geo {
-            Some(g) => g,
-            None => {
-                state.projected_polygons.clear();
-                state.filtered_ids.clear();
-                state.feature_bboxes.clear();
-                return Node::new(Size::ZERO);
+        // ── Entry-derived state (always recomputed) ──────────────────
+        //
+        // value_range, feature_t, and legend strings depend on
+        // `self.data.entries` and `self.data.normalization`, neither of
+        // which is covered by the projection dirty check. The work is O(n)
+        // on entries (typically dozens, not millions), so unconditional
+        // recompute is fine. Moves the per-frame walk out of `draw`.
+        let mut lo = f64::INFINITY;
+        let mut hi = f64::NEG_INFINITY;
+        for entry in &self.data.entries {
+            if entry.value < lo {
+                lo = entry.value;
             }
-        };
+            if entry.value > hi {
+                hi = entry.value;
+            }
+        }
+        if lo.is_infinite() {
+            lo = 0.0;
+        }
+        if hi.is_infinite() || hi <= lo {
+            hi = lo + 1.0;
+        }
+        state.value_range = (lo, hi);
 
-        // Filter features by scope and build projection.
-        let filtered = geo.filter_by_scope(self.data.scope);
-        let scope_bounds = self.data.scope.bounds();
-        let projection =
-            crate::geo::Projection::new(self.data.projection).fit_size(size.width, size.height, scope_bounds);
+        // Build the value lookup once. The HashMap lives only for the rest
+        // of this layout call; feature_t materializes the result so draw
+        // doesn't need it.
+        let value_map: HashMap<&str, f64> = self.data.entries.iter().map(|e| (e.id.as_str(), e.value)).collect();
 
-        // Project all filtered-feature polygons into pixel space.
-        state.projected_polygons = filtered
-            .features
+        state.feature_t = state
+            .filtered_ids
             .iter()
-            .map(|feature| {
-                feature
-                    .polygons
-                    .iter()
-                    .map(|ring| ring.iter().map(|&(lon, lat)| projection.project(lon, lat)).collect())
-                    .collect()
+            .map(|id| {
+                value_map
+                    .get(id.as_str())
+                    .map(|&v| normalize(v, lo, hi, self.data.normalization))
             })
             .collect();
 
-        // Store the ID of each filtered feature in the same order.
-        state.filtered_ids = filtered.features.iter().map(|f| f.id.clone()).collect();
-
-        // Compute bounding boxes for each feature.
-        state.feature_bboxes = state
-            .projected_polygons
-            .iter()
-            .map(|rings| {
-                let mut min_x = f32::INFINITY;
-                let mut min_y = f32::INFINITY;
-                let mut max_x = f32::NEG_INFINITY;
-                let mut max_y = f32::NEG_INFINITY;
-                for ring in rings {
-                    for &(x, y) in ring {
-                        min_x = min_x.min(x);
-                        min_y = min_y.min(y);
-                        max_x = max_x.max(x);
-                        max_y = max_y.max(y);
-                    }
-                }
-                crate::core::Rectangle {
-                    x: min_x,
-                    y: min_y,
-                    width: (max_x - min_x).max(0.0),
-                    height: (max_y - min_y).max(0.0),
-                }
-            })
-            .collect();
+        state.legend_min_text = format_legend_value(lo);
+        state.legend_max_text = format_legend_value(hi);
 
         Node::new(Size::ZERO)
     }
@@ -213,35 +283,18 @@ where
         }
 
         let background = theme.background_color();
+        let text_pair = theme.text_pair();
+        let seed = theme.palette_seed();
         let layout_bounds = layout.bounds();
 
         // ── Resolve color scale ───────────────────────────────────
+        // Theme-dependent (uses the palette seed when no explicit stops are
+        // set), so it stays in draw. Cheap — at most a 3-color clone.
         let color_stops: Vec<crate::core::Color> = if let Some(stops) = &self.data.color_stops {
             stops.clone()
         } else {
-            let seed = theme.palette_seed();
             vec![seed.success, seed.warning, seed.danger]
         };
-
-        // ── Compute value range from entries ──────────────────────
-        let (v_min, v_max) = {
-            let mut lo = f64::INFINITY;
-            let mut hi = f64::NEG_INFINITY;
-            for entry in &self.data.entries {
-                lo = lo.min(entry.value);
-                hi = hi.max(entry.value);
-            }
-            if lo.is_infinite() {
-                lo = 0.0;
-            }
-            if hi.is_infinite() || hi <= lo {
-                hi = lo + 1.0;
-            }
-            (lo, hi)
-        };
-
-        // ── Build value lookup by feature ID ─────────────────────
-        let value_map: HashMap<&str, f64> = self.data.entries.iter().map(|e| (e.id.as_str(), e.value)).collect();
 
         // ── Derived colors ───────────────────────────────────────
         let land_fill = crate::core::Color {
@@ -250,8 +303,7 @@ where
             b: background.b * 0.92 + 0.08 * 0.74,
             a: 1.0,
         };
-        let text_pair = theme.text_pair();
-        let border_color = theme.divider_color().resolve(background, text_pair, None);
+        let border_color = theme.divider_color().resolve(background, text_pair, &seed, None);
 
         // ── Draw ocean background ────────────────────────────────
         let mut frame = Frame::new(renderer, layout_bounds.size());
@@ -287,16 +339,11 @@ where
         // ── Draw features ────────────────────────────────────────
 
         for (feat_idx, feature_rings) in state.projected_polygons.iter().enumerate() {
-            // Determine fill color for this feature.
-            let fill = if let Some(id) = state.filtered_ids.get(feat_idx) {
-                if let Some(&value) = value_map.get(id.as_str()) {
-                    let t = normalize(value, v_min, v_max, self.data.normalization);
-                    crate::palette::sample_gradient(&color_stops, t)
-                } else {
-                    land_fill
-                }
-            } else {
-                land_fill
+            // Per-feature normalized value was computed in layout. Sampling
+            // the gradient is the only theme-touching step left here.
+            let fill = match state.feature_t.get(feat_idx).copied().flatten() {
+                Some(t) => crate::palette::sample_gradient(&color_stops, t),
+                None => land_fill,
             };
 
             for ring in feature_rings {
@@ -430,13 +477,11 @@ where
             });
             frame.stroke(&right_tick, Stroke::default().with_color(border_color).with_width(0.5));
 
-            // 6. Min and max labels
+            // 6. Min and max labels — pre-formatted in layout.
             let labels_y = tick_bottom + 1.0;
-            let min_label = format_legend_value(v_min);
-            let max_label = format_legend_value(v_max);
 
             frame.fill_text(CanvasText {
-                content: min_label,
+                content: state.legend_min_text.clone(),
                 position: crate::core::Point::new(bar_x, labels_y),
                 color: label_color,
                 size: crate::core::Pixels(font_size),
@@ -449,7 +494,7 @@ where
             });
 
             frame.fill_text(CanvasText {
-                content: max_label,
+                content: state.legend_max_text.clone(),
                 position: crate::core::Point::new(bar_x + bar_width, labels_y),
                 color: label_color,
                 size: crate::core::Pixels(font_size),

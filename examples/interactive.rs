@@ -328,8 +328,7 @@ impl App {
             (_, Some(other)) => format!("{other:?}"),
         };
 
-        // --- Chart type toggle ---
-
+        // Chart type toggle
         let chart_type_section = column![
             text("Chart Type").size(14),
             radio("Bar", ChartType::Bar, Some(self.chart_type), Message::ChartTypeChanged,),
@@ -339,15 +338,13 @@ impl App {
 
         let selection_section = column![text("Selection").size(14), text(selection_text).size(12),].spacing(4);
 
-        // --- Color section ---
-
+        // Color section
         let color_section: iced::Element<'_, Message> = match self.chart_type {
             ChartType::Bar => self.bar_color_section(),
             ChartType::Pie => self.pie_color_section(),
         };
 
-        // --- Bar-specific controls ---
-
+        // Bar-specific controls
         let bar_controls: iced::Element<'_, Message> = if self.chart_type == ChartType::Bar {
             let size = self.bar_data.bars(0).map(|b| b.size()).unwrap_or(0.75);
             let spacing = self.bar_data.bars(0).map(|b| b.spacing()).unwrap_or(0.0);
@@ -427,12 +424,11 @@ impl App {
             .into()
         };
 
-        // --- Palette and theme ---
-
+        // Palette and theme
         let on_palette = |p: String| {
             let palette = match p.as_str() {
                 "Categorical" => Palette::Categorical,
-                "Sequential" => Palette::Sequential,
+                "Sequential" => Palette::SEQUENTIAL,
                 _ => return Message::Set(item::Palette(Palette::Categorical)),
             };
             Message::Set(item::Palette(palette))
@@ -440,7 +436,7 @@ impl App {
 
         let current_palette = match data.get_palette() {
             Some(Palette::Categorical) => "Categorical",
-            Some(Palette::Sequential) => "Sequential",
+            Some(Palette::Sequential(_)) => "Sequential",
             Some(Palette::Gradient(_)) => "Gradient",
             None => "Auto",
         };

@@ -173,6 +173,7 @@ where
 
         let background = theme.background_color();
         let text_pair = theme.text_pair();
+        let seed = theme.palette_seed();
 
         let layout_bounds = layout.bounds();
         let mut fill_frame = Frame::new(renderer, layout_bounds.size());
@@ -184,11 +185,11 @@ where
             }
 
             let base_color = if let Some(c) = entry_data.color {
-                c.resolve(background, text_pair, None)
+                c.resolve(background, text_pair, &seed, None)
             } else {
                 palette
                     .get(color_offset + entry_idx)
-                    .resolve(background, text_pair, None)
+                    .resolve(background, text_pair, &seed, None)
             };
 
             let fill_color = crate::core::Color {

@@ -3,6 +3,7 @@ pub mod chart;
 pub mod color;
 pub mod data;
 pub mod design;
+pub mod encoding;
 pub mod geo;
 pub mod geometry;
 pub mod item;

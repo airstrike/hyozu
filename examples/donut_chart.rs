@@ -1,5 +1,5 @@
 use hyozu::mark::pie;
-use hyozu::{Palette, data, pie as pie_fn};
+use hyozu::{Color, data, palette, pie as pie_fn};
 use iced::widget::{center, column, pick_list, row};
 use iced::{Center, Fill, Subscription, Task, Theme, keyboard};
 
@@ -41,7 +41,9 @@ impl App {
         .gap(2.0);
 
         Self {
-            data: data(chart).title("Monthly Expenses").palette(Palette::Sequential),
+            data: data(chart)
+                .title("Monthly Expenses")
+                .palette(palette::sequential(Color::Primary)),
             theme: hyozu::theme::paper(),
             all_themes: hyozu::theme::all_themes().collect(),
         }

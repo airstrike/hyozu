@@ -61,6 +61,11 @@ pub struct State {
     pub series_rects: Vec<Vec<Rectangle>>,
     /// Pixel rectangles for each label, outer vec is series, inner vec is bars
     pub label_rects: Vec<Vec<Option<Rectangle>>>,
+    /// Theme-independent fill encoding plans, one per series. `None` for
+    /// series with no `color_by` encoding. Computed in `layout` so the
+    /// encoding's expensive walk (extractor calls, distinct-key indexing)
+    /// only runs when the data changes, not on every repaint.
+    pub series_fill_plans: Vec<Option<crate::encoding::FillPlan>>,
 }
 
 /// A Bars series that renders vertical bar charts.
@@ -95,6 +100,7 @@ where
             state: tree::State::new(State {
                 series_rects: Vec::new(),
                 label_rects: Vec::new(),
+                series_fill_plans: Vec::new(),
             }),
             children: Vec::new(),
         }
@@ -149,6 +155,10 @@ where
 
             let label_size = label_config.size.map(|p| p.0).unwrap_or(12.0);
             let char_width = label_size * 0.6;
+            // Vertical text run for line-height-ish font metrics. 1.2
+            // is the iced LineHeight::default() coefficient; +4 matches
+            // the ~2px top/bottom pad drawn around a label.
+            let label_height = label_size * 1.2 + 4.0;
 
             for point in &series.points {
                 // point.y carries the bar length in both orientations
@@ -165,12 +175,23 @@ where
                 if text.is_empty() {
                     continue;
                 }
-                let label_width = text.len() as f32 * char_width + 6.0;
+                // The relevant label extent is along the value axis:
+                // text width for horizontal bars (label at the bar's
+                // right end), text height for vertical bars (label
+                // above the bar top). Using the wrong one produces
+                // grossly wrong top insets on vertical bars — the
+                // label clips against the plot area top because the
+                // reserved space is derived from a horizontal measure.
+                let label_extent_along_value_axis = if is_horizontal {
+                    text.len() as f32 * char_width + 6.0
+                } else {
+                    label_height
+                };
 
                 // Assumes the other-end inset on the same axis is 0 (safe
                 // under-estimate of extent; any actual other-end inset makes
                 // the true required value slightly larger, typically <2px).
-                let required = extent - (extent - pad - label_width) / v;
+                let required = extent - (extent - pad - label_extent_along_value_axis) / v;
                 let required = required.max(0.0);
 
                 if is_horizontal {
@@ -218,6 +239,17 @@ where
 
         // Compute label rects for hit-testing
         state.label_rects = self.compute_label_rects(state);
+
+        // Pre-plan fill encodings, one per series. The plan is theme-free
+        // and stable across repaints — only re-runs when layout invalidates
+        // (data change, resize). Materialization to actual colors happens
+        // in `draw` once the theme seed is available.
+        state.series_fill_plans = self
+            .data
+            .series
+            .iter()
+            .map(|s| s.color_by.as_ref().map(|enc| enc.plan_fill(&s.points)))
+            .collect();
 
         // Bars take no space - they're rendered within the plane
         Node::new(Size::ZERO)
@@ -579,6 +611,7 @@ where
         _viewport: &crate::core::Rectangle,
         color_offset: usize,
         palette: &crate::palette::Resolved,
+        chart_user_palette: Option<&crate::palette::Palette>,
         mark_index: usize,
         selection: &Option<crate::target::Target>,
     ) where
@@ -597,7 +630,9 @@ where
         // Single frame for all labels
         let mut label_frame = Frame::new(renderer, layout_bounds.size());
 
-        // Resolve all bar colors: per-point override → series color → palette
+        // Resolve all bar colors via the full priority chain:
+        // point_colors > color_by encoding > series.color > palette fallback.
+        // See GOG.md § 7.
         let mut all_bar_colors: Vec<Vec<crate::core::Color>> = Vec::new();
 
         let is_horizontal = self.data.direction == crate::mark::bar::Direction::Horizontal;
@@ -607,35 +642,58 @@ where
         let total_series = self.data.series.len();
         let is_stacked = self.data.layout == crate::mark::bar::Layout::Stacked;
 
+        // The design's palette seed is used by fill encodings to build a
+        // categorical sub-palette sized to the distinct-key count. Theme is
+        // invariant across series, so compute the seed once per draw.
+        let seed = theme.palette_seed();
+
         // Draw each series
         for (series_idx, (series, rects)) in self.data.series.iter().zip(state.series_rects.iter()).enumerate() {
             let round_this_series = radius > 0.0 && (!is_stacked || series_idx + 1 == total_series);
             // Determine base color for this series
             let base_color = if let Some(series_color) = series.color {
-                series_color.resolve(background, text_pair, None)
+                series_color.resolve(background, text_pair, &seed, None)
             } else {
                 palette
                     .get(color_offset + series_idx)
-                    .resolve(background, text_pair, None)
+                    .resolve(background, text_pair, &seed, None)
             };
 
-            // Resolve per-bar colors
+            // Materialize the cached fill plan for this series. The expensive
+            // walk (extractor + distinct-key indexing) happened in `layout`;
+            // here we only build the palette from the seed and look up by
+            // pre-computed index. See GOG.md § 7 for priority and § 8a for
+            // the integration contract.
+            let fill_colors = state
+                .series_fill_plans
+                .get(series_idx)
+                .and_then(|p| p.as_ref())
+                .map(|plan| plan.materialize(&seed, chart_user_palette));
+
+            // Resolve per-bar colors following the priority chain:
+            // point_colors > color_by > series.color > palette fallback.
             let bar_colors: Vec<crate::core::Color> = rects
                 .iter()
                 .enumerate()
                 .map(|(i, _)| {
-                    if let Some(pc) = series.point_color(i) {
-                        pc.resolve(background, text_pair, None)
+                    let resolved = if let Some(pc) = series.point_color(i) {
+                        *pc
+                    } else if let Some(c) = fill_colors.as_ref().and_then(|v| v[i]) {
+                        c
+                    } else if let Some(sc) = series.color {
+                        sc
                     } else {
-                        base_color
-                    }
+                        palette.get(color_offset + series_idx)
+                    };
+                    resolved.resolve(background, text_pair, &seed, None)
                 })
                 .collect();
 
             let active_radius = if round_this_series { radius } else { 0.0 };
 
-            // Draw bars: batch if all same color, otherwise draw individually
-            if series.has_point_colors() {
+            // Draw bars: per-bar fill if any per-point override OR any fill
+            // encoding is present; otherwise batch into a single Path.
+            if series.has_point_colors() || series.color_by.is_some() {
                 for (rect, &color) in rects.iter().zip(bar_colors.iter()) {
                     let path = Path::new(|builder| {
                         push_bar_path(builder, rect, active_radius, is_horizontal);
@@ -677,7 +735,7 @@ where
                     if let Some(fill_color_spec) = effective_fill
                         && let Some(Some(lr)) = state.label_rects.get(series_idx).and_then(|rects| rects.get(bar_idx))
                     {
-                        let fill_resolved = fill_color_spec.resolve(background, text_pair, None);
+                        let fill_resolved = fill_color_spec.resolve(background, text_pair, &seed, None);
                         let fill_path = Path::new(|b| {
                             b.rectangle(
                                 crate::core::Point::new(lr.x, lr.y),
@@ -711,12 +769,12 @@ where
                             );
 
                             if let Some(other_color) = containing_bar {
-                                label_color_spec.resolve(other_color, text_pair, Some(background))
+                                label_color_spec.resolve(other_color, text_pair, &seed, Some(background))
                             } else {
-                                label_color_spec.resolve(background, text_pair, None)
+                                label_color_spec.resolve(background, text_pair, &seed, None)
                             }
                         }
-                        _ => label_color_spec.resolve(this_bar_color, text_pair, Some(background)),
+                        _ => label_color_spec.resolve(this_bar_color, text_pair, &seed, Some(background)),
                     };
 
                     // Build font with weight/style overrides

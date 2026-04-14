@@ -175,6 +175,7 @@ where
 
         let background = theme.background_color();
         let text_pair = theme.text_pair();
+        let seed = theme.palette_seed();
 
         let layout_bounds = layout.bounds();
         let mut frame = Frame::new(renderer, layout_bounds.size());
@@ -199,9 +200,11 @@ where
         for (i, ((start_angle, end_angle), slice)) in state.slice_angles.iter().zip(self.data.slices.iter()).enumerate()
         {
             let color = if let Some(slice_color) = slice.color {
-                slice_color.resolve(background, text_pair, None)
+                slice_color.resolve(background, text_pair, &seed, None)
             } else {
-                palette.get(color_offset + i).resolve(background, text_pair, None)
+                palette
+                    .get(color_offset + i)
+                    .resolve(background, text_pair, &seed, None)
             };
             slice_colors.push(color);
 
@@ -278,7 +281,7 @@ where
                 if let Some(fill_color_spec) = label.fill
                     && let Some(Some(lr)) = state.label_rects.get(i)
                 {
-                    let fill_resolved = fill_color_spec.resolve(background, text_pair, None);
+                    let fill_resolved = fill_color_spec.resolve(background, text_pair, &seed, None);
                     let fill_path = Path::new(|b| {
                         b.rectangle(
                             crate::core::Point::new(lr.x, lr.y),
@@ -291,7 +294,7 @@ where
                 // Resolve label color for contrast against the slice
                 let slice_fill = slice_colors[i];
                 let label_color = if let Some(c) = label.color {
-                    c.resolve(slice_fill, text_pair, Some(background))
+                    c.resolve(slice_fill, text_pair, &seed, Some(background))
                 } else {
                     text_pair.resolve(slice_fill, Some(background))
                 };

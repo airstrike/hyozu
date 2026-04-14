@@ -2,7 +2,7 @@ use iced::widget::center;
 use iced::{Element, Font, Task, color};
 
 use hyozu::mark::bar::label::Position;
-use hyozu::{Mark, bar, bars, data, tick};
+use hyozu::{Mark, bar, bars, data, encoding, tick};
 
 pub fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
@@ -64,23 +64,24 @@ const BLUE_ABOVE: iced::Color = color!(0x1A6DAA);
 impl App {
     fn new() -> Self {
         let actuals: Vec<f64> = COUNTRIES.iter().map(|c| c.actual).collect();
-        let mut series = bar(actuals).with_labels(Position::Above + (|v: f64| format!("${v:.0}M")));
-
-        for (i, c) in COUNTRIES.iter().enumerate() {
-            let color = if c.actual >= c.target { BLUE_ABOVE } else { BLUE_BELOW };
-            series.set_point_color(i, color);
-        }
+        let targets: Vec<f64> = COUNTRIES.iter().map(|c| c.target).collect();
+        let series = bar(actuals)
+            .with_labels(Position::Above + (|v: f64| format!("${v:.0}M")))
+            .color_by(
+                encoding::key(move |i, d| if d.y >= targets[i] { "above" } else { "below" })
+                    .manual([("above", BLUE_ABOVE), ("below", BLUE_BELOW)]),
+            );
 
         let chart_bars = bars([series]).horizontal();
 
         // Per-bar target ticks: (category_index, target_value)
-        let targets: Vec<(f64, f64)> = COUNTRIES
+        let tick_points: Vec<(f64, f64)> = COUNTRIES
             .iter()
             .enumerate()
             .map(|(i, c)| (i as f64, c.target))
             .collect();
 
-        let target_ticks = tick(targets).vertical().color(color!(0xD4A843)).width(2.0);
+        let target_ticks = tick(tick_points).vertical().color(color!(0xD4A843)).width(2.0);
 
         let marks: Vec<Mark> = vec![chart_bars.into(), target_ticks.into()];
         let labels: Vec<&str> = COUNTRIES.iter().map(|c| c.name).collect();

@@ -341,6 +341,7 @@ where
         let legend_interactive = self.scene.legend().map(|l| l.interactive()).unwrap_or(false);
 
         // --- Interactive legend click-to-toggle ---
+        //
         // Handled before plot-area actions so legend clicks take priority
         // even if an action handler is attached.
         // Hit-test before borrowing widget State mutably below.
@@ -762,7 +763,8 @@ fn draw_tooltip_overlay<Message>(
 
     let background = design.background_color();
     let text_pair = design.text_pair();
-    let text_color = design.text_color().resolve(background, text_pair, None);
+    let seed = design.palette_seed();
+    let text_color = design.text_color().resolve(background, text_pair, &seed, None);
     let palette = scene.resolve_palette(design);
 
     // Compute the tracking pixel x from data_x
@@ -786,6 +788,12 @@ fn draw_tooltip_overlay<Message>(
     for &(mark_idx, series_idx, pt_idx) in &hover.entries {
         let series = &plot_area.series[mark_idx];
         let child = &plot_area_tree.children[mark_idx];
+
+        // Bars resolve their color through the full priority chain
+        // (point_colors > color_by > series.color > palette). When this is
+        // `Some`, the generic explicit_color/palette-fallback logic below is
+        // bypassed. See GOG.md § 8b.
+        let mut bars_resolved_color: Option<crate::core::Color> = None;
 
         let (datum, name, explicit_color, annotation) = if child.tag == line_tag {
             if let plot_area::Series::Line(line) = series {
@@ -831,10 +839,19 @@ fn draw_tooltip_overlay<Message>(
             if let plot_area::Series::Bars(bars) = series {
                 let bar_series = &bars.data.series[series_idx];
                 let pt = &bar_series.points[pt_idx];
+
+                // Resolve the bar's displayed color via the full priority
+                // chain (point_colors > color_by > series.color > palette)
+                // so the tooltip swatch matches the actual bar color.
+                let color_idx = plot_area.color_offset_for(mark_idx, series_idx);
+                let fallback = palette.get(color_idx);
+                let resolved = bar_series.resolved_color_at(pt_idx, &seed, scene.user_palette(), fallback);
+                bars_resolved_color = Some(resolved.resolve(background, text_pair, &seed, None));
+
                 (
                     crate::data::Datum { x: pt.x, y: pt.y },
                     bar_series.name().map(|s| s.to_string()),
-                    bar_series.color().cloned(),
+                    None,
                     hover::Annotation::None,
                 )
             } else {
@@ -846,12 +863,15 @@ fn draw_tooltip_overlay<Message>(
 
         let anchor = plane.to_pixel(datum);
 
-        // Resolve series color: use explicit mark color if set, else palette
-        let series_color = if let Some(c) = explicit_color {
-            c.resolve(background, text_pair, None)
+        // Resolve series color: bars pre-compute through the priority chain;
+        // other marks use explicit mark color if set, else palette fallback.
+        let series_color = if let Some(c) = bars_resolved_color {
+            c
+        } else if let Some(c) = explicit_color {
+            c.resolve(background, text_pair, &seed, None)
         } else {
             let color_idx = plot_area.color_offset_for(mark_idx, series_idx);
-            palette.get(color_idx).resolve(background, text_pair, None)
+            palette.get(color_idx).resolve(background, text_pair, &seed, None)
         };
 
         entries.push(hover::Entry {
@@ -967,7 +987,7 @@ fn draw_tooltip_overlay<Message>(
 
         // Tooltip background — opaque by default (ensures readability on transparent charts)
         let tooltip_bg = crate::core::Color { a: 1.0, ..background };
-        let divider_color = design.divider_color().resolve(background, text_pair, None);
+        let divider_color = design.divider_color().resolve(background, text_pair, &seed, None);
 
         renderer.fill_quad(
             crate::core::renderer::Quad {
@@ -1066,9 +1086,12 @@ pub fn default(design: &dyn design::Design) -> Style {
         border: crate::core::Border {
             width: 1.0,
             radius: 5.0.into(),
-            color: design
-                .divider_color()
-                .resolve(design.background_color(), design.text_pair(), None),
+            color: design.divider_color().resolve(
+                design.background_color(),
+                design.text_pair(),
+                &design.palette_seed(),
+                None,
+            ),
         },
     }
 }
@@ -1085,9 +1108,12 @@ pub fn bordered(design: &dyn design::Design) -> Style {
         border: crate::core::Border {
             width: 1.0,
             radius: 0.0.into(),
-            color: design
-                .divider_color()
-                .resolve(design.background_color(), design.text_pair(), None),
+            color: design.divider_color().resolve(
+                design.background_color(),
+                design.text_pair(),
+                &design.palette_seed(),
+                None,
+            ),
         },
     }
 }
@@ -1099,9 +1125,12 @@ pub fn filled(design: &dyn design::Design) -> Style {
         border: crate::core::Border {
             width: 1.0,
             radius: 5.0.into(),
-            color: design
-                .divider_color()
-                .resolve(design.background_color(), design.text_pair(), None),
+            color: design.divider_color().resolve(
+                design.background_color(),
+                design.text_pair(),
+                &design.palette_seed(),
+                None,
+            ),
         },
     }
 }

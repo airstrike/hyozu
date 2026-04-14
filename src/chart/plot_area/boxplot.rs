@@ -200,16 +200,17 @@ where
 
         let background = theme.background_color();
         let text_pair = theme.text_pair();
+        let seed = theme.palette_seed();
 
         let layout_bounds = layout.bounds();
         let mut frame = Frame::new(renderer, layout_bounds.size());
 
         match self.data.direction {
             Direction::Vertical => {
-                self.draw_vertical(state, &mut frame, color_offset, palette, background, text_pair);
+                self.draw_vertical(state, &mut frame, color_offset, palette, background, text_pair, &seed);
             }
             Direction::Horizontal => {
-                self.draw_horizontal(state, &mut frame, color_offset, palette, background, text_pair);
+                self.draw_horizontal(state, &mut frame, color_offset, palette, background, text_pair, &seed);
             }
         }
 
@@ -219,6 +220,7 @@ where
         });
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn draw_vertical(
         &self,
         state: &State,
@@ -227,15 +229,16 @@ where
         palette: &crate::palette::Resolved,
         background: crate::core::Color,
         text_pair: crate::color::Pair,
+        seed: &crate::palette::PaletteSeed,
     ) {
         for (i, (entry, el)) in self.data.entries.iter().zip(state.entries_layout.iter()).enumerate() {
             let rect = &state.box_rects[i];
 
             // Resolve color
             let base_color = if let Some(entry_color) = entry.color {
-                entry_color.resolve(background, text_pair, None)
+                entry_color.resolve(background, text_pair, seed, None)
             } else {
-                palette.get(color_offset + i).resolve(background, text_pair, None)
+                palette.get(color_offset + i).resolve(background, text_pair, seed, None)
             };
 
             let fill_color = crate::core::Color {
@@ -295,6 +298,7 @@ where
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn draw_horizontal(
         &self,
         state: &State,
@@ -303,15 +307,16 @@ where
         palette: &crate::palette::Resolved,
         background: crate::core::Color,
         text_pair: crate::color::Pair,
+        seed: &crate::palette::PaletteSeed,
     ) {
         for (i, (entry, el)) in self.data.entries.iter().zip(state.entries_layout.iter()).enumerate() {
             let rect = &state.box_rects[i];
 
             // Resolve color
             let base_color = if let Some(entry_color) = entry.color {
-                entry_color.resolve(background, text_pair, None)
+                entry_color.resolve(background, text_pair, seed, None)
             } else {
-                palette.get(color_offset + i).resolve(background, text_pair, None)
+                palette.get(color_offset + i).resolve(background, text_pair, seed, None)
             };
 
             let fill_color = crate::core::Color {
