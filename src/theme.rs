@@ -49,9 +49,35 @@ pub fn hyozu_dark() -> Theme {
     })
 }
 
-/// Returns all available themes, including iced's built-in themes and our custom Paper themes.
+/// Creates a custom "shadcn" theme, ported from icedxdy's shadcn/ui-derived
+/// light palette (Neutral variant, OKLCH values converted to sRGB).
+pub fn shadcn() -> Theme {
+    Theme::custom("shadcn", Seed {
+        background: color!(0xffffff), // Near-white
+        text: color!(0x0a0a0a),       // Near-black foreground
+        primary: color!(0x171717),    // Neutral 900 primary
+        success: color!(0xf5f5f5),    // Neutral 50 accent
+        warning: color!(0xf5f5f5),    // Neutral 50 secondary
+        danger: color!(0xdf2225),     // Destructive red
+    })
+}
+
+/// Creates a custom "shadcn Dark" theme, ported from icedxdy's shadcn/ui-derived
+/// dark palette (Neutral variant, OKLCH values converted to sRGB).
+pub fn shadcn_dark() -> Theme {
+    Theme::custom("shadcn Dark", Seed {
+        background: color!(0x0a0a0a), // Near-black
+        text: color!(0xfafafa),       // Near-white foreground
+        primary: color!(0xe5e5e5),    // Neutral 200 primary
+        success: color!(0x404040),    // Neutral 700 accent
+        warning: color!(0x262626),    // Neutral 800 secondary
+        danger: color!(0xff6467),     // Destructive red
+    })
+}
+
+/// Returns all available themes, including iced's built-in themes and our custom themes.
 pub fn all_themes() -> impl Iterator<Item = Theme> {
-    [paper(), paper_dark(), hyozu(), hyozu_dark()]
+    [paper(), paper_dark(), hyozu(), hyozu_dark(), shadcn(), shadcn_dark()]
         .into_iter()
         .chain(Theme::ALL.iter().cloned())
 }
