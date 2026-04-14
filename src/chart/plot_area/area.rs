@@ -1,5 +1,5 @@
 use super::Plane;
-use super::line::{alignment_for_position, compute_label_rect, find_best_label_placement};
+use super::line::{alignment_for_position, clamp_rect_to_bounds, compute_label_rect, find_best_label_placement};
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
 use crate::core::{Point, Rectangle, Size};
@@ -242,6 +242,10 @@ where
                         preferred
                     }
                 };
+                // Guarantee the label stays inside the plot area even at the
+                // first/last data point, where the centered ideal rect would
+                // otherwise bleed past the edge and get clipped.
+                let label_rect = clamp_rect_to_bounds(label_rect, plane.bounds);
 
                 placed_rects.push(label_rect);
                 state.series_label_texts[series_idx].push(label_text);

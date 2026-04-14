@@ -159,8 +159,7 @@ where
                     other => {
                         // For fixed positions, use pathfinding too to avoid obstacles
                         let start_rect = compute_label_rect(*pixel_point, label_width, label_height, other);
-                        // Search from the fixed position to find valid placement
-                        search_from_position(
+                        let rect = search_from_position(
                             start_rect,
                             &segments,
                             &state.label_rects,
@@ -168,8 +167,10 @@ where
                             Some(plane.bounds),
                             10,
                         )
-                        .map(|(rect, _)| (other, rect))
-                        .unwrap_or((other, start_rect))
+                        .map(|(rect, _)| rect)
+                        .unwrap_or(start_rect);
+                        // Guarantee visibility at edges even if no valid slot exists.
+                        (other, clamp_rect_to_bounds(rect, plane.bounds))
                     }
                 };
 
@@ -643,6 +644,27 @@ fn search_from_position(
     None
 }
 
+/// Shift `rect` so it fits inside `bounds` without resizing. If the rect is
+/// larger than the bounds on an axis, that axis is left anchored at the
+/// bounds origin (prefers showing the left/top portion of the text).
+pub(super) fn clamp_rect_to_bounds(rect: Rectangle, bounds: Rectangle) -> Rectangle {
+    let mut x = rect.x;
+    if x + rect.width > bounds.x + bounds.width {
+        x = bounds.x + bounds.width - rect.width;
+    }
+    if x < bounds.x {
+        x = bounds.x;
+    }
+    let mut y = rect.y;
+    if y + rect.height > bounds.y + bounds.height {
+        y = bounds.y + bounds.height - rect.height;
+    }
+    if y < bounds.y {
+        y = bounds.y;
+    }
+    Rectangle::new(Point::new(x, y), crate::core::Size::new(rect.width, rect.height))
+}
+
 /// Find the best position for a label, returning both the position and final rect
 pub(super) fn find_best_label_placement(
     point: Point,
@@ -686,11 +708,22 @@ pub(super) fn find_best_label_placement(
         }
     }
 
-    // Return best found, or fallback to Above at origin
-    best_result.map(|(pos, rect, _)| (pos, rect)).unwrap_or_else(|| {
+    // Return best found, or fallback to Above clamped into bounds. Clamping
+    // guarantees that edge-of-plot labels (first/last point) stay visible
+    // even when the spiral search couldn't find a valid slot within its
+    // step budget — we'd rather accept a small overlap with a line than
+    // render "190" as "19".
+    let (pos, rect) = best_result.map(|(pos, rect, _)| (pos, rect)).unwrap_or_else(|| {
         let rect = compute_label_rect(point, label_width, label_height, Position::Above);
         (Position::Above, rect)
-    })
+    });
+
+    let rect = match plot_bounds {
+        Some(bounds) => clamp_rect_to_bounds(rect, bounds),
+        None => rect,
+    };
+
+    (pos, rect)
 }
 
 #[cfg(test)]
@@ -891,6 +924,113 @@ mod tests {
             !crate::geometry::intersect::line_rect(Point::new(0.0, 0.0), Point::new(20.0, 20.0), rect),
             "rect should not intersect line"
         );
+    }
+
+    #[test]
+    fn find_best_placement_falls_back_clamped_when_search_fails() {
+        // Force the spiral to fail for every candidate by making the label
+        // wider than the plot bounds. Before clamping, the fallback returned
+        // an Above rect centered on the data point, bleeding off the left
+        // edge. Now the returned rect is clamped into bounds so the text
+        // stays visible (even though it's no longer centered on the point).
+        let bounds = plot_bounds();
+        let point = Point::new(bounds.x + 5.0, 100.0);
+        let wide_label = bounds.width + 20.0;
+        let segments: Vec<(Point, Point)> = vec![];
+        let existing: Vec<Rectangle> = vec![];
+        let obstacles: Vec<Rectangle> = vec![];
+
+        let (_pos, rect) = find_best_label_placement(
+            point,
+            wide_label,
+            LABEL_HEIGHT,
+            &segments,
+            &existing,
+            &obstacles,
+            Some(bounds),
+        );
+
+        // Label wider than bounds: clamp leaves it anchored at bounds.x.
+        assert_eq!(rect.x, bounds.x);
+        assert!(rect.y >= bounds.y);
+        assert!(rect.y + rect.height <= bounds.y + bounds.height);
+    }
+
+    #[test]
+    fn find_best_placement_at_left_edge_stays_in_bounds() {
+        // Repro of the area_chart example: first data point of a stacked
+        // series sits at plot_bounds.x = 0, and the label "150" needs to fit
+        // inside bounds without bleeding off the left edge. The returned rect
+        // must satisfy `rect.x >= bounds.x` so the text isn't clipped.
+        let point = Point::new(0.0, 100.0);
+        let label_width = 18.0; // "150" / "190" at ~6px per char
+        let label_height = 14.0;
+        // Two series' worth of segments, as area.rs builds via `all_segments`
+        let segments = vec![
+            (Point::new(0.0, 100.0), Point::new(60.0, 90.0)),
+            (Point::new(0.0, 50.0), Point::new(60.0, 45.0)),
+        ];
+        let existing: Vec<Rectangle> = vec![];
+        let obstacles: Vec<Rectangle> = vec![];
+        let bounds = plot_bounds();
+
+        let (_pos, rect) = find_best_label_placement(
+            point,
+            label_width,
+            label_height,
+            &segments,
+            &existing,
+            &obstacles,
+            Some(bounds),
+        );
+
+        assert!(
+            rect.x >= bounds.x,
+            "left edge label bled outside plot bounds: rect.x={}, bounds.x={}",
+            rect.x,
+            bounds.x
+        );
+        assert!(
+            rect.x + rect.width <= bounds.x + bounds.width,
+            "right edge of label bled outside plot bounds"
+        );
+    }
+
+    #[test]
+    fn find_best_placement_at_right_edge_stays_in_bounds() {
+        // Mirror of the left-edge test for the last data point.
+        let bounds = plot_bounds();
+        let point = Point::new(bounds.x + bounds.width, 100.0);
+        let label_width = 18.0;
+        let label_height = 14.0;
+        let segments = vec![
+            (Point::new(bounds.x + bounds.width - 60.0, 90.0), point),
+            (
+                Point::new(bounds.x + bounds.width - 60.0, 45.0),
+                Point::new(bounds.x + bounds.width, 50.0),
+            ),
+        ];
+        let existing: Vec<Rectangle> = vec![];
+        let obstacles: Vec<Rectangle> = vec![];
+
+        let (_pos, rect) = find_best_label_placement(
+            point,
+            label_width,
+            label_height,
+            &segments,
+            &existing,
+            &obstacles,
+            Some(bounds),
+        );
+
+        assert!(
+            rect.x + rect.width <= bounds.x + bounds.width,
+            "right edge label bled outside plot bounds: rect.x={}, rect.width={}, bounds right={}",
+            rect.x,
+            rect.width,
+            bounds.x + bounds.width
+        );
+        assert!(rect.x >= bounds.x, "left edge of label bled outside plot bounds");
     }
 
     #[test]
