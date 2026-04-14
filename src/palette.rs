@@ -93,7 +93,7 @@ pub fn categorical() -> Palette {
 /// let p = palette::gradient([0xff0000, 0xffff00, 0x00ff00]);
 ///
 /// // Mix-and-match (semantic + hex)
-/// let p = palette::gradient([Color::from(0xffffff2), Color::Primary]);
+/// let p = palette::gradient([Color::from(0xffffff), Color::Primary]);
 /// ```
 pub fn gradient<I, C>(stops: I) -> Palette
 where

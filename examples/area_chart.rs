@@ -2,7 +2,7 @@ use iced::Task;
 use iced::widget::center;
 
 use hyozu::mark::line::label::{Label, Show};
-use hyozu::{area, areas, chart, data};
+use hyozu::{area, areas, chart, data, palette};
 
 pub fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
@@ -37,7 +37,8 @@ impl App {
                 .stacked()
                 .gradient(true),
             )
-            .title("Revenue vs Expenses"),
+            .title("Revenue vs Expenses")
+            .palette(palette::categorical()),
         }
     }
 

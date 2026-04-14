@@ -1,5 +1,5 @@
 use hyozu::data::Mark;
-use hyozu::{LegendConfig, data, xy};
+use hyozu::{Color, LegendConfig, data, palette, xy};
 use iced::widget::{center, column, pick_list, row};
 use iced::{Center, Fill, Subscription, Task, Theme, keyboard};
 
@@ -140,7 +140,8 @@ impl App {
                     .title("Iris Dataset (Petal)")
                     .x_axis_labels(|v| format!("{v:.1} cm"))
                     .y_axis_labels(|v| format!("{v:.1} cm"))
-                    .legend(LegendConfig::right().interactive(true)),
+                    .legend(LegendConfig::right().interactive(true))
+                    .palette(palette::gradient([Color::Success, Color::Danger])),
                 theme: hyozu::theme::paper(),
                 all_themes: hyozu::theme::all_themes().collect(),
             },
