@@ -14,7 +14,8 @@ serde_json = { version = "1", optional = true }
 geojson = ["dep:serde", "dep:serde_json"]
 
 [dev-dependencies]
-iced = { version = "0.15.0-dev", features = ["debug"] }
+iced = { version = "0.15.0-dev", features = ["debug", "tokio"] }
+fount = { git = "https://github.com/airstrike/fount" }
 
 [workspace]
 members = ["examples/*"]
