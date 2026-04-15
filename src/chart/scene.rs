@@ -182,7 +182,7 @@ where
             Some(config) if !entries.is_empty() => Some(Legend::new(
                 entries,
                 config.position,
-                config.font_size,
+                config.text,
                 config.wrap,
                 config.interactive,
             )),
@@ -212,7 +212,7 @@ where
         });
 
         Self {
-            title: data.title.as_deref().map(Title::new),
+            title: data.title.as_deref().map(|t| Title::new(t, data.title_text)),
             legend,
             top_axis: data
                 .secondary

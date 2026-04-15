@@ -131,7 +131,7 @@ where
                     return None;
                 }
 
-                let font_size = label.size.map(|p| p.0).unwrap_or(12.0);
+                let font_size = label.text.size.map(|p| p.0).unwrap_or(12.0);
                 let char_width = font_size * 0.6;
                 let text_width = text.len() as f32 * char_width + 6.0;
                 let text_height = font_size * 1.2 + 4.0;
@@ -275,7 +275,7 @@ where
                 let pct = slice.value.max(0.0) / total;
                 let label_text = (label.format)(slice.value, pct);
 
-                let font_size = label.size.unwrap_or(crate::core::Pixels(theme.font_size()));
+                let font_size = label.text.size.unwrap_or(crate::core::Pixels(theme.font_size()));
 
                 // Draw fill background if specified
                 if let Some(fill_color_spec) = label.fill
@@ -299,14 +299,11 @@ where
                     text_pair.resolve(slice_fill, Some(background))
                 };
 
-                // Build font with weight/style overrides
-                let mut font = theme.font();
-                if let Some(w) = label.weight {
-                    font.weight = w;
-                }
-                if let Some(s) = label.style {
-                    font.style = s;
-                }
+                // Resolve the font: label's family/weight/style layered
+                // on top of the theme's data-label default.
+                let font = label
+                    .text
+                    .resolved_font(theme.data_label_text().resolved_font(theme.font()));
 
                 frame.fill_text(CanvasText {
                     content: label_text,

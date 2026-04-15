@@ -31,7 +31,7 @@ impl Ord for OrderedFloat {
 /// Format a tick value with an explicit decimal precision derived from
 /// the tick step size. This is the D3-style approach: if the step is 0.2
 /// we need 1 decimal place; if 0.05, 2 places; if 5, 0 places.
-fn default_format_with_precision(value: f64, precision: Option<usize>) -> String {
+fn format_with_precision(value: f64, precision: Option<usize>) -> String {
     match precision {
         Some(p) => format!("{:.prec$}", value, prec = p),
         None => {
@@ -280,12 +280,7 @@ fn select_time_interval(range_seconds: f64, target_count: usize) -> TimeInterval
 
 /// Generate nice time-aligned tick positions using hierarchical intervals.
 /// Returns (tick_timestamps_i64, selected_interval) for proper formatting.
-fn nice_time_ticks_with_interval(
-    min: f64,
-    max: f64,
-    target_count: usize,
-    alignment: Alignment,
-) -> (Vec<i64>, TimeInterval) {
+fn nice_time_ticks(min: f64, max: f64, target_count: usize, alignment: Alignment) -> (Vec<i64>, TimeInterval) {
     if min >= max {
         return (vec![min as i64], TIME_INTERVALS[0]);
     }
@@ -340,12 +335,6 @@ fn nice_time_ticks_with_interval(
     }
 
     (ticks, interval)
-}
-
-/// Generate nice time-aligned tick positions
-fn nice_time_ticks(min: f64, max: f64, target_count: usize, alignment: Alignment) -> Vec<f64> {
-    let (ticks, _) = nice_time_ticks_with_interval(min, max, target_count, alignment);
-    ticks.into_iter().map(|t| t as f64).collect()
 }
 
 /// State for a Guide - stores paragraphs for text measurement
@@ -425,7 +414,7 @@ where
 
     /// Derive tick positions, label positions, and label text from data
     /// Returns (label_info, tick_positions) based on label placement
-    fn compute_ticks_and_labels(&self, bounds: Bounds) -> (Vec<(f64, String)>, Vec<f64>) {
+    fn ticks_and_labels(&self, bounds: Bounds) -> (Vec<(f64, String)>, Vec<f64>) {
         use crate::axis::label;
         use crate::axis::tick::Frequency;
 
@@ -503,7 +492,13 @@ where
             // Use time-aligned ticks for time-based axes
             let alignment = self.axis.ticks.alignment;
             if self.axis.kind() == Kind::Time {
-                (nice_time_ticks(axis_min, axis_max, 6, alignment), None)
+                (
+                    {
+                        let (ticks, _) = nice_time_ticks(axis_min, axis_max, 6, alignment);
+                        ticks.into_iter().map(|t| t as f64).collect::<Vec<f64>>()
+                    },
+                    None,
+                )
             } else {
                 let (ticks, step) = self.nice_ticks(axis_min, axis_max, 6, alignment);
                 (ticks, Some(step))
@@ -516,7 +511,7 @@ where
         // For time axes, get the interval for smart formatting
         let time_interval = if self.axis.kind() == Kind::Time {
             let alignment = self.axis.ticks.alignment;
-            let (_, interval) = nice_time_ticks_with_interval(axis_min, axis_max, 6, alignment);
+            let (_, interval) = nice_time_ticks(axis_min, axis_max, 6, alignment);
             Some(interval)
         } else {
             None
@@ -547,14 +542,14 @@ where
                 if index < labels.len() {
                     labels[index].clone()
                 } else {
-                    default_format_with_precision(pos, step_precision)
+                    format_with_precision(pos, step_precision)
                 }
             } else if let Some(ref format_fn) = self.axis.labels.format {
                 format_fn(pos)
             } else if let Some(interval) = time_interval {
                 interval.format(pos as i64)
             } else {
-                default_format_with_precision(pos, step_precision)
+                format_with_precision(pos, step_precision)
             }
         };
 
@@ -937,7 +932,7 @@ where
     pub(super) fn state(&self) -> Tree {
         // Compute bounds first, then ticks within bounds
         let bounds = self.compute_axis_bounds();
-        let (label_info, _tick_positions) = self.compute_ticks_and_labels(bounds);
+        let (label_info, _tick_positions) = self.ticks_and_labels(bounds);
 
         // Create a tree for each label's paragraph
         let children = label_info.iter().map(|_| Tree::empty()).collect();
@@ -958,7 +953,7 @@ where
     /// Reconcile the tree with current Guide state
     pub(super) fn diff(&self, tree: &mut Tree) {
         let bounds = self.compute_axis_bounds();
-        let (label_info, _) = self.compute_ticks_and_labels(bounds);
+        let (label_info, _) = self.ticks_and_labels(bounds);
 
         tree.diff_children_custom(&label_info, |_tree, _tick| {}, |_tick| Tree::empty());
     }
@@ -982,7 +977,7 @@ where
     ) -> Node {
         // Compute bounds first, then generate ticks within those bounds
         let bounds = self.compute_axis_bounds();
-        let (label_info, tick_positions) = self.compute_ticks_and_labels(bounds);
+        let (label_info, tick_positions) = self.ticks_and_labels(bounds);
 
         // Update state with computed values
         let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
@@ -1062,6 +1057,9 @@ where
         let mut max_label_width = 0.0f32;
 
         // First pass: measure all labels
+        let axis_text = self.axis.text();
+        let label_font = axis_text.resolved_font(renderer.default_font());
+        let label_size_px: crate::core::Pixels = axis_text.resolved_size(12.0).into();
         for (i, (_pos, label)) in label_data.iter().enumerate() {
             let paragraph = &mut state.labels[i];
 
@@ -1069,9 +1067,9 @@ where
             let _ = paragraph.update(text::Text {
                 content: label,
                 bounds: Size::INFINITE,
-                size: self.axis.label_size().unwrap_or(12.0.into()),
+                size: label_size_px,
                 line_height: text::LineHeight::default(),
-                font: self.axis.font().unwrap_or_else(|| renderer.default_font()),
+                font: label_font,
                 align_x: text::Alignment::Left,
                 align_y: alignment::Vertical::Top,
                 shaping: text::Shaping::Basic,
@@ -1232,6 +1230,9 @@ where
         // shrinks to intrinsic (the bound is an upper limit). If intrinsic >
         // column_width, the paragraph either wraps or ellipsizes at
         // column_width.
+        let axis_text = self.axis.text();
+        let label_font = axis_text.resolved_font(renderer.default_font());
+        let label_size_px: crate::core::Pixels = axis_text.resolved_size(12.0).into();
         for (i, (_pos, label)) in label_data.iter().enumerate() {
             let paragraph = &mut state.labels[i];
 
@@ -1239,9 +1240,9 @@ where
             let _ = paragraph.update(text::Text {
                 content: label,
                 bounds: Size::new(column_width, f32::INFINITY),
-                size: self.axis.label_size().unwrap_or(12.0.into()),
+                size: label_size_px,
                 line_height: text::LineHeight::default(),
-                font: self.axis.font().unwrap_or_else(|| renderer.default_font()),
+                font: label_font,
                 align_x: text::Alignment::Left,
                 align_y: alignment::Vertical::Top,
                 shaping: text::Shaping::Basic,
@@ -1294,8 +1295,7 @@ where
         // Track the tallest label so the axis area can grow vertically when
         // `Wrap` produces multi-line labels. Single-line (Ellipsize) keeps the
         // historical height (label_size + tick_length + label_offset).
-        let label_size = self.axis.label_size().unwrap_or(12.0.into());
-        let mut max_label_height: f32 = label_size.0;
+        let mut max_label_height: f32 = label_size_px.0;
 
         // Second pass: position labels within the inset range
         for (i, (pos, _label)) in label_data.iter().enumerate() {
@@ -1635,7 +1635,7 @@ mod tests {
         let min = base as f64;
         let max = min + 3600.0;
 
-        let (ticks, interval) = nice_time_ticks_with_interval(min, max, 6, Alignment::Auto);
+        let (ticks, interval) = nice_time_ticks(min, max, 6, Alignment::Auto);
 
         // Should select 10-minute intervals
         assert_eq!(interval.unit, TimeUnit::Minute);

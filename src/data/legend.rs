@@ -1,4 +1,6 @@
 use crate::color::Color;
+use crate::core::Font;
+use crate::text;
 
 /// Position of the legend relative to the plot area.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -30,8 +32,9 @@ pub enum Position {
 #[derive(Debug, Clone)]
 pub struct Legend {
     pub(crate) position: Position,
-    /// Font size override. None = default (10.0).
-    pub(crate) font_size: Option<f32>,
+    /// Typography override. Any field left unset falls back to
+    /// [`crate::Design::legend_text`].
+    pub(crate) text: text::Style,
     /// Optional text color override.
     pub(crate) text_color: Option<Color>,
     /// Whether legend entries wrap to multiple rows (default true).
@@ -45,7 +48,7 @@ impl Default for Legend {
     fn default() -> Self {
         Self {
             position: Position::default(),
-            font_size: None,
+            text: text::Style::new(),
             text_color: None,
             wrap: true,
             interactive: false,
@@ -88,7 +91,20 @@ impl Legend {
 
     /// Sets the font size for legend text.
     pub fn font_size(mut self, size: f32) -> Self {
-        self.font_size = Some(size);
+        self.text.size = Some(size.into());
+        self
+    }
+
+    /// Sets the font family for legend text.
+    pub fn font(mut self, font: Font) -> Self {
+        self.text.family = Some(font);
+        self
+    }
+
+    /// Overrides the full text style for legend labels. Any field left
+    /// unset falls back to [`crate::Design::legend_text`].
+    pub fn with_text(mut self, style: text::Style) -> Self {
+        self.text = style;
         self
     }
 

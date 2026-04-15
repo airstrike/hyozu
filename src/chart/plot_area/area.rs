@@ -153,7 +153,7 @@ where
                 continue;
             }
 
-            let label_size = label_config.size.map(|p| p.0).unwrap_or(12.0);
+            let label_size = label_config.text.size.map(|p| p.0).unwrap_or(12.0);
 
             let minmax_indices: Vec<usize> = match label_config.show {
                 Show::MinMaxFirst | Show::MinMaxAll | Show::MinMaxLast => {
@@ -370,7 +370,7 @@ where
                 continue;
             };
 
-            let label_size = label_config.size.map(|p| p.0).unwrap_or(12.0);
+            let label_size = label_config.text.size.map(|p| p.0).unwrap_or(12.0);
 
             let base_color = if let Some(c) = series.color {
                 c.resolve(background, text_pair, &seed, None)
@@ -386,13 +386,9 @@ where
                 base_color
             };
 
-            let mut label_font = theme.font();
-            if let Some(w) = label_config.weight {
-                label_font.weight = w;
-            }
-            if let Some(s) = label_config.style {
-                label_font.style = s;
-            }
+            let label_font = label_config
+                .text
+                .resolved_font(theme.data_label_text().resolved_font(theme.font()));
 
             let label_fill_color = label_config
                 .fill

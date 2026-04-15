@@ -1,5 +1,6 @@
 use crate::color::Color;
-use crate::core::{Font, Pixels};
+use crate::core::{Font, Pixels, font};
+use crate::text;
 
 pub mod label;
 pub mod tick;
@@ -217,8 +218,9 @@ pub struct Axis {
     label_color: Option<Color>,
     grid_color: Option<Color>,
     minor_grid_color: Option<Color>,
-    font: Option<Font>,
-    label_size: Option<Pixels>,
+    /// Typography for tick labels. Any field left unset falls back to
+    /// [`crate::Design::axis_text`].
+    pub(crate) text: text::Style,
 }
 
 impl Axis {
@@ -257,8 +259,7 @@ impl Axis {
             label_color: None,
             grid_color: None,
             minor_grid_color: None,
-            font: None,
-            label_size: None,
+            text: text::Style::new(),
         }
     }
 
@@ -364,20 +365,41 @@ impl Axis {
     }
 
     /// Set the minor grid line color (overrides design system).
-    pub fn with_minor_grid_color(mut self, color: impl Into<Color>) -> Self {
+    pub fn with_minor_grid(mut self, color: impl Into<Color>) -> Self {
         self.minor_grid_color = Some(color.into());
         self
     }
 
-    /// Set the font (overrides design system).
-    pub fn with_font(mut self, font: Font) -> Self {
-        self.font = Some(font);
+    /// Override the full text style for tick labels.
+    ///
+    /// Any field left unset on `style` falls back to
+    /// [`crate::Design::axis_text`].
+    pub fn with_text(mut self, style: text::Style) -> Self {
+        self.text = style;
         self
     }
 
-    /// Set the label size (overrides design system).
+    /// Set the font family for tick labels (overrides design system).
+    pub fn with_font(mut self, font: Font) -> Self {
+        self.text.family = Some(font);
+        self
+    }
+
+    /// Set the tick label size (overrides design system).
     pub fn with_label_size(mut self, size: impl Into<Pixels>) -> Self {
-        self.label_size = Some(size.into());
+        self.text.size = Some(size.into());
+        self
+    }
+
+    /// Set the tick label font weight (e.g. `font::Weight::Bold`).
+    pub fn with_label_weight(mut self, weight: font::Weight) -> Self {
+        self.text.weight = Some(weight);
+        self
+    }
+
+    /// Make tick labels italic.
+    pub fn with_label_italic(mut self) -> Self {
+        self.text.style = Some(font::Style::Italic);
         self
     }
 
@@ -426,14 +448,9 @@ impl Axis {
         self.show_labels
     }
 
-    /// Get the font, if specified.
-    pub(crate) fn font(&self) -> Option<Font> {
-        self.font
-    }
-
-    /// Get the label size, if specified.
-    pub(crate) fn label_size(&self) -> Option<Pixels> {
-        self.label_size
+    /// Returns the text style override for tick labels.
+    pub(crate) fn text(&self) -> &text::Style {
+        &self.text
     }
 
     /// Get the axis color, if specified.

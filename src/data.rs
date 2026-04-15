@@ -43,6 +43,10 @@ pub struct Data {
     /// Optional title
     pub(crate) title: Option<String>,
 
+    /// Typography override for the title. Any field unset falls back to
+    /// [`crate::Design::title_text`].
+    pub(crate) title_text: crate::text::Style,
+
     /// Optional palette strategy override
     pub(crate) palette: Option<crate::palette::Palette>,
 
@@ -117,6 +121,7 @@ impl IntoData for Mark {
             primary: Area::from(self),
             secondary: Area::empty(),
             title: None,
+            title_text: crate::text::Style::new(),
             palette: None,
             selection: None,
             legend: None,
@@ -209,6 +214,7 @@ impl IntoData for Vec<Mark> {
             primary: Area::from(self),
             secondary: Area::empty(),
             title: None,
+            title_text: crate::text::Style::new(),
             palette: None,
             selection: None,
             legend: None,
@@ -234,6 +240,13 @@ impl Data {
     /// Sets the title for the chart.
     pub fn title(mut self, title: impl Into<String>) -> Self {
         self.title = Some(title.into());
+        self
+    }
+
+    /// Overrides the title's text style. Any field left unset on `style`
+    /// falls back to [`crate::Design::title_text`].
+    pub fn title_style(mut self, style: crate::text::Style) -> Self {
+        self.title_text = style;
         self
     }
 

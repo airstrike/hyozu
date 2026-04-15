@@ -19,21 +19,23 @@ where
 pub struct Title<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: text::Renderer,
+    Renderer: text::Renderer<Font = crate::core::Font>,
 {
     text: &'a str,
+    style: crate::text::Style,
     _marker: std::marker::PhantomData<(Message, Renderer)>,
 }
 
 impl<'a, Message, Renderer> Title<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: text::Renderer,
+    Renderer: text::Renderer<Font = crate::core::Font>,
 {
-    /// Create a new Title borrowing text
-    pub fn new(text: &'a str) -> Self {
+    /// Create a new Title borrowing text, with an optional style override.
+    pub fn new(text: &'a str, style: crate::text::Style) -> Self {
         Self {
             text,
+            style,
             _marker: std::marker::PhantomData,
         }
     }
@@ -58,13 +60,19 @@ where
     pub fn layout(&self, tree: &mut Tree, renderer: &Renderer, limits: &Limits) -> Node {
         let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
 
-        // Update paragraph with title text
+        // Resolve font/size before measurement. When `design` isn't reachable
+        // here, fall back to the historical defaults: renderer.default_font()
+        // and 16.0 pixels. The draw() path layers the actual theme defaults
+        // on top.
+        let font = self.style.resolved_font(renderer.default_font());
+        let size: crate::core::Pixels = self.style.resolved_size(16.0).into();
+
         let _ = state.paragraph.update(text::Text {
             content: self.text,
             bounds: Size::INFINITE,
-            size: 16.0.into(), // TODO: Make configurable
+            size,
             line_height: text::LineHeight::default(),
-            font: renderer.default_font(),
+            font,
             align_x: text::Alignment::Center,
             align_y: crate::core::alignment::Vertical::Top,
             shaping: text::Shaping::Basic,
@@ -109,6 +117,14 @@ where
         let seed = design.palette_seed();
         let text_color = design.text_color().resolve(background, text_pair, &seed, None);
 
+        // Resolve typography: per-chart style wins, then theme title default,
+        // then the renderer/library fallback (16px).
+        let title_default = design.title_text();
+        let font = self
+            .style
+            .resolved_font(title_default.resolved_font(renderer.default_font()));
+        let size: crate::core::Pixels = self.style.resolved_size(title_default.resolved_size(16.0)).into();
+
         // Draw title text centered at top with padding
         let position = Point::new(bounds.x + bounds.width / 2.0, bounds.y + padding);
 
@@ -116,8 +132,8 @@ where
             crate::core::text::Text {
                 content: self.text.to_string(),
                 bounds: Size::new(bounds.width, bounds.height),
-                size: 16.0.into(),
-                font: renderer.default_font(),
+                size,
+                font,
                 align_x: crate::core::alignment::Horizontal::Center.into(),
                 align_y: crate::core::alignment::Vertical::Top,
                 line_height: crate::core::text::LineHeight::default(),

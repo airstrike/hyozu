@@ -13,6 +13,7 @@ pub mod props;
 pub mod scale;
 pub mod sparkline;
 pub mod target;
+pub mod text;
 pub mod theme;
 
 // Make our imports look like iced's built-in widgets

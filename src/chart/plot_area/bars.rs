@@ -153,7 +153,7 @@ where
                 continue;
             }
 
-            let label_size = label_config.size.map(|p| p.0).unwrap_or(12.0);
+            let label_size = label_config.text.size.map(|p| p.0).unwrap_or(12.0);
             let char_width = label_size * 0.6;
             // Vertical text run for line-height-ish font metrics. 1.2
             // is the iced LineHeight::default() coefficient; +4 matches
@@ -548,7 +548,7 @@ where
                     return rects.iter().map(|_| None).collect();
                 };
 
-                let label_size = label_config.size.map(|p| p.0).unwrap_or(12.0);
+                let label_size = label_config.text.size.map(|p| p.0).unwrap_or(12.0);
 
                 rects
                     .iter()
@@ -713,7 +713,7 @@ where
 
             // Draw labels for this series if configured
             if let Some(label_config) = &series.label {
-                let label_size = label_config.size.map(|p| p.0).unwrap_or(12.0);
+                let label_size = label_config.text.size.map(|p| p.0).unwrap_or(12.0);
                 let is_horizontal = self.data.direction == crate::mark::bar::Direction::Horizontal;
 
                 for (bar_idx, (rect, point)) in rects.iter().zip(series.points.iter()).enumerate() {
@@ -727,8 +727,8 @@ where
                     // Merge per-point label overrides
                     let point_label = series.point_label(bar_idx);
                     let effective_size = point_label.and_then(|l| l.size()).map(|p| p.0).unwrap_or(label_size);
-                    let effective_weight = point_label.and_then(|l| l.weight()).or(label_config.weight);
-                    let effective_style = point_label.and_then(|l| l.style()).or(label_config.style);
+                    let effective_weight = point_label.and_then(|l| l.weight()).or(label_config.text.weight);
+                    let effective_style = point_label.and_then(|l| l.style()).or(label_config.text.style);
                     let effective_fill = point_label.and_then(|l| l.fill().copied()).or(label_config.fill);
 
                     // Draw fill background if specified
@@ -777,8 +777,10 @@ where
                         _ => label_color_spec.resolve(this_bar_color, text_pair, &seed, Some(background)),
                     };
 
-                    // Build font with weight/style overrides
-                    let mut font = theme.font();
+                    // Resolve the font: label's family/weight/style layered
+                    // on top of the theme's data-label default.
+                    let base_font = theme.data_label_text().resolved_font(theme.font());
+                    let mut font = label_config.text.resolved_font(base_font);
                     if let Some(w) = effective_weight {
                         font.weight = w;
                     }

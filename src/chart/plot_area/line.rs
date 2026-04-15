@@ -82,7 +82,7 @@ where
         state.label_rects.clear();
 
         if let Some(label_config) = &self.data.label {
-            let label_size = label_config.size.map(|p| p.0).unwrap_or(12.0);
+            let label_size = label_config.text.resolved_size(12.0);
             let num_points = state.pixel_points.len();
 
             // Find min/max Y indices for MinMax modes
@@ -425,7 +425,9 @@ where
 
         // Draw data labels from state
         if let Some(label_config) = &self.data.label {
-            let label_size = label_config.size.map(|p| p.0).unwrap_or(12.0);
+            let label_size = label_config
+                .text
+                .resolved_size(theme.data_label_text().resolved_size(12.0));
 
             // Resolve label color (defaults to line color)
             let label_color = if let Some(label_color_spec) = label_config.color {
@@ -434,16 +436,12 @@ where
                 color
             };
 
-            // Build the label font once per series, applying weight/style
-            // overrides from the label config. Same approach bar uses so that
-            // bold/italic data labels work consistently across mark types.
-            let mut label_font = theme.font();
-            if let Some(w) = label_config.weight {
-                label_font.weight = w;
-            }
-            if let Some(s) = label_config.style {
-                label_font.style = s;
-            }
+            // Resolve the label font once per series — family, weight, and
+            // style all flow from the label's `text::Style`, falling back to
+            // the theme's data-label default for anything unset.
+            let label_font = label_config
+                .text
+                .resolved_font(theme.data_label_text().resolved_font(theme.font()));
 
             let label_fill_color = label_config
                 .fill

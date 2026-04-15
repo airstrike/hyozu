@@ -1,6 +1,7 @@
 use crate::color::Color;
-use crate::core::Pixels;
 use crate::core::font::{Style, Weight};
+use crate::core::{Font, Pixels};
+use crate::text;
 use std::sync::Arc;
 
 /// Position of data labels on bars.
@@ -22,9 +23,8 @@ pub struct Label {
     pub(crate) position: Position,
     pub(crate) format: Arc<dyn Fn(f64) -> String + Send + Sync>,
     pub(crate) color: Option<Color>,
-    pub(crate) size: Option<Pixels>,
-    pub(crate) weight: Option<Weight>,
-    pub(crate) style: Option<Style>,
+    /// Typography override for the label text.
+    pub(crate) text: text::Style,
     pub(crate) fill: Option<Color>,
 }
 
@@ -33,9 +33,7 @@ impl PartialEq for Label {
         self.position == other.position
             && (self.format)(1.0) == (other.format)(1.0)
             && self.color == other.color
-            && self.size == other.size
-            && self.weight == other.weight
-            && self.style == other.style
+            && self.text == other.text
             && self.fill == other.fill
     }
 }
@@ -46,9 +44,7 @@ impl std::fmt::Debug for Label {
             .field("position", &self.position)
             .field("format", &"<function>")
             .field("color", &self.color)
-            .field("size", &self.size)
-            .field("weight", &self.weight)
-            .field("style", &self.style)
+            .field("text", &self.text)
             .field("fill", &self.fill)
             .finish()
     }
@@ -69,9 +65,7 @@ impl Default for Label {
             position: Position::Above,
             format: Arc::new(default),
             color: None,
-            size: None,
-            weight: None,
-            style: None,
+            text: text::Style::new(),
             fill: None,
         }
     }
@@ -101,21 +95,36 @@ impl Label {
         self
     }
 
+    /// Override the full text style.
+    ///
+    /// Any field left unset on `style` falls back to
+    /// [`crate::Design::data_label_text`].
+    pub fn with_text(mut self, style: text::Style) -> Self {
+        self.text = style;
+        self
+    }
+
+    /// Set the label font family (overrides the theme default).
+    pub fn with_font(mut self, font: Font) -> Self {
+        self.text.family = Some(font);
+        self
+    }
+
     /// Set the label size.
     pub fn with_size(mut self, size: impl Into<Pixels>) -> Self {
-        self.size = Some(size.into());
+        self.text.size = Some(size.into());
         self
     }
 
     /// Set the label font weight.
     pub fn with_weight(mut self, weight: Weight) -> Self {
-        self.weight = Some(weight);
+        self.text.weight = Some(weight);
         self
     }
 
     /// Set the label font style.
     pub fn with_style(mut self, style: Style) -> Self {
-        self.style = Some(style);
+        self.text.style = Some(style);
         self
     }
 
@@ -134,17 +143,22 @@ impl Label {
 
     /// Sets the label size in place.
     pub fn set_size(&mut self, size: Option<Pixels>) {
-        self.size = size;
+        self.text.size = size;
     }
 
     /// Sets the label font weight in place.
     pub fn set_weight(&mut self, weight: Option<Weight>) {
-        self.weight = weight;
+        self.text.weight = weight;
     }
 
     /// Sets the label font style in place.
     pub fn set_style(&mut self, style: Option<Style>) {
-        self.style = style;
+        self.text.style = style;
+    }
+
+    /// Sets the label font family in place.
+    pub fn set_font(&mut self, font: Option<Font>) {
+        self.text.family = font;
     }
 
     /// Sets the label background fill color in place.
@@ -166,22 +180,27 @@ impl Label {
 
     /// Returns the label size.
     pub fn size(&self) -> Option<Pixels> {
-        self.size
+        self.text.size
     }
 
     /// Returns the label font weight.
     pub fn weight(&self) -> Option<Weight> {
-        self.weight
+        self.text.weight
     }
 
     /// Returns the label font style.
     pub fn style(&self) -> Option<Style> {
-        self.style
+        self.text.style
     }
 
     /// Returns the label background fill color.
     pub fn fill(&self) -> Option<&Color> {
         self.fill.as_ref()
+    }
+
+    /// Returns the label text style override.
+    pub fn text(&self) -> &text::Style {
+        &self.text
     }
 }
 

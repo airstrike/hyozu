@@ -43,7 +43,7 @@ where
 {
     entries: Vec<LegendEntry>,
     position: Position,
-    font_size: f32,
+    text: crate::text::Style,
     wrap: bool,
     interactive: bool,
     _marker: std::marker::PhantomData<(Message, &'a Renderer)>,
@@ -57,14 +57,14 @@ where
     pub fn new(
         entries: Vec<LegendEntry>,
         position: Position,
-        font_size: Option<f32>,
+        text: crate::text::Style,
         wrap: bool,
         interactive: bool,
     ) -> Self {
         Self {
             entries,
             position,
-            font_size: font_size.unwrap_or(DEFAULT_FONT_SIZE),
+            text,
             wrap,
             interactive,
             _marker: std::marker::PhantomData,
@@ -120,7 +120,7 @@ where
         }
 
         let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
-        let font_size = self.font_size;
+        let font_size = self.text.resolved_size(DEFAULT_FONT_SIZE);
         let swatch_size = font_size * SWATCH_SCALE;
 
         // Measure each entry's text width
@@ -131,7 +131,7 @@ where
                 bounds: Size::INFINITE,
                 size: font_size.into(),
                 line_height: text::LineHeight::default(),
-                font: renderer.default_font(),
+                font: self.text.resolved_font(renderer.default_font()),
                 align_x: text::Alignment::Left,
                 align_y: crate::core::alignment::Vertical::Top,
                 shaping: text::Shaping::Basic,
@@ -259,8 +259,9 @@ where
         let background = design.background_color();
         let text_pair = design.text_pair();
         let seed = design.palette_seed();
-        let font = design.font();
-        let font_size = self.font_size;
+        let legend_default = design.legend_text();
+        let font = self.text.resolved_font(legend_default.resolved_font(design.font()));
+        let font_size = self.text.resolved_size(legend_default.resolved_size(DEFAULT_FONT_SIZE));
         let swatch_size = font_size * SWATCH_SCALE;
         let text_color = design.text_color().resolve(background, text_pair, &seed, None);
         let row_height = font_size + PADDING_V * 2.0;

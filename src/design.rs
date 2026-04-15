@@ -92,6 +92,39 @@ pub trait Design {
     /// Returns the default font size for chart text.
     fn font_size(&self) -> f32;
 
+    /// Default text style for the chart title. Themes override this to
+    /// customise title typography; callers on [`crate::Data`] may further
+    /// layer a per-chart [`crate::text::Style`] on top.
+    ///
+    /// The default is `font()` at 16px — the historical hardcoded title size.
+    fn title_text(&self) -> crate::text::Style {
+        crate::text::Style::new().font(self.font()).size(16.0)
+    }
+
+    /// Default text style for axis tick labels and titles.
+    ///
+    /// Defaults to `font()` at `font_size()`.
+    fn axis_text(&self) -> crate::text::Style {
+        crate::text::Style::new().font(self.font()).size(self.font_size())
+    }
+
+    /// Default text style for the legend.
+    ///
+    /// Defaults to `font()` at 10px — 2px smaller than the general 12px
+    /// label size, matching the historical `DEFAULT_FONT_SIZE` in the
+    /// legend renderer.
+    fn legend_text(&self) -> crate::text::Style {
+        crate::text::Style::new().font(self.font()).size(10.0)
+    }
+
+    /// Default text style for in-plot data labels (bar totals, line point
+    /// labels, pie slice labels, etc.).
+    ///
+    /// Defaults to `font()` at `font_size()`.
+    fn data_label_text(&self) -> crate::text::Style {
+        crate::text::Style::new().font(self.font()).size(self.font_size())
+    }
+
     /// Returns an owned [`Cow`] of this design.
     fn to_cow(&self) -> Cow<'static, Self>
     where
@@ -163,6 +196,22 @@ impl<T: Design> Design for &T {
 
     fn font_size(&self) -> f32 {
         (*self).font_size()
+    }
+
+    fn title_text(&self) -> crate::text::Style {
+        (*self).title_text()
+    }
+
+    fn axis_text(&self) -> crate::text::Style {
+        (*self).axis_text()
+    }
+
+    fn legend_text(&self) -> crate::text::Style {
+        (*self).legend_text()
+    }
+
+    fn data_label_text(&self) -> crate::text::Style {
+        (*self).data_label_text()
     }
 }
 
