@@ -42,9 +42,10 @@ impl Style {
         Self::default()
     }
 
-    /// Sets the font family.
-    pub fn font(mut self, font: Font) -> Self {
-        self.family = Some(font);
+    /// Sets the font family. Accepts anything convertible to a
+    /// [`Font`], so you can pass `"Inter"` directly.
+    pub fn font(mut self, font: impl Into<Font>) -> Self {
+        self.family = Some(font.into());
         self
     }
 
@@ -128,7 +129,9 @@ impl From<f32> for Style {
 
 impl From<Font> for Style {
     fn from(font: Font) -> Self {
-        Self::new().font(font)
+        let mut st = Self::new();
+        st.family = Some(font);
+        st
     }
 }
 

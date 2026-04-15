@@ -77,8 +77,10 @@ impl Label {
     }
 
     /// Sets the label font family (overrides the theme default).
-    pub fn with_font(mut self, font: Font) -> Self {
-        self.text.family = Some(font);
+    ///
+    /// Accepts anything convertible to a [`Font`] — `"Inter"` works.
+    pub fn with_font(mut self, font: impl Into<Font>) -> Self {
+        self.text.family = Some(font.into());
         self
     }
 

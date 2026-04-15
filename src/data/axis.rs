@@ -380,8 +380,11 @@ impl Axis {
     }
 
     /// Set the font family for tick labels (overrides design system).
-    pub fn with_font(mut self, font: Font) -> Self {
-        self.text.family = Some(font);
+    ///
+    /// Accepts anything convertible to a [`Font`], so `"Inter"` and
+    /// `Font::MONOSPACE` both work.
+    pub fn with_font(mut self, font: impl Into<Font>) -> Self {
+        self.text.family = Some(font.into());
         self
     }
 
