@@ -8,7 +8,16 @@
 //! At startup we pull three Google Fonts via the `fount` crate — Playfair
 //! Display for the title, Inter for the axes, JetBrains Mono for data
 //! labels and legend — and register them with iced. Once loaded, the chart
-//! text snaps to the new families on the next redraw.
+//! is rebuilt with the new families so the text snaps to the real typeface.
+//!
+//! Note: we intentionally don't set a font family until it has finished
+//! loading. iced's text buffer cache keys on (content, font, size, …) but
+//! not the font-system version, so a buffer rendered with a fallback font
+//! would persist even after the real font is registered. By deferring the
+//! family name until the font is ready, we avoid that stale-cache path
+//! entirely.
+
+use std::collections::HashSet;
 
 use iced::widget::{center, column, row, text};
 use iced::{Font, Length, Task, Theme, font};
@@ -30,67 +39,24 @@ pub fn main() -> iced::Result {
 
 struct App {
     sales: hyozu::Data,
+    loaded: HashSet<&'static str>,
     status: String,
 }
 
 #[derive(Debug, Clone)]
 enum Message {
-    FontLoaded(String, Result<(), String>),
+    FontLoaded(&'static str, Result<(), String>),
 }
 
 impl App {
     fn new() -> (Self, Task<Message>) {
-        // Bold italic data labels in JetBrains Mono. `with_font` takes
-        // `impl Into<Font>`, so a bare `&str` works — iced looks the
-        // family up by name once it's been registered.
-        let label = bar::label::Label::default()
-            .with_position(bar::label::Position::Above)
-            .with_font(MONO_FAMILY)
-            .with_weight(font::Weight::Bold)
-            .with_style(font::Style::Italic);
-
-        let sales = data(
-            bars([bar([1200, 1900, 1500, 2200, 1800, 2400]).with_name("Revenue")])
-                .corner_radius(6.0)
-                .data_labels(label),
-        )
-        .palette(Palette::Categorical)
-        .title("Quarterly Revenue")
-        // Playfair Display title. Any field unset on the Style falls back
-        // to `Design::title_text` (theme font at 16 px).
-        .title_style(
-            chart_text::Style::new()
-                .font(TITLE_FAMILY)
-                .size(26.0)
-                .weight(font::Weight::Semibold),
-        )
-        .x_axis_labels(axis::Placement::BetweenTicks + MONTHS)
-        // Inter semibold x-axis.
-        .x_axis(|a| {
-            a.with_font(AXIS_FAMILY)
-                .with_label_size(14.0)
-                .with_label_weight(font::Weight::Semibold)
-        })
-        // Inter light italic y-axis.
-        .y_axis(|a| {
-            a.show_grid(true)
-                .with_font(AXIS_FAMILY)
-                .with_label_size(11.0)
-                .with_label_weight(font::Weight::Light)
-                .with_label_italic()
-        })
-        // JetBrains Mono 11 px legend.
-        .legend(LegendConfig::below().font(MONO_FAMILY).font_size(11.0));
-
-        let app = Self {
-            sales,
-            status: "Loading fonts…".into(),
+        let mut app = Self {
+            sales: hyozu::Data::default(),
+            loaded: HashSet::new(),
+            status: "Loading fonts\u{2026}".into(),
         };
+        app.sales = build_data(&app.loaded);
 
-        // Fire off three Google Fonts downloads in parallel. Each family
-        // can ship multiple variant files (regular / bold / italic / …),
-        // so `fount::google::load` returns a `Vec<Vec<u8>>` that we feed
-        // into `iced::font::load` one variant at a time.
         let init = Task::batch([
             load_family(TITLE_FAMILY),
             load_family(AXIS_FAMILY),
@@ -104,7 +70,8 @@ impl App {
         match message {
             Message::FontLoaded(name, Ok(())) => {
                 self.status = format!("Loaded {name}");
-                self.sales.invalidate();
+                self.loaded.insert(name);
+                self.sales = build_data(&self.loaded);
             }
             Message::FontLoaded(name, Err(e)) => {
                 self.status = format!("Failed to load {name}: {e}");
@@ -123,11 +90,11 @@ impl App {
         .spacing(4);
 
         let key = column![
-            info_row("Title", "Playfair Display · 26 px · Semibold"),
-            info_row("X axis", "Inter · 14 px · Semibold"),
-            info_row("Y axis", "Inter · 11 px · Light italic"),
-            info_row("Data labels", "JetBrains Mono · Bold italic"),
-            info_row("Legend", "JetBrains Mono · 11 px"),
+            info_row("Title", "Playfair Display \u{b7} 26 px \u{b7} Semibold"),
+            info_row("X axis", "Inter \u{b7} 14 px \u{b7} Semibold"),
+            info_row("Y axis", "Inter \u{b7} 11 px \u{b7} Light italic"),
+            info_row("Data labels", "JetBrains Mono \u{b7} Bold italic"),
+            info_row("Legend", "JetBrains Mono \u{b7} 11 px"),
         ]
         .spacing(2);
 
@@ -139,6 +106,55 @@ impl App {
             .padding(20)
             .into()
     }
+}
+
+/// (Re)build chart data, setting font families only for fonts that
+/// have already been registered with iced. This avoids poisoning
+/// iced's text buffer cache with fallback-rendered entries.
+fn build_data(loaded: &HashSet<&str>) -> hyozu::Data {
+    let title_font = loaded.contains(TITLE_FAMILY).then_some(TITLE_FAMILY);
+    let axis_font = loaded.contains(AXIS_FAMILY).then_some(AXIS_FAMILY);
+    let mono_font = loaded.contains(MONO_FAMILY).then_some(MONO_FAMILY);
+
+    // Data labels — only set family once the font is ready.
+    let mut label = bar::label::Label::default()
+        .with_position(bar::label::Position::Above)
+        .with_weight(font::Weight::Bold)
+        .with_style(font::Style::Italic);
+    if let Some(f) = mono_font {
+        label = label.with_font(f);
+    }
+
+    let mut title_style = chart_text::Style::new().size(26.0).weight(font::Weight::Semibold);
+    if let Some(f) = title_font {
+        title_style = title_style.font(f);
+    }
+
+    data(
+        bars([bar([1200, 1900, 1500, 2200, 1800, 2400]).with_name("Revenue")])
+            .corner_radius(6.0)
+            .data_labels(label),
+    )
+    .palette(Palette::Categorical)
+    .title("Quarterly Revenue")
+    .title_style(title_style)
+    .x_axis_labels(axis::Placement::BetweenTicks + MONTHS)
+    .x_axis(|a| {
+        let a = a.with_label_size(14.0).with_label_weight(font::Weight::Semibold);
+        if let Some(f) = axis_font { a.with_font(f) } else { a }
+    })
+    .y_axis(|a| {
+        let a = a
+            .show_grid(true)
+            .with_label_size(11.0)
+            .with_label_weight(font::Weight::Light)
+            .with_label_italic();
+        if let Some(f) = axis_font { a.with_font(f) } else { a }
+    })
+    .legend({
+        let l = LegendConfig::below().font_size(11.0);
+        if let Some(f) = mono_font { l.font(f) } else { l }
+    })
 }
 
 /// Download a Google Fonts family via `fount` and register each variant
@@ -154,10 +170,10 @@ fn load_family(name: &'static str) -> Task<Message> {
                 .collect()
                 .map(move |results: Vec<Result<(), String>>| {
                     let combined = results.into_iter().find(Result::is_err).unwrap_or(Ok(()));
-                    Message::FontLoaded(name.into(), combined)
+                    Message::FontLoaded(name, combined)
                 })
         }
-        Err(e) => Task::done(Message::FontLoaded(name.into(), Err(format!("{e:?}")))),
+        Err(e) => Task::done(Message::FontLoaded(name, Err(format!("{e:?}")))),
     })
 }
 
