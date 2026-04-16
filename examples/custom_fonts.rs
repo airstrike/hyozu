@@ -104,6 +104,7 @@ impl App {
         match message {
             Message::FontLoaded(name, Ok(())) => {
                 self.status = format!("Loaded {name}");
+                self.sales.invalidate();
             }
             Message::FontLoaded(name, Err(e)) => {
                 self.status = format!("Failed to load {name}: {e}");

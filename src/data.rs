@@ -58,6 +58,11 @@ pub struct Data {
 
     /// Optional tooltip configuration
     pub(crate) tooltip: Option<tooltip::Tooltip>,
+
+    /// Monotonic version counter. Bumped by [`Data::invalidate`] to signal
+    /// that external state (e.g. newly loaded fonts) changed and the chart
+    /// widget should re-measure all text.
+    pub(crate) generation: u64,
 }
 
 /// Returns the default axis pair for a given mark type.
@@ -126,6 +131,7 @@ impl IntoData for Mark {
             selection: None,
             legend: None,
             tooltip: None,
+            generation: 0,
         }
     }
 }
@@ -219,6 +225,7 @@ impl IntoData for Vec<Mark> {
             selection: None,
             legend: None,
             tooltip: None,
+            generation: 0,
         }
     }
 }
@@ -248,6 +255,14 @@ impl Data {
     pub fn title_style(mut self, style: crate::text::Style) -> Self {
         self.title_text = style;
         self
+    }
+
+    /// Bumps an internal version counter so the chart widget knows to
+    /// re-measure all text. Call this after registering new fonts with
+    /// iced — otherwise cached paragraph state keeps the old metrics and
+    /// the chart won't pick up the newly available font family.
+    pub fn invalidate(&mut self) {
+        self.generation = self.generation.wrapping_add(1);
     }
 
     /// Configure the X axis of the primary plotting area.

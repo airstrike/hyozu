@@ -28,6 +28,7 @@ where
     Design: design::Design + Clone,
 {
     scene: Scene<'a, Message, Renderer>,
+    generation: u64,
     padding: Padding,
     width: Length,
     height: Length,
@@ -40,6 +41,7 @@ where
 /// Internal state for the chart widget.
 #[derive(Default)]
 struct State {
+    generation: u64,
     is_pressed: bool,
     hover: Option<hover::State>,
     /// Names of series hidden via legend click toggles. Lives with the
@@ -70,6 +72,7 @@ where
 
         Chart {
             scene,
+            generation: data.generation,
             padding: DEFAULT_PADDING,
             width: Length::Fill,
             height: Length::Fill,
@@ -108,6 +111,7 @@ where
     ) -> Chart<'a, Message, D, Theme> {
         Chart {
             scene: self.scene,
+            generation: self.generation,
             padding: self.padding,
             width: self.width,
             height: self.height,
@@ -286,7 +290,12 @@ where
     }
 
     fn diff(&self, tree: &mut Tree) {
-        // Chart always has exactly one child (the scene)
+        let state = tree.state.downcast_mut::<State>();
+        if state.generation != self.generation {
+            state.generation = self.generation;
+            tree.children = self.children();
+            return;
+        }
         self.scene.diff(&mut tree.children[0]);
     }
 
