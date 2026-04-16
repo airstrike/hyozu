@@ -4,6 +4,13 @@ use crate::core::{Font, Pixels};
 use crate::text;
 use std::sync::Arc;
 
+pub use Position::{Above, Base, Center, End};
+
+// Re-export common font weight/style variants so label composition
+// reads naturally:  `Above + font("Inter") + Bold + Italic`
+pub use crate::core::font::Style::Italic;
+pub use crate::core::font::Weight::{Black, Bold, Light, Medium, Semibold, Thin};
+
 /// Position of data labels on bars.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Position {
@@ -245,5 +252,56 @@ impl<F: Fn(f64) -> String + Send + Sync + 'static> std::ops::Add<F> for Label {
     type Output = Label;
     fn add(self, format: F) -> Label {
         self.with_format(format)
+    }
+}
+
+// === text::Style composition ===
+
+impl std::ops::Add<crate::text::Style> for Position {
+    type Output = Label;
+    fn add(self, text: crate::text::Style) -> Label {
+        Label::from(self).with_text(text)
+    }
+}
+
+impl std::ops::Add<crate::text::Style> for Label {
+    type Output = Label;
+    fn add(self, text: crate::text::Style) -> Label {
+        self.with_text(text)
+    }
+}
+
+impl std::ops::Add<crate::core::Font> for Position {
+    type Output = Label;
+    fn add(self, font: crate::core::Font) -> Label {
+        Label::from(self).with_font(font)
+    }
+}
+
+impl std::ops::Add<crate::core::Font> for Label {
+    type Output = Label;
+    fn add(self, font: crate::core::Font) -> Label {
+        self.with_font(font)
+    }
+}
+
+impl std::ops::Add<Weight> for Position {
+    type Output = Label;
+    fn add(self, weight: Weight) -> Label {
+        Label::from(self).with_weight(weight)
+    }
+}
+
+impl std::ops::Add<Weight> for Label {
+    type Output = Label;
+    fn add(self, weight: Weight) -> Label {
+        self.with_weight(weight)
+    }
+}
+
+impl std::ops::Add<Style> for Label {
+    type Output = Label;
+    fn add(self, style: Style) -> Label {
+        self.with_style(style)
     }
 }

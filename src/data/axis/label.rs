@@ -55,6 +55,9 @@ pub struct Labels {
 
     /// What to do when a label's intrinsic width exceeds its column.
     pub overflow: Overflow,
+
+    /// Typography override for tick labels.
+    pub text: crate::text::Style,
 }
 
 impl std::fmt::Debug for Labels {
@@ -65,6 +68,7 @@ impl std::fmt::Debug for Labels {
             .field("format", &self.format.as_ref().map(|_| "<function>"))
             .field("align", &self.align)
             .field("overflow", &self.overflow)
+            .field("text", &self.text)
             .finish()
     }
 }
@@ -252,6 +256,75 @@ where
         // Otherwise, this doesn't make sense - you can't transform values that don't exist
         // Just return self unchanged
         self
+    }
+}
+
+// Typography composition — same pattern as data labels.
+//   BetweenTicks + MONTHS + "Inter" + 14.0 + Semibold
+
+impl std::ops::Add<crate::text::Style> for Placement {
+    type Output = Labels;
+    fn add(self, text: crate::text::Style) -> Labels {
+        let mut l = Labels::from(self);
+        l.text = text;
+        l
+    }
+}
+
+impl std::ops::Add<crate::text::Style> for Labels {
+    type Output = Labels;
+    fn add(mut self, text: crate::text::Style) -> Labels {
+        self.text = text;
+        self
+    }
+}
+
+impl std::ops::Add<crate::core::Font> for Labels {
+    type Output = Labels;
+    fn add(mut self, font: crate::core::Font) -> Labels {
+        self.text.family = Some(font);
+        self
+    }
+}
+
+impl std::ops::Add<crate::core::font::Weight> for Labels {
+    type Output = Labels;
+    fn add(mut self, weight: crate::core::font::Weight) -> Labels {
+        self.text.weight = Some(weight);
+        self
+    }
+}
+
+impl std::ops::Add<crate::core::font::Style> for Labels {
+    type Output = Labels;
+    fn add(mut self, style: crate::core::font::Style) -> Labels {
+        self.text.style = Some(style);
+        self
+    }
+}
+
+impl std::ops::Add<f32> for Labels {
+    type Output = Labels;
+    fn add(mut self, size: f32) -> Labels {
+        self.text.size = Some(crate::core::Pixels(size));
+        self
+    }
+}
+
+impl std::ops::Add<crate::core::Pixels> for Labels {
+    type Output = Labels;
+    fn add(mut self, size: crate::core::Pixels) -> Labels {
+        self.text.size = Some(size);
+        self
+    }
+}
+
+impl From<crate::text::Style> for Labels {
+    fn from(text: crate::text::Style) -> Self {
+        Labels {
+            text,
+            ..Default::default()
+        }
     }
 }
 

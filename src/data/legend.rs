@@ -5,10 +5,10 @@ use crate::text;
 /// Position of the legend relative to the plot area.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Position {
-    /// Below the title, above the plot area (default).
-    #[default]
+    /// Below the title, above the plot area.
     Above,
-    /// Below the plot area and bottom axis.
+    /// Below the plot area and bottom axis (default).
+    #[default]
     Below,
     /// Vertical column to the left of the plot area.
     Left,

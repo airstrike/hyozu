@@ -135,6 +135,66 @@ impl From<Font> for Style {
     }
 }
 
+impl From<&'static str> for Style {
+    fn from(name: &'static str) -> Self {
+        Self::new().font(name)
+    }
+}
+
+/// Shorthand for `Style::from(f)`. Lets you write `font("Inter") + 14.0 + Bold`.
+pub fn font(f: impl Into<Style>) -> Style {
+    f.into()
+}
+
+// Composition via `+` so styles read naturally:
+//   Style::from("Playfair Display") + 26.0 + Semibold
+
+impl std::ops::Add<f32> for Style {
+    type Output = Style;
+    fn add(self, size: f32) -> Style {
+        self.size(size)
+    }
+}
+
+impl std::ops::Add<Pixels> for Style {
+    type Output = Style;
+    fn add(self, size: Pixels) -> Style {
+        self.size(size)
+    }
+}
+
+impl std::ops::Add<Font> for Style {
+    type Output = Style;
+    fn add(self, font: Font) -> Style {
+        self.font(font)
+    }
+}
+
+impl std::ops::Add<&'static str> for Style {
+    type Output = Style;
+    fn add(self, name: &'static str) -> Style {
+        self.font(name)
+    }
+}
+
+impl std::ops::Add<font::Weight> for Style {
+    type Output = Style;
+    fn add(self, weight: font::Weight) -> Style {
+        self.weight(weight)
+    }
+}
+
+impl std::ops::Add<font::Style> for Style {
+    type Output = Style;
+    fn add(self, style: font::Style) -> Style {
+        self.font_style(style)
+    }
+}
+
+// Re-export common weight/style variants for terse composition.
+pub use crate::core::font::Style::Italic;
+pub use crate::core::font::Weight::{Black, Bold, Light, Medium, Semibold, Thin};
+
 #[cfg(test)]
 mod tests {
     use super::*;

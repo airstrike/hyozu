@@ -341,3 +341,75 @@ impl<F: Fn(f64) -> String + Send + Sync + 'static> std::ops::Add<F> for Label {
         self.format(format)
     }
 }
+
+// === text::Style composition ===
+
+impl std::ops::Add<crate::text::Style> for Position {
+    type Output = Label;
+    fn add(self, text: crate::text::Style) -> Label {
+        Label::from(self).with_text(text)
+    }
+}
+
+impl std::ops::Add<crate::text::Style> for Show {
+    type Output = Label;
+    fn add(self, text: crate::text::Style) -> Label {
+        Label::from(self).with_text(text)
+    }
+}
+
+impl std::ops::Add<crate::text::Style> for Label {
+    type Output = Label;
+    fn add(self, text: crate::text::Style) -> Label {
+        self.with_text(text)
+    }
+}
+
+impl std::ops::Add<crate::core::Font> for Position {
+    type Output = Label;
+    fn add(self, font: crate::core::Font) -> Label {
+        Label::from(self).font(font)
+    }
+}
+
+impl std::ops::Add<crate::core::Font> for Show {
+    type Output = Label;
+    fn add(self, font: crate::core::Font) -> Label {
+        Label::from(self).font(font)
+    }
+}
+
+impl std::ops::Add<crate::core::Font> for Label {
+    type Output = Label;
+    fn add(self, font: crate::core::Font) -> Label {
+        self.font(font)
+    }
+}
+
+impl std::ops::Add<Weight> for Position {
+    type Output = Label;
+    fn add(self, weight: Weight) -> Label {
+        Label::from(self).weight(weight)
+    }
+}
+
+impl std::ops::Add<Weight> for Show {
+    type Output = Label;
+    fn add(self, weight: Weight) -> Label {
+        Label::from(self).weight(weight)
+    }
+}
+
+impl std::ops::Add<Weight> for Label {
+    type Output = Label;
+    fn add(self, weight: Weight) -> Label {
+        self.weight(weight)
+    }
+}
+
+impl std::ops::Add<Style> for Label {
+    type Output = Label;
+    fn add(self, style: Style) -> Label {
+        self.style(style)
+    }
+}

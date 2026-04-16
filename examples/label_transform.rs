@@ -67,7 +67,7 @@ impl App {
                 .data_labels(bar::label::Position::End),
         )
         .title("Grouped Bars, Labels on End")
-        .x_axis_labels(Placement::BetweenTicks + months + |m| m[..3].to_string())
+        .x_axis_labels(Placement::BetweenTicks + months + |m: &str| m[..3].to_string())
         .y_axis_labels(|v| format!("{:.0}%", v));
 
         // 3. Transform labels with .map()

@@ -1057,7 +1057,7 @@ where
         let mut max_label_width = 0.0f32;
 
         // First pass: measure all labels
-        let axis_text = self.axis.text();
+        let axis_text = self.axis.labels.text.or(self.axis.text());
         let label_font = axis_text.resolved_font(renderer.default_font());
         let label_size_px: crate::core::Pixels = axis_text.resolved_size(12.0).into();
         for (i, (_pos, label)) in label_data.iter().enumerate() {
@@ -1230,7 +1230,7 @@ where
         // shrinks to intrinsic (the bound is an upper limit). If intrinsic >
         // column_width, the paragraph either wraps or ellipsizes at
         // column_width.
-        let axis_text = self.axis.text();
+        let axis_text = self.axis.labels.text.or(self.axis.text());
         let label_font = axis_text.resolved_font(renderer.default_font());
         let label_size_px: crate::core::Pixels = axis_text.resolved_size(12.0).into();
         for (i, (_pos, label)) in label_data.iter().enumerate() {
