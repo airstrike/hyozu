@@ -1,0 +1,25 @@
+[package]
+name = "drill_down"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "drill_down"
+path = "src/main.rs"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+hyozu = { path = "../..", features = ["tatami", "geojson"] }
+tatami = { path = "../../../tatami/tatami" }
+tatami-inmem = { path = "../../../tatami/tatami-inmem" }
+iced = { version = "0.15.0-dev", features = ["canvas", "tokio"] }
+polars-core = { version = "0.51", default-features = false, features = ["serde"] }
+polars-io = { version = "0.51", default-features = false, features = ["csv"] }
+tokio = { version = "1", features = ["rt-multi-thread", "fs", "time", "macros"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+jiff = { version = "0.2", features = ["serde"] }
