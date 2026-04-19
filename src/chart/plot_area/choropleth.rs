@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::chart::scale_legend;
 use crate::core::Size;
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
-use crate::widget::canvas::{Frame, Path, Stroke, Text as CanvasText};
+use crate::widget::canvas::{Frame, Path, Stroke};
 
 use crate::core::text;
 use crate::widget::renderer::geometry;
@@ -14,8 +15,8 @@ use super::Plane;
 /// State for Choropleth -- stores projected polygon geometry, feature IDs,
 /// bounding boxes, and pre-computed value normalization for each feature.
 ///
-/// The per-feature `feature_t` values, the legend min/max strings, and the
-/// data value range are all theme-independent and computed in `layout` so
+/// The per-feature `feature_t` values, the scale legend plan, and the data
+/// value range are all theme-independent and computed in `layout` so
 /// `draw` doesn't re-walk `self.data.entries` or rebuild the value lookup
 /// HashMap on every repaint. See the `iced layout-vs-draw discipline` note
 /// for the broader principle.
@@ -27,13 +28,11 @@ pub struct State {
     /// order. `None` for features without an entry in `self.data.entries`
     /// (those render as land-fill).
     pub feature_t: Vec<Option<f32>>,
-    /// Min/max of the entry values, used by the legend. Cached so the
-    /// legend strings don't need to re-walk entries each draw.
+    /// Min/max of the entry values. Cached so the scale legend doesn't
+    /// need to re-walk entries each draw.
     pub value_range: (f64, f64),
-    /// Pre-formatted legend min/max labels. Result of `format_legend_value`,
-    /// which is theme-free.
-    pub legend_min_text: String,
-    pub legend_max_text: String,
+    /// Theme-free plan for the scale legend (pre-formatted min/max labels).
+    pub legend_plan: scale_legend::Plan,
     prev_size: (f32, f32),
     prev_scope: crate::geo::MapScope,
     prev_geo: Option<Arc<crate::geo::GeoData>>,
@@ -118,8 +117,7 @@ where
                 feature_bboxes: Vec::new(),
                 feature_t: Vec::new(),
                 value_range: (0.0, 1.0),
-                legend_min_text: String::new(),
-                legend_max_text: String::new(),
+                legend_plan: scale_legend::Plan::default(),
                 prev_size: (0.0, 0.0),
                 prev_scope: crate::geo::MapScope::World,
                 prev_geo: None,
@@ -255,8 +253,10 @@ where
             })
             .collect();
 
-        state.legend_min_text = format_legend_value(lo);
-        state.legend_max_text = format_legend_value(hi);
+        state.legend_plan = scale_legend::Plan {
+            min_label: format_legend_value(lo),
+            max_label: format_legend_value(hi),
+        };
 
         Node::new(Size::ZERO)
     }
@@ -365,146 +365,32 @@ where
             }
         }
 
-        // ── In-chart color legend ────────────────────────────────
-        let chart_width = layout_bounds.width;
-        let chart_height = layout_bounds.height;
-
-        if chart_width >= 300.0 {
-            let padding = 16.0_f32;
-            let panel_padding = 8.0_f32;
-            let font_size = 10.0_f32;
-            let bar_height = 10.0_f32;
-            let tick_height = 4.0_f32;
-            let gradient_segments: usize = 64;
-
-            let bar_width = if chart_width < 400.0 {
-                (chart_width * 0.45).min(200.0)
-            } else {
-                200.0_f32
-            };
-
-            let has_title = self.data.legend_title.is_some();
-            let title_row_height = if has_title { font_size + 4.0 } else { 0.0 };
-            let label_row_height = font_size + 2.0;
-
-            let panel_content_width = bar_width;
-            let panel_content_height = title_row_height + bar_height + tick_height + label_row_height;
-            let panel_width = panel_content_width + panel_padding * 2.0;
-            let panel_height = panel_content_height + panel_padding * 2.0;
-
-            let panel_x = chart_width - padding - panel_width;
-            let panel_y = chart_height - padding - panel_height;
-
-            // 1. Background panel
-            let panel_bg = crate::core::Color { a: 0.85, ..background };
-            let panel_path = Path::new(|builder| {
-                builder.rectangle(
-                    crate::core::Point::new(panel_x, panel_y),
-                    crate::core::Size::new(panel_width, panel_height),
-                );
-            });
-            frame.fill(&panel_path, panel_bg);
-            frame.stroke(&panel_path, Stroke::default().with_color(border_color).with_width(0.5));
-
-            let content_x = panel_x + panel_padding;
-            let mut cursor_y = panel_y + panel_padding;
-
-            // 2. Title text (if present)
+        // ── Color scale legend ────────────────────────────────────
+        if let Some(legend_config) = &self.data.legend {
             let label_color = {
                 let resolved = text_pair.resolve(background, None);
                 crate::core::Color { a: 0.7, ..resolved }
             };
-
-            if let Some(title) = &self.data.legend_title {
-                frame.fill_text(CanvasText {
-                    content: title.clone(),
-                    position: crate::core::Point::new(content_x + bar_width / 2.0, cursor_y),
-                    color: label_color,
-                    size: crate::core::Pixels(font_size),
-                    font: theme.font(),
-                    align_x: crate::core::alignment::Horizontal::Center.into(),
-                    align_y: crate::core::alignment::Vertical::Top,
-                    line_height: crate::core::text::LineHeight::default(),
-                    shaping: crate::core::text::Shaping::Basic,
-                    ..CanvasText::default()
-                });
-                cursor_y += title_row_height;
-            }
-
-            // 3. Gradient segments (64 thin vertical rectangles with 0.5px overlap)
-            let bar_x = content_x;
-            let bar_y = cursor_y;
-            let segment_width = bar_width / gradient_segments as f32;
-
-            for i in 0..gradient_segments {
-                let t = i as f32 / (gradient_segments - 1) as f32;
-                let seg_color = crate::palette::sample_gradient(&color_stops, t);
-                let seg_x = bar_x + i as f32 * segment_width;
-                // Add 0.5px overlap to avoid hairlines between segments
-                let seg_w = segment_width + 0.5;
-
-                let seg_path = Path::new(|builder| {
-                    builder.rectangle(
-                        crate::core::Point::new(seg_x, bar_y),
-                        crate::core::Size::new(seg_w, bar_height),
-                    );
-                });
-                frame.fill(&seg_path, seg_color);
-            }
-
-            // 4. Gradient bar outline stroke
-            let bar_outline = Path::new(|builder| {
-                builder.rectangle(
-                    crate::core::Point::new(bar_x, bar_y),
-                    crate::core::Size::new(bar_width, bar_height),
-                );
-            });
-            frame.stroke(&bar_outline, Stroke::default().with_color(border_color).with_width(0.5));
-
-            // 5. Tick marks at both endpoints
-            let tick_top = bar_y + bar_height;
-            let tick_bottom = tick_top + tick_height;
-
-            let left_tick = Path::new(|builder| {
-                builder.move_to(crate::core::Point::new(bar_x, tick_top));
-                builder.line_to(crate::core::Point::new(bar_x, tick_bottom));
-            });
-            frame.stroke(&left_tick, Stroke::default().with_color(border_color).with_width(0.5));
-
-            let right_tick = Path::new(|builder| {
-                builder.move_to(crate::core::Point::new(bar_x + bar_width, tick_top));
-                builder.line_to(crate::core::Point::new(bar_x + bar_width, tick_bottom));
-            });
-            frame.stroke(&right_tick, Stroke::default().with_color(border_color).with_width(0.5));
-
-            // 6. Min and max labels — pre-formatted in layout.
-            let labels_y = tick_bottom + 1.0;
-
-            frame.fill_text(CanvasText {
-                content: state.legend_min_text.clone(),
-                position: crate::core::Point::new(bar_x, labels_y),
-                color: label_color,
-                size: crate::core::Pixels(font_size),
-                font: theme.font(),
-                align_x: crate::core::alignment::Horizontal::Left.into(),
-                align_y: crate::core::alignment::Vertical::Top,
-                line_height: crate::core::text::LineHeight::default(),
-                shaping: crate::core::text::Shaping::Basic,
-                ..CanvasText::default()
-            });
-
-            frame.fill_text(CanvasText {
-                content: state.legend_max_text.clone(),
-                position: crate::core::Point::new(bar_x + bar_width, labels_y),
-                color: label_color,
-                size: crate::core::Pixels(font_size),
-                font: theme.font(),
-                align_x: crate::core::alignment::Horizontal::Right.into(),
-                align_y: crate::core::alignment::Vertical::Top,
-                line_height: crate::core::text::LineHeight::default(),
-                shaping: crate::core::text::Shaping::Basic,
-                ..CanvasText::default()
-            });
+            // Plot bounds for the scale legend are in frame-local space,
+            // so the origin is (0, 0) and the extent matches `layout_bounds`.
+            let plot_bounds = crate::core::Rectangle {
+                x: 0.0,
+                y: 0.0,
+                width: layout_bounds.width,
+                height: layout_bounds.height,
+            };
+            scale_legend::draw(
+                &mut frame,
+                &state.legend_plan,
+                legend_config,
+                self.data.legend_title.as_deref(),
+                plot_bounds,
+                &color_stops,
+                background,
+                border_color,
+                label_color,
+                theme,
+            );
         }
 
         // ── Composite ────────────────────────────────────────────

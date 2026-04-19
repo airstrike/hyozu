@@ -38,7 +38,7 @@ pub use data::data;
 pub use geo::{GeoData, MapScope, ProjectionKind};
 
 pub use data::axis::{self, Axis, Orientation};
-pub use data::legend::{Legend as LegendConfig, Position as LegendPosition};
+pub use data::legend::{self, Legend as LegendConfig};
 pub use data::mark::{
     self, Area, Band, BandOrientation, Bars, BoxPlot, BubbleMap, Choropleth, ChoroplethEntry, Gauge, Heatmap,
     LegendEntry, Line, LineStyle, MapPoint, Mark, Normalization, Pie, Rule, Tick, Treemap, Violin, Waterfall, Xy, area,

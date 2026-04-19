@@ -4,7 +4,7 @@ use crate::core::layout::{Limits, Node};
 use crate::core::text::paragraph;
 use crate::core::widget::{Tree, tree};
 use crate::core::{Point, Rectangle, Size, text};
-use crate::data::legend::Position;
+use crate::data::legend::{Anchor, Orientation};
 use crate::data::mark::{LegendEntry, LegendSwatch};
 use crate::line::LineStyle;
 use crate::line::marker::Shape;
@@ -36,7 +36,7 @@ where
     paragraph: paragraph::Plain<P>,
     /// Row assignments: each row contains (entry_index, x_offset_within_row) pairs.
     pub rows: Vec<Vec<(usize, f32)>>,
-    /// Row widths (total content width per row, for centering).
+    /// Row widths (total content width per row, used by draw to align rows).
     pub row_widths: Vec<f32>,
     /// Absolute-pixel bounding rect for each entry (indexed by entry index),
     /// cached on the last `draw()` call. Used for legend click hit-testing.
@@ -49,7 +49,8 @@ where
     Renderer: text::Renderer<Font = crate::core::Font> + geometry::Renderer,
 {
     entries: Vec<LegendEntry>,
-    position: Position,
+    anchor: Anchor,
+    orientation: Orientation,
     text: crate::text::Style,
     wrap: bool,
     interactive: bool,
@@ -63,14 +64,16 @@ where
     /// Create a new Legend from entries and configuration.
     pub fn new(
         entries: Vec<LegendEntry>,
-        position: Position,
+        anchor: Anchor,
+        orientation: Orientation,
         text: crate::text::Style,
         wrap: bool,
         interactive: bool,
     ) -> Self {
         Self {
             entries,
-            position,
+            anchor,
+            orientation,
             text,
             wrap,
             interactive,
@@ -78,9 +81,14 @@ where
         }
     }
 
-    /// Returns the position of this legend.
-    pub fn position(&self) -> Position {
-        self.position
+    /// Returns the anchor of this legend.
+    pub fn anchor(&self) -> Anchor {
+        self.anchor
+    }
+
+    /// Returns the orientation of this legend.
+    pub fn orientation(&self) -> Orientation {
+        self.orientation
     }
 
     /// Returns whether this legend is click-interactive.
@@ -93,9 +101,25 @@ where
         &self.entries
     }
 
-    /// Returns true if this legend is horizontal (Above/Below).
+    /// Returns true if this legend flows horizontally.
     fn is_horizontal(&self) -> bool {
-        matches!(self.position, Position::Above | Position::Below)
+        matches!(self.orientation, Orientation::Horizontal)
+    }
+
+    /// Returns the alignment of rows inside the legend box, along the
+    /// flow direction. `0.0` = start, `0.5` = center, `1.0` = end.
+    ///
+    /// Only horizontal legends use this — vertical legends stack one
+    /// entry per row, left-aligned inside the column.
+    fn alignment(&self) -> f32 {
+        if !self.is_horizontal() {
+            return 0.0;
+        }
+        match self.anchor {
+            Anchor::TopLeft | Anchor::BottomLeft | Anchor::Left => 0.0,
+            Anchor::Top | Anchor::Bottom => 0.5,
+            Anchor::TopRight | Anchor::BottomRight | Anchor::Right => 1.0,
+        }
     }
 
     /// Returns the initial tree state for this Legend.
@@ -196,7 +220,7 @@ where
 
             (Node::new(Size::new(available_width, total_height)), available_width)
         } else {
-            // Vertical stacked layout (Left/Right)
+            // Vertical stacked layout
             state.rows.clear();
             state.row_widths.clear();
 
@@ -216,12 +240,13 @@ where
 
         // Compute entry bounds relative to the legend's own origin (0, 0).
         // The widget adds the legend's final layout position at hit-test time.
+        let alignment = self.alignment();
         let mut entry_rects: Vec<Option<Rectangle>> = vec![None; self.entries.len()];
         for (row_idx, row) in state.rows.iter().enumerate() {
             let row_width = state.row_widths.get(row_idx).copied().unwrap_or(0.0);
             let row_y = row_idx as f32 * row_height + PADDING_V;
             let row_start_x = if self.is_horizontal() {
-                (box_width - row_width).max(0.0) / 2.0
+                (box_width - row_width).max(0.0) * alignment
             } else {
                 0.0
             };
@@ -273,14 +298,14 @@ where
         let square_size = font_size * SWATCH_SCALE;
         let text_color = design.text_color().resolve(background, text_pair, &seed, None);
         let row_height = font_size + PADDING_V * 2.0;
+        let alignment = self.alignment();
 
         for (row_idx, row) in state.rows.iter().enumerate() {
             let row_width = state.row_widths.get(row_idx).copied().unwrap_or(0.0);
             let row_y = bounds.y + row_idx as f32 * row_height + PADDING_V;
 
-            // Center this row horizontally within bounds (for horizontal layout)
             let row_start_x = if self.is_horizontal() {
-                bounds.x + (bounds.width - row_width).max(0.0) / 2.0
+                bounds.x + (bounds.width - row_width).max(0.0) * alignment
             } else {
                 bounds.x
             };

@@ -137,7 +137,7 @@ fn build_line(series: &[model::metric::Series], theme: &Theme) -> hyozu::Data {
         .tooltip(hyozu::Swatch + hyozu::ColoredText);
 
     if series.len() > 1 {
-        data = data.legend(hyozu::LegendPosition::Above);
+        data = data.legend(hyozu::LegendConfig::above());
     }
     data
 }
@@ -166,7 +166,7 @@ fn build_bar(series: &[model::metric::Series], theme: &Theme) -> hyozu::Data {
         .tooltip(hyozu::ColoredText);
 
     if series.len() > 1 {
-        data = data.legend(hyozu::LegendPosition::Above);
+        data = data.legend(hyozu::LegendConfig::above());
     }
     data
 }

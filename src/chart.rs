@@ -2,6 +2,7 @@ pub mod guide;
 pub(crate) mod hover;
 pub mod legend;
 pub mod plot_area;
+pub mod scale_legend;
 mod scene;
 pub mod title;
 pub mod value;

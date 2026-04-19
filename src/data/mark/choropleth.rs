@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::data::legend::{self, Legend};
 use crate::geo::{GeoData, MapScope, ProjectionKind};
 
 /// How values are mapped onto the [0, 1] color scale range.
@@ -45,8 +46,16 @@ pub struct Choropleth {
     pub(crate) color_stops: Option<Vec<crate::core::Color>>,
     pub(crate) projection: ProjectionKind,
     pub(crate) normalization: Normalization,
-    /// Optional title for the in-chart color legend.
+    /// Optional title for the color-scale legend.
     pub(crate) legend_title: Option<String>,
+    /// Color-scale legend configuration. `None` suppresses the legend
+    /// entirely. The default is an overlaid horizontal bar pinned to the
+    /// bottom-right corner.
+    pub(crate) legend: Option<Legend>,
+}
+
+fn default_legend() -> Option<Legend> {
+    Some(Legend::overlay(legend::Anchor::BottomRight).orientation(legend::Orientation::Horizontal))
 }
 
 /// Creates a choropleth from entries.
@@ -71,6 +80,7 @@ impl<const N: usize> IntoChoropleth for [ChoroplethEntry; N] {
             projection: ProjectionKind::default(),
             normalization: Normalization::default(),
             legend_title: None,
+            legend: default_legend(),
         }
     }
 }
@@ -87,6 +97,7 @@ impl IntoChoropleth for Vec<ChoroplethEntry> {
             projection: ProjectionKind::default(),
             normalization: Normalization::default(),
             legend_title: None,
+            legend: default_legend(),
         }
     }
 }
@@ -113,6 +124,7 @@ where
             projection: ProjectionKind::default(),
             normalization: Normalization::default(),
             legend_title: None,
+            legend: default_legend(),
         }
     }
 }
@@ -139,6 +151,7 @@ where
             projection: ProjectionKind::default(),
             normalization: Normalization::default(),
             legend_title: None,
+            legend: default_legend(),
         }
     }
 }
@@ -172,10 +185,30 @@ impl Choropleth {
         self
     }
 
-    /// Sets the title shown on the in-chart color legend.
+    /// Sets the title shown on the color-scale legend.
     pub fn legend_title(mut self, title: impl Into<String>) -> Self {
         self.legend_title = Some(title.into());
         self
+    }
+
+    /// Configures the color-scale legend.
+    ///
+    /// Pass a [`Legend`] to customize anchor / placement / orientation /
+    /// text, or `None` to suppress the legend entirely. The default is an
+    /// overlaid horizontal bar pinned to the bottom-right.
+    pub fn legend(mut self, legend: impl Into<Option<Legend>>) -> Self {
+        self.legend = legend.into();
+        self
+    }
+
+    /// Returns the current color-scale legend configuration.
+    pub fn legend_config(&self) -> Option<&Legend> {
+        self.legend.as_ref()
+    }
+
+    /// Returns the current color-scale legend title, if any.
+    pub fn legend_title_value(&self) -> Option<&str> {
+        self.legend_title.as_deref()
     }
 
     /// Sets the value normalization (default: Sqrt).

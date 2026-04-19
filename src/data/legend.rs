@@ -2,42 +2,81 @@ use crate::color::Color;
 use crate::core::Font;
 use crate::text;
 
-/// Position of the legend relative to the plot area.
+/// Where on the plot area the legend attaches.
+///
+/// Corner variants align the legend to that corner; side variants
+/// center-align along that edge. The [`Orientation`] decides which edge
+/// the legend rides on, and [`Placement`] decides whether it overlays
+/// the plot or pushes the plot area in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Position {
-    /// Below the title, above the plot area.
-    Above,
-    /// Below the plot area and bottom axis (default).
+#[non_exhaustive]
+pub enum Anchor {
+    TopLeft,
     #[default]
-    Below,
-    /// Vertical column to the left of the plot area.
-    Left,
-    /// Vertical column to the right of the plot area.
+    Top,
+    TopRight,
     Right,
+    BottomRight,
+    Bottom,
+    BottomLeft,
+    Left,
 }
 
-/// Configuration for the chart legend.
+/// Whether the legend draws on top of the plot area or outside it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum Placement {
+    /// The legend is drawn on top of the plot area. The plot keeps its
+    /// full size.
+    Overlaid,
+    /// The chart reserves space for the legend along the edge nearest the
+    /// anchor. The plot area shrinks accordingly.
+    #[default]
+    Inset,
+}
+
+/// Legend layout direction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum Orientation {
+    /// Entries flow left-to-right; the legend rides the top or bottom edge.
+    #[default]
+    Horizontal,
+    /// Entries stack top-to-bottom; the legend rides the left or right edge.
+    Vertical,
+}
+
+/// Configuration for a chart legend.
+///
+/// A single `Legend` drives both the series-key legend (swatches for each
+/// data series) and the choropleth color-scale legend. Pick the edge with
+/// [`Legend::anchor`] + [`Legend::orientation`] and whether the chart should
+/// reserve space for it with [`Legend::placement`].
 ///
 /// # Examples
 ///
 /// ```
-/// use hyozu::{LegendConfig, LegendPosition};
+/// use hyozu::{LegendConfig, legend};
 ///
-/// // Short form — just set position
-/// let config = LegendPosition::Below;
+/// // Short form — legend below the plot area (chart reserves space).
+/// let config = LegendConfig::below();
 ///
-/// // Detailed form — builder
-/// let config = LegendConfig::below().font_size(10.0);
+/// // Top-right overlay with vertical stacking.
+/// let config = LegendConfig::overlay(legend::Anchor::TopRight)
+///     .orientation(legend::Orientation::Vertical);
 /// ```
 #[derive(Debug, Clone)]
 pub struct Legend {
-    pub(crate) position: Position,
+    pub(crate) anchor: Anchor,
+    pub(crate) placement: Placement,
+    pub(crate) orientation: Orientation,
     /// Typography override. Any field left unset falls back to
     /// [`crate::Design::legend_text`].
     pub(crate) text: text::Style,
     /// Optional text color override.
     pub(crate) text_color: Option<Color>,
-    /// Whether legend entries wrap to multiple rows (default true).
+    /// Whether legend entries wrap to multiple rows (horizontal) or
+    /// columns (vertical). Default true.
     pub(crate) wrap: bool,
     /// Whether clicking a legend entry toggles its series visibility.
     /// Defaults to `false` so existing charts are unaffected.
@@ -47,7 +86,9 @@ pub struct Legend {
 impl Default for Legend {
     fn default() -> Self {
         Self {
-            position: Position::default(),
+            anchor: Anchor::Bottom,
+            placement: Placement::Inset,
+            orientation: Orientation::Horizontal,
             text: text::Style::new(),
             text_color: None,
             wrap: true,
@@ -57,36 +98,86 @@ impl Default for Legend {
 }
 
 impl Legend {
-    /// Create a legend positioned above the plot area.
+    /// Legend inset above the plot area (centered, horizontal).
     pub fn above() -> Self {
         Self {
-            position: Position::Above,
+            anchor: Anchor::Top,
+            placement: Placement::Inset,
+            orientation: Orientation::Horizontal,
             ..Self::default()
         }
     }
 
-    /// Create a legend positioned below the plot area.
+    /// Legend inset below the plot area (centered, horizontal).
     pub fn below() -> Self {
         Self {
-            position: Position::Below,
+            anchor: Anchor::Bottom,
+            placement: Placement::Inset,
+            orientation: Orientation::Horizontal,
             ..Self::default()
         }
     }
 
-    /// Create a legend positioned to the left of the plot area.
+    /// Legend inset to the left of the plot area (centered, vertical).
     pub fn left() -> Self {
         Self {
-            position: Position::Left,
+            anchor: Anchor::Left,
+            placement: Placement::Inset,
+            orientation: Orientation::Vertical,
             ..Self::default()
         }
     }
 
-    /// Create a legend positioned to the right of the plot area.
+    /// Legend inset to the right of the plot area (centered, vertical).
     pub fn right() -> Self {
         Self {
-            position: Position::Right,
+            anchor: Anchor::Right,
+            placement: Placement::Inset,
+            orientation: Orientation::Vertical,
             ..Self::default()
         }
+    }
+
+    /// Overlay legend at an arbitrary anchor point.
+    ///
+    /// The orientation is picked from the anchor: top/bottom side anchors
+    /// and all corner anchors default to [`Orientation::Horizontal`];
+    /// left/right side anchors default to [`Orientation::Vertical`]. Use
+    /// [`Legend::orientation`] to override.
+    pub fn overlay(anchor: Anchor) -> Self {
+        let orientation = match anchor {
+            Anchor::Left | Anchor::Right => Orientation::Vertical,
+            Anchor::Top
+            | Anchor::Bottom
+            | Anchor::TopLeft
+            | Anchor::TopRight
+            | Anchor::BottomLeft
+            | Anchor::BottomRight => Orientation::Horizontal,
+        };
+        Self {
+            anchor,
+            placement: Placement::Overlaid,
+            orientation,
+            ..Self::default()
+        }
+    }
+
+    /// Sets the anchor position.
+    pub fn anchor(mut self, anchor: Anchor) -> Self {
+        self.anchor = anchor;
+        self
+    }
+
+    /// Sets the placement (overlay vs inset).
+    pub fn placement(mut self, placement: Placement) -> Self {
+        self.placement = placement;
+        self
+    }
+
+    /// Sets the orientation.
+    pub fn orientation(mut self, orientation: Orientation) -> Self {
+        self.orientation = orientation;
+        self
     }
 
     /// Sets the font size for legend text.
@@ -124,20 +215,127 @@ impl Legend {
 
     /// Enable or disable click-to-toggle on legend entries.
     ///
-    /// When enabled, clicking a legend entry hides or shows its corresponding
-    /// series. Visibility state lives inside the chart widget and is reset
-    /// when the widget is destroyed.
+    /// When enabled, clicking a legend entry hides or shows its
+    /// corresponding series. Visibility state lives inside the chart
+    /// widget and is reset when the widget is destroyed.
     pub fn interactive(mut self, enabled: bool) -> Self {
         self.interactive = enabled;
         self
     }
+
+    /// Returns the current anchor.
+    pub fn anchor_value(&self) -> Anchor {
+        self.anchor
+    }
+
+    /// Returns the current placement.
+    pub fn placement_value(&self) -> Placement {
+        self.placement
+    }
+
+    /// Returns the current orientation.
+    pub fn orientation_value(&self) -> Orientation {
+        self.orientation
+    }
+
+    /// Which edge of the plot area this legend rides.
+    ///
+    /// Decided by [`Self::orientation`] first (horizontal → top/bottom,
+    /// vertical → left/right), then tie-broken by the anchor.
+    pub fn edge(&self) -> Edge {
+        match self.orientation {
+            Orientation::Horizontal => match self.anchor {
+                Anchor::Top | Anchor::TopLeft | Anchor::TopRight => Edge::Top,
+                Anchor::Bottom | Anchor::BottomLeft | Anchor::BottomRight => Edge::Bottom,
+                Anchor::Left => Edge::Bottom,
+                Anchor::Right => Edge::Bottom,
+            },
+            Orientation::Vertical => match self.anchor {
+                Anchor::Left | Anchor::TopLeft | Anchor::BottomLeft => Edge::Left,
+                Anchor::Right | Anchor::TopRight | Anchor::BottomRight => Edge::Right,
+                Anchor::Top => Edge::Right,
+                Anchor::Bottom => Edge::Right,
+            },
+        }
+    }
 }
 
-impl From<Position> for Legend {
-    fn from(position: Position) -> Self {
-        Self {
-            position,
-            ..Self::default()
-        }
+/// The edge of the plot area the legend attaches to, derived from the
+/// combination of [`Anchor`] and [`Orientation`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Edge {
+    Top,
+    Bottom,
+    Left,
+    Right,
+}
+
+impl From<Anchor> for Legend {
+    fn from(anchor: Anchor) -> Self {
+        Self::overlay(anchor)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn above_resolves_to_top_edge_inset_horizontal() {
+        let l = Legend::above();
+        assert_eq!(l.anchor_value(), Anchor::Top);
+        assert_eq!(l.placement_value(), Placement::Inset);
+        assert_eq!(l.orientation_value(), Orientation::Horizontal);
+        assert_eq!(l.edge(), Edge::Top);
+    }
+
+    #[test]
+    fn below_resolves_to_bottom_edge() {
+        assert_eq!(Legend::below().edge(), Edge::Bottom);
+    }
+
+    #[test]
+    fn left_and_right_resolve_to_vertical_edges() {
+        assert_eq!(Legend::left().edge(), Edge::Left);
+        assert_eq!(Legend::right().edge(), Edge::Right);
+        assert_eq!(Legend::left().orientation_value(), Orientation::Vertical);
+        assert_eq!(Legend::right().orientation_value(), Orientation::Vertical);
+    }
+
+    #[test]
+    fn overlay_picks_horizontal_for_corners() {
+        let l = Legend::overlay(Anchor::BottomRight);
+        assert_eq!(l.orientation_value(), Orientation::Horizontal);
+        assert_eq!(l.placement_value(), Placement::Overlaid);
+    }
+
+    #[test]
+    fn overlay_picks_vertical_for_left_and_right_sides() {
+        assert_eq!(Legend::overlay(Anchor::Left).orientation_value(), Orientation::Vertical);
+        assert_eq!(
+            Legend::overlay(Anchor::Right).orientation_value(),
+            Orientation::Vertical
+        );
+    }
+
+    #[test]
+    fn builder_methods_override_defaults() {
+        let l = Legend::above()
+            .anchor(Anchor::TopRight)
+            .orientation(Orientation::Vertical)
+            .placement(Placement::Overlaid);
+        assert_eq!(l.anchor_value(), Anchor::TopRight);
+        assert_eq!(l.orientation_value(), Orientation::Vertical);
+        assert_eq!(l.placement_value(), Placement::Overlaid);
+        // TopRight + Vertical => right edge
+        assert_eq!(l.edge(), Edge::Right);
+    }
+
+    #[test]
+    fn anchor_converts_into_overlay_legend() {
+        let l: Legend = Anchor::TopLeft.into();
+        assert_eq!(l.placement_value(), Placement::Overlaid);
+        assert_eq!(l.anchor_value(), Anchor::TopLeft);
     }
 }

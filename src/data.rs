@@ -372,12 +372,13 @@ impl Data {
     /// Configures the chart legend.
     ///
     /// ```
-    /// # use hyozu::{data, line, LegendPosition, LegendConfig};
-    /// // Short form — just position
-    /// data(line([(0, 10)]).with_name("Revenue")).legend(LegendPosition::Below);
+    /// # use hyozu::{data, line, LegendConfig, legend};
+    /// // Short form — inset below the plot area.
+    /// data(line([(0, 10)]).with_name("Revenue")).legend(LegendConfig::below());
     ///
-    /// // Detailed form — builder
-    /// data(line([(0, 10)]).with_name("Revenue")).legend(LegendConfig::below().font_size(10.0));
+    /// // Detailed form — builder.
+    /// data(line([(0, 10)]).with_name("Revenue"))
+    ///     .legend(LegendConfig::overlay(legend::Anchor::TopRight).font_size(10.0));
     /// ```
     pub fn legend(mut self, legend: impl Into<legend::Legend>) -> Self {
         self.legend = Some(legend.into());

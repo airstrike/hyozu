@@ -36,6 +36,10 @@ where
     /// Legend bounds (position + size) within the scene, computed during layout.
     /// Only set when a legend is configured.
     legend_bounds: Option<crate::core::Rectangle>,
+    /// Which edge of the plot area the series-key legend rides, cached
+    /// once from the legend config at scene construction. `None` when no
+    /// legend is configured or the legend has no entries.
+    legend_edge: Option<crate::data::legend::Edge>,
     /// Current selection (borrowed from Data).
     selection: &'a Option<crate::target::Target>,
     /// Optional tooltip configuration (borrowed from Data).
@@ -181,11 +185,16 @@ where
         let legend = match data.legend.as_ref() {
             Some(config) if !entries.is_empty() => Some(Legend::new(
                 entries,
-                config.position,
+                config.anchor,
+                config.orientation,
                 config.text,
                 config.wrap,
                 config.interactive,
             )),
+            _ => None,
+        };
+        let legend_edge = match data.legend.as_ref() {
+            Some(config) if legend.is_some() => Some(config.edge()),
             _ => None,
         };
 
@@ -244,6 +253,7 @@ where
             color_slots,
             plot_area_offset: crate::core::Point::ORIGIN,
             legend_bounds: None,
+            legend_edge,
             selection: &data.selection,
             tooltip: data.tooltip.as_ref(),
         }
@@ -301,16 +311,16 @@ where
     ) -> crate::core::layout::Node {
         use crate::core::layout::Node;
         use crate::core::{Point, Size};
-        use crate::data::legend::Position as LPos;
+        use crate::data::legend::Edge;
 
         let available = limits.max();
         let lim = |w, h| crate::core::layout::Limits::new(Size::ZERO, Size::new(w, h));
 
         // Tree indices: [0: title, 1: legend, 2: top, 3: right, 4: bottom, 5: left, 6: plot]
 
-        let legend_pos = self.legend.as_ref().map(|l| l.position());
-        let legend_is_side = matches!(legend_pos, Some(LPos::Left | LPos::Right));
-        let legend_is_above = matches!(legend_pos, Some(LPos::Above));
+        let legend_edge = self.legend_edge;
+        let legend_is_side = matches!(legend_edge, Some(Edge::Left | Edge::Right));
+        let legend_is_above = matches!(legend_edge, Some(Edge::Top));
 
         // --- Phase 1: Title (always at top, full width) ---
         let (title_height, title_node) = if let Some(title) = &self.title {
@@ -430,7 +440,7 @@ where
         };
 
         let above_legend_h = if legend_is_above { legend_tb_height } else { 0.0 };
-        let below_legend_h = if matches!(legend_pos, Some(LPos::Below)) {
+        let below_legend_h = if matches!(legend_edge, Some(Edge::Bottom)) {
             legend_tb_height
         } else {
             0.0
@@ -598,7 +608,7 @@ where
         let mut layout_children = Vec::new();
 
         // Compute vertical offsets
-        let legend_left_x = if legend_pos == Some(LPos::Left) {
+        let legend_left_x = if legend_edge == Some(Edge::Left) {
             legend_side_width
         } else {
             0.0
@@ -614,11 +624,11 @@ where
         // Legend — position depends on config
         let legend_node = legend_tb_node.or(legend_side_node);
         if let Some(node) = legend_node {
-            let pos = match legend_pos.unwrap_or(LPos::Above) {
-                LPos::Above => Point::new(content_left, title_height),
-                LPos::Below => Point::new(content_left, plot_top + plot_height + bottom_height),
-                LPos::Left => Point::new(0.0, plot_top),
-                LPos::Right => Point::new(content_left + plot_width, plot_top),
+            let pos = match legend_edge.unwrap_or(Edge::Top) {
+                Edge::Top => Point::new(content_left, title_height),
+                Edge::Bottom => Point::new(content_left, plot_top + plot_height + bottom_height),
+                Edge::Left => Point::new(0.0, plot_top),
+                Edge::Right => Point::new(content_left + plot_width, plot_top),
             };
             let size = node.size();
             self.legend_bounds = Some(crate::core::Rectangle {
