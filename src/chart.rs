@@ -452,6 +452,7 @@ where
                     let pie_tag = tree::Tag::of::<plot_area::pie::State>();
                     let treemap_tag = tree::Tag::of::<plot_area::treemap::State>();
                     let choropleth_tag = tree::Tag::of::<plot_area::choropleth::State>();
+                    let bubble_map_tag = tree::Tag::of::<plot_area::bubble_map::State>();
 
                     // First pass: hit-test labels (labels win when overlapping shapes)
                     for (mark_idx, mark_tree) in plot_area_tree.children.iter().enumerate() {
@@ -571,6 +572,26 @@ where
                                     }
                                 }
                                 if inside && let Some(id) = choro_state.filtered_ids.get(feat_idx) {
+                                    shell.publish(on_action(Action::Clicked(crate::target::Target::Feature {
+                                        mark: mark_idx,
+                                        id: id.clone(),
+                                    })));
+                                    return;
+                                }
+                            }
+                        } else if mark_tree.tag == bubble_map_tag {
+                            let bm_state = mark_tree.state.downcast_ref::<plot_area::bubble_map::State>();
+
+                            // Walk bubble circles; hit = point inside disc.
+                            // Reads the matching `point_ids[i]` — bubbles
+                            // without an id stay click-silent (backward-
+                            // compatible with callers that never set one).
+                            for (i, (center, radius)) in bm_state.bubble_circles.iter().enumerate() {
+                                let dx = local.x - center.x;
+                                let dy = local.y - center.y;
+                                if dx * dx + dy * dy <= radius * radius
+                                    && let Some(Some(id)) = bm_state.point_ids.get(i)
+                                {
                                     shell.publish(on_action(Action::Clicked(crate::target::Target::Feature {
                                         mark: mark_idx,
                                         id: id.clone(),

@@ -77,7 +77,7 @@ impl MapScope {
 /// A single geographic feature with one or more polygon rings.
 #[derive(Debug, Clone)]
 pub struct GeoFeature {
-    pub id: String,
+    pub id: crate::feature::Id,
     pub name: String,
     pub polygons: Vec<Vec<(f32, f32)>>,
     pub properties: HashMap<String, String>,
@@ -100,7 +100,7 @@ impl GeoFeature {
 #[derive(Debug, Clone)]
 pub struct GeoData {
     pub features: Vec<GeoFeature>,
-    index: HashMap<String, usize>,
+    index: HashMap<crate::feature::Id, usize>,
 }
 
 // ── GeoData methods ────────────────────────────────────────────────
@@ -113,9 +113,12 @@ impl GeoData {
         Self { features, index }
     }
 
-    /// O(1) lookup by feature id.
-    pub fn get(&self, id: &str) -> Option<&GeoFeature> {
-        self.index.get(id).map(|&i| &self.features[i])
+    /// O(1) lookup by feature id. Accepts anything convertible into an
+    /// [`Id`](crate::feature::Id) so call sites can pass `&str`, `String`,
+    /// or an existing `&Id`.
+    pub fn get(&self, id: impl Into<crate::feature::Id>) -> Option<&GeoFeature> {
+        let id = id.into();
+        self.index.get(&id).map(|&i| &self.features[i])
     }
 
     pub fn len(&self) -> usize {
@@ -127,7 +130,7 @@ impl GeoData {
     }
 
     /// Exposes the id-to-index map for Phase 6 choropleth matching.
-    pub fn id_index(&self) -> &HashMap<String, usize> {
+    pub fn id_index(&self) -> &HashMap<crate::feature::Id, usize> {
         &self.index
     }
 
@@ -426,7 +429,7 @@ mod geojson_parser {
             let name = properties.get("NAME").cloned().unwrap_or_default();
 
             features.push(GeoFeature {
-                id,
+                id: crate::feature::Id::new(id),
                 name,
                 polygons,
                 properties,

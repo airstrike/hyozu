@@ -16,6 +16,10 @@ use super::Plane;
 pub struct State {
     /// Pixel center and radius for each bubble (in local coordinates).
     pub bubble_circles: Vec<(crate::core::Point, f32)>,
+    /// Optional feature id per bubble, aligned 1:1 with `bubble_circles`.
+    /// Populated from `MapPoint::id` during the layout pass; read by the
+    /// click hit-test in `chart.rs` to emit `Target::Feature`.
+    pub point_ids: Vec<Option<crate::feature::Id>>,
     /// Projected polygon rings per feature, in pixel coordinates.
     pub projected_polygons: Vec<Vec<Vec<(f32, f32)>>>,
     /// Axis-aligned bounding box per feature (for future culling / hit-testing).
@@ -38,6 +42,7 @@ impl State {
     pub fn new() -> Self {
         Self {
             bubble_circles: Vec::new(),
+            point_ids: Vec::new(),
             projected_polygons: Vec::new(),
             feature_bboxes: Vec::new(),
             projection: None,
@@ -166,6 +171,12 @@ where
                 (crate::core::Point::new(px, py), 0.0)
             })
             .collect();
+
+        // Capture feature ids 1:1 with `bubble_circles` so the click hit-test
+        // in `chart.rs` can emit `Target::Feature { id }` for bubbles the
+        // caller labeled via `MapPoint::id`. Unlabeled bubbles stay `None`
+        // and silently don't fire.
+        state.point_ids = self.data.points.iter().map(|pt| pt.id.clone()).collect();
 
         // Pre-compute bubble radii.
         let (v_min, v_max) = value_range(&self.data.points);

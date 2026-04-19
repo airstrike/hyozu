@@ -19,12 +19,13 @@ pub enum Normalization {
 /// A single entry: maps a feature ID to a value.
 #[derive(Debug, Clone)]
 pub struct ChoroplethEntry {
-    pub(crate) id: String,
+    pub(crate) id: crate::feature::Id,
     pub(crate) value: f64,
 }
 
-/// Creates a choropleth entry.
-pub fn choropleth_entry(id: impl Into<String>, value: impl Into<f64>) -> ChoroplethEntry {
+/// Creates a choropleth entry. `id` accepts anything convertible into an
+/// [`Id`](crate::feature::Id) — `&str`, `String`, or an existing `Id`.
+pub fn choropleth_entry(id: impl Into<crate::feature::Id>, value: impl Into<f64>) -> ChoroplethEntry {
     ChoroplethEntry {
         id: id.into(),
         value: value.into(),
@@ -94,7 +95,7 @@ impl IntoChoropleth for Vec<ChoroplethEntry> {
 
 impl<S, V, const N: usize> IntoChoropleth for [(S, V); N]
 where
-    S: Into<String>,
+    S: Into<crate::feature::Id>,
     V: Into<f64>,
 {
     fn into_choropleth(self) -> Choropleth {
@@ -116,11 +117,11 @@ where
     }
 }
 
-// ── From Vec<(S, V)> where S: Into<String>, V: Into<f64> ────────
+// ── From Vec<(S, V)> where S: Into<Id>, V: Into<f64> ────────
 
 impl<S, V> IntoChoropleth for Vec<(S, V)>
 where
-    S: Into<String>,
+    S: Into<crate::feature::Id>,
     V: Into<f64>,
 {
     fn into_choropleth(self) -> Choropleth {

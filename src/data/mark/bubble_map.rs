@@ -18,6 +18,12 @@ pub struct MapPoint {
     pub(crate) label: Option<String>,
     /// Optional name for this point (used in legends).
     pub(crate) name: Option<String>,
+    /// Optional feature id. When set, a click on this bubble emits
+    /// `Target::Feature { mark, id }` — matching the docstring on
+    /// `target::Target::Feature` that describes "choropleth or bubble map"
+    /// features. Bubbles without an id remain click-silent (backward-
+    /// compatible).
+    pub(crate) id: Option<crate::feature::Id>,
 }
 
 /// Creates a map point at the given latitude and longitude with a value.
@@ -29,6 +35,7 @@ pub fn map_point(lat: impl Into<f64>, lon: impl Into<f64>, value: impl Into<f64>
         color: None,
         label: None,
         name: None,
+        id: None,
     }
 }
 
@@ -48,6 +55,15 @@ impl MapPoint {
     /// Sets the name for this point (used in legends).
     pub fn name(mut self, name: impl Into<String>) -> Self {
         self.name = Some(name.into());
+        self
+    }
+
+    /// Sets the feature id used when this bubble is clicked. A click
+    /// emits `Action::Clicked(Target::Feature { mark, id })`; unset points
+    /// are click-silent. Accepts anything convertible into an
+    /// [`Id`](crate::feature::Id) (`&str`, `String`, or an existing `Id`).
+    pub fn id(mut self, id: impl Into<crate::feature::Id>) -> Self {
+        self.id = Some(id.into());
         self
     }
 
@@ -73,6 +89,10 @@ impl MapPoint {
 
     pub fn get_name(&self) -> Option<&str> {
         self.name.as_deref()
+    }
+
+    pub fn get_id(&self) -> Option<&crate::feature::Id> {
+        self.id.as_ref()
     }
 }
 

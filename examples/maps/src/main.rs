@@ -1036,7 +1036,7 @@ impl App {
             }
             Message::ChartAction(hyozu::Action::Clicked(hyozu::Target::Feature { id, .. })) => {
                 // Drill into the region containing this country
-                if let Some(scope) = scope_for_country(&id, &self.countries) {
+                if let Some(scope) = scope_for_country(id.as_str(), &self.countries) {
                     if scope != self.scope {
                         self.scope = scope;
                         self.chart_data = self.build_chart_data();

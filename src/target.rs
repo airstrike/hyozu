@@ -26,5 +26,5 @@ pub enum Target {
     /// A specific legend entry by index.
     LegendEntry(usize),
     /// A geographic feature on a map (choropleth or bubble map).
-    Feature { mark: usize, id: String },
+    Feature { mark: usize, id: crate::feature::Id },
 }

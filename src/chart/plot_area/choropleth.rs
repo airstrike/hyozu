@@ -21,7 +21,7 @@ use super::Plane;
 /// for the broader principle.
 pub struct State {
     pub projected_polygons: Vec<Vec<Vec<(f32, f32)>>>,
-    pub filtered_ids: Vec<String>,
+    pub filtered_ids: Vec<crate::feature::Id>,
     pub feature_bboxes: Vec<crate::core::Rectangle>,
     /// Normalized [0,1] value for each filtered feature, in `filtered_ids`
     /// order. `None` for features without an entry in `self.data.entries`
