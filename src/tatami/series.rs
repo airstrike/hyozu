@@ -6,6 +6,7 @@
 //! Error cells become NaN — line charts break the line at the gap; bar
 //! charts drop the bar.
 
+use tatami::query::MemberRef;
 use tatami::series;
 
 use crate::tatami::cell::cells_f64;
@@ -17,11 +18,9 @@ use crate::{Bars, Data, Mark, bar};
 
 /// Build a multi-series line chart from a [`tatami::series::Result`].
 ///
-/// One [`Mark::Line`] per [`series::Row`]. The x-axis is shared; hyozu
-/// infers integer positions from the y-vector length (0..N), which matches
-/// the `x` member order — for display, a caller that wants member-labeled
-/// categorical ticks should use `Data::x_axis(...)` on the returned value
-/// with a categorical axis configured from `result.x()`.
+/// One [`Mark::Line`] per [`series::Row`]; the returned [`Data`] carries
+/// categorical x-axis labels taken from the leaf segment of each member's
+/// path. Callers can override via [`Data::x_axis`] on the return value.
 #[must_use]
 pub fn line(result: &series::Result) -> Data {
     let marks: Vec<Mark> = result
@@ -36,14 +35,17 @@ pub fn line(result: &series::Result) -> Data {
         })
         .collect();
 
-    marks.into()
+    let data: Data = marks.into();
+    data.x_axis_labels(leaf_labels(result.x()))
 }
 
 /// Build a grouped bar chart from a [`tatami::series::Result`].
 ///
 /// One [`bar::Series`] per [`series::Row`], all gathered into a single
 /// [`Mark::Bars`]. Grouped layout by default — the caller can switch to
-/// stacked on the returned `Data` via the usual mark builder pattern.
+/// stacked on the returned `Data` via the usual mark builder pattern. The
+/// returned [`Data`] carries categorical x-axis labels taken from the leaf
+/// segment of each member's path.
 #[must_use]
 pub fn bars(result: &series::Result) -> Data {
     let series_list: Vec<bar::Series> = result
@@ -58,7 +60,24 @@ pub fn bars(result: &series::Result) -> Data {
         })
         .collect();
 
-    Mark::Bars(Bars::from_series(series_list)).into()
+    let data: Data = Mark::Bars(Bars::from_series(series_list)).into();
+    data.x_axis_labels(leaf_labels(result.x()))
+}
+
+/// Return the leaf segment (deepest path component) of each member, as a
+/// parallel `Vec<String>`. Used for categorical x-axis labelling: a member
+/// at path `World/West/US/CA` contributes `"CA"`.
+fn leaf_labels(members: &[MemberRef]) -> Vec<String> {
+    members
+        .iter()
+        .map(|m| {
+            m.path
+                .segments()
+                .last()
+                .map(|n| n.as_str().to_owned())
+                .unwrap_or_default()
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -128,5 +147,39 @@ mod tests {
         // `bars` emits one Mark::Bars even with zero series — preserves the
         // shape so downstream layouts still render axis infrastructure.
         assert_eq!(bars_data.marks().len(), 1);
+    }
+
+    fn deep_mr(leaf: &str) -> MemberRef {
+        MemberRef::new(
+            name("Geography"),
+            name("Default"),
+            Path::with(name("World"), vec![name("North"), name("US"), name(leaf)]),
+        )
+    }
+
+    #[test]
+    fn bars_x_axis_labels_use_leaf_segment() {
+        let result = series::Result::new(vec![deep_mr("CA"), deep_mr("NY"), deep_mr("TX")], vec![series::Row {
+            label: "Revenue".into(),
+            values: vec![valid(1.0), valid(2.0), valid(3.0)],
+        }]);
+        let data = bars(&result);
+        let axis = data.x_axis_ref().expect("x axis present");
+        let values = axis.labels.values.as_ref().expect("categorical labels");
+        let owned: Vec<&str> = values.iter().map(String::as_str).collect();
+        assert_eq!(owned, vec!["CA", "NY", "TX"]);
+    }
+
+    #[test]
+    fn line_x_axis_labels_use_leaf_segment() {
+        let result = series::Result::new(vec![deep_mr("CA"), deep_mr("NY")], vec![series::Row {
+            label: "Revenue".into(),
+            values: vec![valid(1.0), valid(2.0)],
+        }]);
+        let data = line(&result);
+        let axis = data.x_axis_ref().expect("x axis present");
+        let values = axis.labels.values.as_ref().expect("categorical labels");
+        let owned: Vec<&str> = values.iter().map(String::as_str).collect();
+        assert_eq!(owned, vec!["CA", "NY"]);
     }
 }
