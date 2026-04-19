@@ -401,7 +401,7 @@ where
 
         let background = theme.background_color();
         let text_pair = theme.text_pair();
-        let seed = theme.palette_seed();
+        let seed = theme.seed();
 
         let color_stops: Vec<crate::core::Color> = if let Some(stops) = &self.data.color_stops {
             stops.clone()

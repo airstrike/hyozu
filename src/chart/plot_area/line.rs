@@ -222,11 +222,25 @@ where
 
         let mut frame = Frame::new(renderer, layout_bounds.size());
 
+        // Build a path from all points, breaking the line at any non-finite
+        // coordinate. A NaN y (from a missing or error cell flowing through
+        // the series unchanged) used to panic lyon_path's `move_to`; now it
+        // ends the current segment and the next finite point starts a fresh
+        // one.
         let path = Path::new(|builder| {
-            if let Some(first) = state.pixel_points.first() {
-                builder.move_to(crate::core::Point::new(first.x, first.y));
-                for point in state.pixel_points.iter().skip(1) {
-                    builder.line_to(crate::core::Point::new(point.x, point.y));
+            let mut in_segment = false;
+            for point in &state.pixel_points {
+                let finite = point.x.is_finite() && point.y.is_finite();
+                if !finite {
+                    in_segment = false;
+                    continue;
+                }
+                let p = crate::core::Point::new(point.x, point.y);
+                if in_segment {
+                    builder.line_to(p);
+                } else {
+                    builder.move_to(p);
+                    in_segment = true;
                 }
             }
         });
