@@ -1,55 +1,66 @@
 use crate::color::Color;
-use crate::core::Font;
 use crate::core::font::{Style, Weight};
+use crate::core::{Font, Pixels};
+use crate::data::mark::waterfall::EntryKind;
 use crate::text;
 use std::sync::Arc;
 
-pub use Position::{Edge, Inside, Outside};
+pub use Position::{Above, Base, Center, End};
 
 // Re-export common font weight/style variants so label composition
-// reads naturally:  `Outside + font("Inter") + Bold`
+// reads naturally:  `Above + font("Inter") + Bold + Italic`
 pub use crate::core::font::Style::Italic;
 pub use crate::core::font::Weight::{Black, Bold, Light, Medium, Semibold, Thin};
 
-/// Position of pie slice labels.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// Position of data labels on waterfall bars.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Position {
-    /// Inside the slice — midway between inner and outer radius (or
-    /// `radius * 0.65` for full pies).
-    #[default]
-    Inside,
-    /// Outside the outer arc, with a leader line from the slice edge.
-    Outside,
-    /// At the outer arc edge, just inside the slice.
-    Edge,
+    /// Outside the bar — above the top for positive bars/totals,
+    /// below the bottom for negative bars.
+    Above,
+    /// At the bar tip (top for positive, bottom for negative) — inside the bar.
+    End,
+    /// At the center of the bar.
+    Center,
+    /// At the baseline-side edge of the bar — inside.
+    Base,
 }
 
-/// Controls which slices show labels.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+/// Controls which entries show labels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Show {
-    /// Show labels on every slice.
+    /// Show labels on every entry.
     #[default]
     All,
-    /// Only show labels on slices whose fraction (0.0..=1.0) is at least the
-    /// given threshold.
-    Threshold(f32),
-    /// Only show labels on the N largest slices.
-    Top(usize),
+    /// Show labels on totals only.
+    Totals,
+    /// Show labels on increase/decrease entries only.
+    Changes,
+    /// Show labels on the first and last entries only.
+    EndsOnly,
 }
 
-impl Eq for Show {}
+impl Show {
+    /// Returns whether this entry should display a label given its position
+    /// and total count.
+    pub fn allows(&self, index: usize, total: usize, kind: EntryKind) -> bool {
+        match self {
+            Show::All => true,
+            Show::Totals => matches!(kind, EntryKind::Total),
+            Show::Changes => !matches!(kind, EntryKind::Total),
+            Show::EndsOnly => index == 0 || (total > 0 && index + 1 == total),
+        }
+    }
+}
 
-/// Label configuration for pie slices.
+/// Data label configuration for waterfall charts.
 #[derive(Clone)]
 pub struct Label {
-    /// Position relative to the slice arc.
     pub(crate) position: Position,
-    /// Which slices show this label (when broadcast via `Pie::labels`).
     pub(crate) show: Show,
-    /// Format function for the label text. Receives `(value, percentage)`
-    /// where percentage is `0.0..=1.0`.
-    pub(crate) format: Arc<dyn Fn(f64, f64) -> String + Send + Sync>,
+    pub(crate) format: Arc<dyn Fn(f64) -> String + Send + Sync>,
     pub(crate) color: Option<Color>,
+    /// Typography override for the label text.
     pub(crate) text: text::Style,
     pub(crate) fill: Option<Color>,
 }
@@ -58,7 +69,7 @@ impl PartialEq for Label {
     fn eq(&self, other: &Self) -> bool {
         self.position == other.position
             && self.show == other.show
-            && (self.format)(1.0, 0.5) == (other.format)(1.0, 0.5)
+            && (self.format)(1.0) == (other.format)(1.0)
             && self.color == other.color
             && self.text == other.text
             && self.fill == other.fill
@@ -78,15 +89,19 @@ impl std::fmt::Debug for Label {
     }
 }
 
-/// Default label formatter that displays the percentage.
-pub fn default(_value: f64, pct: f64) -> String {
-    format!("{:.0}%", pct * 100.0)
+/// Default label formatter that displays numbers naturally.
+pub fn default(value: f64) -> String {
+    if value.fract().abs() < 0.001 {
+        format!("{}", value as i64)
+    } else {
+        format!("{:.1}", value)
+    }
 }
 
 impl Default for Label {
     fn default() -> Self {
         Self {
-            position: Position::default(),
+            position: Position::Above,
             show: Show::default(),
             format: Arc::new(default),
             color: None,
@@ -97,81 +112,66 @@ impl Default for Label {
 }
 
 impl Label {
-    /// Creates a label that shows the percentage.
-    pub fn percent() -> Self {
-        Self {
-            format: Arc::new(|_value, pct| format!("{:.0}%", pct * 100.0)),
-            ..Self::default()
-        }
+    /// Create a new label configuration with default values.
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    /// Creates a label that shows the raw value.
-    pub fn value() -> Self {
-        Self {
-            format: Arc::new(|value, _pct| format!("{}", value)),
-            ..Self::default()
-        }
-    }
-
-    /// Creates a label with a custom format function.
-    ///
-    /// The function receives `(value, percentage)` where percentage is 0.0..1.0.
-    pub fn custom(f: impl Fn(f64, f64) -> String + Send + Sync + 'static) -> Self {
-        Self {
-            format: Arc::new(f),
-            ..Self::default()
-        }
-    }
-
-    /// Sets the label position.
+    /// Set the position of the label.
     pub fn with_position(mut self, position: Position) -> Self {
         self.position = position;
         self
     }
 
-    /// Sets which slices show labels.
+    /// Set which entries show labels.
     pub fn with_show(mut self, show: Show) -> Self {
         self.show = show;
         self
     }
 
-    /// Sets the label color.
+    /// Set a custom format function for the label text.
+    pub fn with_format(mut self, f: impl Fn(f64) -> String + Send + Sync + 'static) -> Self {
+        self.format = Arc::new(f);
+        self
+    }
+
+    /// Set the label color.
     pub fn with_color(mut self, color: impl Into<Color>) -> Self {
         self.color = Some(color.into());
         self
     }
 
-    /// Override the full text style for this label.
+    /// Override the full text style.
     pub fn with_text(mut self, style: text::Style) -> Self {
         self.text = style;
         self
     }
 
-    /// Sets the label font family (overrides the theme default).
+    /// Set the label font family (overrides the theme default).
     pub fn with_font(mut self, font: impl Into<Font>) -> Self {
         self.text.family = Some(font.into());
         self
     }
 
-    /// Sets the label font size.
-    pub fn with_size(mut self, size: impl Into<crate::core::Pixels>) -> Self {
+    /// Set the label size.
+    pub fn with_size(mut self, size: impl Into<Pixels>) -> Self {
         self.text.size = Some(size.into());
         self
     }
 
-    /// Sets the label font weight.
+    /// Set the label font weight.
     pub fn with_weight(mut self, weight: Weight) -> Self {
         self.text.weight = Some(weight);
         self
     }
 
-    /// Sets the label font style.
+    /// Set the label font style.
     pub fn with_style(mut self, style: Style) -> Self {
         self.text.style = Some(style);
         self
     }
 
-    /// Sets the label background fill color.
+    /// Set the label background fill color.
     pub fn with_fill(mut self, fill: impl Into<Color>) -> Self {
         self.fill = Some(fill.into());
         self
@@ -191,7 +191,7 @@ impl Label {
         self.color = color;
     }
 
-    pub fn set_size(&mut self, size: Option<crate::core::Pixels>) {
+    pub fn set_size(&mut self, size: Option<Pixels>) {
         self.text.size = size;
     }
 
@@ -225,7 +225,7 @@ impl Label {
         self.color.as_ref()
     }
 
-    pub fn size(&self) -> Option<crate::core::Pixels> {
+    pub fn size(&self) -> Option<Pixels> {
         self.text.size
     }
 
@@ -280,10 +280,10 @@ impl From<Show> for Option<Label> {
 
 // === Position + component ===
 
-impl<F: Fn(f64, f64) -> String + Send + Sync + 'static> std::ops::Add<F> for Position {
+impl<F: Fn(f64) -> String + Send + Sync + 'static> std::ops::Add<F> for Position {
     type Output = Label;
     fn add(self, format: F) -> Label {
-        Label::from(self).custom_format(format)
+        Label::from(self).with_format(format)
     }
 }
 
@@ -332,10 +332,10 @@ impl std::ops::Add<Position> for Show {
     }
 }
 
-impl<F: Fn(f64, f64) -> String + Send + Sync + 'static> std::ops::Add<F> for Show {
+impl<F: Fn(f64) -> String + Send + Sync + 'static> std::ops::Add<F> for Show {
     type Output = Label;
     fn add(self, format: F) -> Label {
-        Label::from(self).custom_format(format)
+        Label::from(self).with_format(format)
     }
 }
 
@@ -369,11 +369,37 @@ impl std::ops::Add<Show> for Label {
     }
 }
 
-impl Label {
-    /// Replace the format function. Used internally by `Add` impls; mirrors
-    /// the public surface of `bar::label::Label::with_format`.
-    fn custom_format(mut self, f: impl Fn(f64, f64) -> String + Send + Sync + 'static) -> Self {
-        self.format = Arc::new(f);
-        self
+impl<F: Fn(f64) -> String + Send + Sync + 'static> std::ops::Add<F> for Label {
+    type Output = Label;
+    fn add(self, format: F) -> Label {
+        self.with_format(format)
+    }
+}
+
+impl std::ops::Add<crate::text::Style> for Label {
+    type Output = Label;
+    fn add(self, text: crate::text::Style) -> Label {
+        self.with_text(text)
+    }
+}
+
+impl std::ops::Add<crate::core::Font> for Label {
+    type Output = Label;
+    fn add(self, font: crate::core::Font) -> Label {
+        self.with_font(font)
+    }
+}
+
+impl std::ops::Add<Weight> for Label {
+    type Output = Label;
+    fn add(self, weight: Weight) -> Label {
+        self.with_weight(weight)
+    }
+}
+
+impl std::ops::Add<Style> for Label {
+    type Output = Label;
+    fn add(self, style: Style) -> Label {
+        self.with_style(style)
     }
 }

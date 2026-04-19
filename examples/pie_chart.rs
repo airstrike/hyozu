@@ -36,7 +36,11 @@ impl App {
             pie::slice(5).name("Edge"),
             pie::slice(9).name("Other"),
         ])
-        .labels(pie::label::Label::percent())
+        .labels(
+            pie::label::Label::percent()
+                .with_position(pie::label::Outside)
+                .with_show(pie::label::Show::Threshold(0.05)),
+        )
         .gap(2.0);
 
         Self {

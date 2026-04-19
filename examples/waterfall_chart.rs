@@ -32,16 +32,16 @@ enum Message {
 impl App {
     fn new() -> Self {
         let wf = waterfall::waterfall([
-            waterfall::entry(2733, Total).label("$2,733M"),
-            waterfall::entry(50, Increase).label("+$50M"),
-            waterfall::entry(-30, Decrease).label("-$30M"),
-            waterfall::entry(45, Increase).label("+$45M"),
-            waterfall::entry(-25, Decrease).label("-$25M"),
-            waterfall::entry(40, Increase).label("+$40M"),
-            waterfall::entry(-20, Decrease).label("-$20M"),
-            waterfall::entry(35, Increase).label("+$35M"),
-            waterfall::entry(-75, Decrease).label("-$75M"),
-            waterfall::entry(2753, Total).label("$2,753M"),
+            waterfall::entry(2733, Total).text("$2,733M"),
+            waterfall::entry(50, Increase).text("+$50M"),
+            waterfall::entry(-30, Decrease).text("-$30M"),
+            waterfall::entry(45, Increase).text("+$45M"),
+            waterfall::entry(-25, Decrease).text("-$25M"),
+            waterfall::entry(40, Increase).text("+$40M"),
+            waterfall::entry(-20, Decrease).text("-$20M"),
+            waterfall::entry(35, Increase).text("+$35M"),
+            waterfall::entry(-75, Decrease).text("-$75M"),
+            waterfall::entry(2753, Total).text("$2,753M"),
         ]);
 
         Self {

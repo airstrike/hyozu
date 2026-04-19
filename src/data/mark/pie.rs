@@ -33,6 +33,20 @@ impl Slice {
         self
     }
 
+    /// Sets the label position for this slice (no-op when no label is set).
+    pub fn set_label_position(&mut self, position: label::Position) {
+        if let Some(label) = &mut self.label {
+            label.set_position(position);
+        }
+    }
+
+    /// Sets which slices show labels (no-op when no label is set).
+    pub fn set_label_show(&mut self, show: label::Show) {
+        if let Some(label) = &mut self.label {
+            label.set_show(show);
+        }
+    }
+
     /// Sets the label color for this slice.
     pub fn set_label_color(&mut self, color: Option<Color>) {
         if let Some(label) = &mut self.label {
@@ -241,6 +255,50 @@ impl Pie {
             }
         }
         self
+    }
+
+    // === Chart-wide label setters (only affect slices that already have a label) ===
+
+    pub fn set_label_position(&mut self, position: label::Position) {
+        for slice in &mut self.slices {
+            slice.set_label_position(position);
+        }
+    }
+
+    pub fn set_label_show(&mut self, show: label::Show) {
+        for slice in &mut self.slices {
+            slice.set_label_show(show);
+        }
+    }
+
+    pub fn set_label_color(&mut self, color: Option<Color>) {
+        for slice in &mut self.slices {
+            slice.set_label_color(color);
+        }
+    }
+
+    pub fn set_label_size(&mut self, size: Option<crate::core::Pixels>) {
+        for slice in &mut self.slices {
+            slice.set_label_size(size);
+        }
+    }
+
+    pub fn set_label_weight(&mut self, weight: Option<crate::core::font::Weight>) {
+        for slice in &mut self.slices {
+            slice.set_label_weight(weight);
+        }
+    }
+
+    pub fn set_label_style(&mut self, style: Option<crate::core::font::Style>) {
+        for slice in &mut self.slices {
+            slice.set_label_style(style);
+        }
+    }
+
+    pub fn set_label_fill(&mut self, fill: Option<Color>) {
+        for slice in &mut self.slices {
+            slice.set_label_fill(fill);
+        }
     }
 
     /// Pie charts have no axes.

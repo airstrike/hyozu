@@ -2,13 +2,23 @@ use super::Plane;
 use crate::core::Size;
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
-use crate::widget::canvas::{Frame, Path, Text as CanvasText};
+use crate::mark::pie::label::{Position, Show};
+use crate::widget::canvas::{Frame, Path, Stroke, Text as CanvasText};
 
 use crate::core::text;
 use crate::widget::renderer::geometry;
 
 /// Number of line segments per full circle for arc approximation.
 const ARC_SEGMENTS_PER_TAU: usize = 64;
+
+/// Padding reserved around the pie when any visible slice has an outside label.
+const OUTSIDE_LABEL_PAD: f32 = 24.0;
+
+/// Distance from outer arc to label baseline for outside labels.
+const OUTSIDE_LABEL_OFFSET: f32 = 14.0;
+
+/// Distance from outer arc to leader-line knee for outside labels.
+const OUTSIDE_LEADER_KNEE: f32 = 10.0;
 
 /// State for Pie — stores pre-calculated slice angles and geometry for hit-testing
 pub struct State {
@@ -63,9 +73,7 @@ where
     }
 
     /// Reconcile the tree with current Pie state
-    pub(super) fn diff(&self, _tree: &mut Tree) {
-        // No children to diff
-    }
+    pub(super) fn diff(&self, _tree: &mut Tree) {}
 
     /// Layout the pie — compute angles from values
     pub fn layout(&self, tree: &mut Tree, _renderer: &Renderer, limits: &Limits, _plane: &Plane) -> Node {
@@ -75,21 +83,28 @@ where
 
         if total == 0.0 {
             state.slice_angles.clear();
+            state.label_rects.clear();
             return Node::new(Size::ZERO);
         }
 
-        // Compute geometry for hit-testing (same formula as draw)
+        let visibility = compute_visibility(self.data, total);
+        let needs_outside_pad =
+            self.data.slices.iter().zip(visibility.iter()).any(|(s, &visible)| {
+                visible && matches!(s.label.as_ref().map(|l| l.position), Some(Position::Outside))
+            });
+
         let size = limits.max();
         let cx = size.width / 2.0;
         let cy = size.height / 2.0;
-        let radius = size.width.min(size.height) / 2.0 * 0.9;
+        let pad = if needs_outside_pad { OUTSIDE_LABEL_PAD } else { 0.0 };
+        let radius = ((size.width.min(size.height) / 2.0 - pad).max(0.0)) * 0.95;
         let inner_radius = radius * self.data.hole;
 
         state.center = (cx, cy);
         state.outer_radius = radius;
         state.inner_radius = inner_radius;
 
-        let mut current_angle: f32 = -std::f32::consts::FRAC_PI_2; // Start at top (12 o'clock)
+        let mut current_angle: f32 = -std::f32::consts::FRAC_PI_2;
         state.slice_angles = self
             .data
             .slices
@@ -104,27 +119,18 @@ where
             })
             .collect();
 
-        // Compute label rects for hit-testing
         state.label_rects = state
             .slice_angles
             .iter()
             .zip(self.data.slices.iter())
-            .map(|((start, end), slice)| {
-                let label = match &slice.label {
-                    Some(l) => l,
-                    None => return None,
-                };
+            .zip(visibility.iter())
+            .map(|(((start, end), slice), &visible)| {
+                if !visible {
+                    return None;
+                }
+                let label = slice.label.as_ref()?;
 
                 let mid = (start + end) / 2.0;
-                let label_r = if inner_radius > 0.0 {
-                    inner_radius + (radius - inner_radius) * 0.5
-                } else {
-                    radius * 0.65
-                };
-
-                let lx = cx + label_r * mid.cos();
-                let ly = cy + label_r * mid.sin();
-
                 let pct = slice.value.max(0.0) / total;
                 let text = (label.format)(slice.value, pct);
                 if text.is_empty() {
@@ -136,13 +142,18 @@ where
                 let text_width = text.len() as f32 * char_width + 6.0;
                 let text_height = font_size * 1.2 + 4.0;
 
-                // Center-aligned
-                Some(crate::core::Rectangle {
-                    x: lx - text_width / 2.0,
-                    y: ly - text_height / 2.0,
-                    width: text_width,
-                    height: text_height,
-                })
+                Some(label_rect(
+                    LabelGeometry {
+                        position: label.position,
+                        mid,
+                        cx,
+                        cy,
+                        radius,
+                        inner_radius,
+                    },
+                    text_width,
+                    text_height,
+                ))
             })
             .collect();
 
@@ -180,20 +191,26 @@ where
         let layout_bounds = layout.bounds();
         let mut frame = Frame::new(renderer, layout_bounds.size());
 
-        // Center and radius
+        let total: f64 = self.data.slices.iter().map(|s| s.value.max(0.0)).sum();
+        let visibility = if total > 0.0 {
+            compute_visibility(self.data, total)
+        } else {
+            vec![false; self.data.slices.len()]
+        };
+        let needs_outside_pad =
+            self.data.slices.iter().zip(visibility.iter()).any(|(s, &visible)| {
+                visible && matches!(s.label.as_ref().map(|l| l.position), Some(Position::Outside))
+            });
+
         let cx = layout_bounds.width / 2.0;
         let cy = layout_bounds.height / 2.0;
-        let radius = layout_bounds.width.min(layout_bounds.height) / 2.0 * 0.9;
+        let pad = if needs_outside_pad { OUTSIDE_LABEL_PAD } else { 0.0 };
+        let radius = ((layout_bounds.width.min(layout_bounds.height) / 2.0 - pad).max(0.0)) * 0.95;
         let inner_radius = radius * self.data.hole;
 
-        // Compute gap offset for each slice
         let has_gap = self.data.gap > 0.0 && self.data.slices.len() > 1;
         let gap_offset = self.data.gap / 2.0;
 
-        // Compute total for label percentages
-        let total: f64 = self.data.slices.iter().map(|s| s.value.max(0.0)).sum();
-
-        // Track resolved colors for label contrast
         let mut slice_colors = Vec::with_capacity(self.data.slices.len());
 
         // Draw each slice
@@ -211,7 +228,6 @@ where
             let start = *start_angle;
             let end = *end_angle;
 
-            // Apply gap offset by shifting slice center outward
             let (scx, scy) = if has_gap {
                 let mid = (start + end) / 2.0;
                 (cx + gap_offset * mid.cos(), cy + gap_offset * mid.sin())
@@ -221,7 +237,6 @@ where
 
             let path = Path::new(|builder| {
                 if inner_radius > 0.0 {
-                    // Donut wedge
                     let inner_start =
                         crate::core::Point::new(scx + inner_radius * start.cos(), scy + inner_radius * start.sin());
                     let outer_start = crate::core::Point::new(scx + radius * start.cos(), scy + radius * start.sin());
@@ -236,7 +251,6 @@ where
                     trace_arc(builder, scx, scy, inner_radius, end, start);
                     builder.close();
                 } else {
-                    // Full pie wedge from center
                     builder.move_to(crate::core::Point::new(scx, scy));
                     let outer_start = crate::core::Point::new(scx + radius * start.cos(), scy + radius * start.sin());
                     builder.line_to(outer_start);
@@ -248,11 +262,14 @@ where
             frame.fill(&path, color);
         }
 
-        // Draw slice labels (second pass — on top of slices)
+        // Slice labels
         if total > 0.0 {
             for (i, ((start_angle, end_angle), slice)) in
                 state.slice_angles.iter().zip(self.data.slices.iter()).enumerate()
             {
+                if !visibility[i] {
+                    continue;
+                }
                 let label = match &slice.label {
                     Some(l) => l,
                     None => continue,
@@ -262,22 +279,14 @@ where
                 let end = *end_angle;
                 let mid = (start + end) / 2.0;
 
-                // Position label between inner and outer radius
-                let label_r = if inner_radius > 0.0 {
-                    inner_radius + (radius - inner_radius) * 0.5
-                } else {
-                    radius * 0.65
-                };
-
-                let lx = cx + label_r * mid.cos();
-                let ly = cy + label_r * mid.sin();
-
                 let pct = slice.value.max(0.0) / total;
                 let label_text = (label.format)(slice.value, pct);
+                if label_text.is_empty() {
+                    continue;
+                }
 
                 let font_size = label.text.size.unwrap_or(crate::core::Pixels(theme.font_size()));
 
-                // Draw fill background if specified
                 if let Some(fill_color_spec) = label.fill
                     && let Some(Some(lr)) = state.label_rects.get(i)
                 {
@@ -291,16 +300,47 @@ where
                     frame.fill(&fill_path, fill_resolved);
                 }
 
-                // Resolve label color for contrast against the slice
-                let slice_fill = slice_colors[i];
-                let label_color = if let Some(c) = label.color {
-                    c.resolve(slice_fill, text_pair, &seed, Some(background))
-                } else {
-                    text_pair.resolve(slice_fill, Some(background))
+                let (lx, ly, align_x, align_y) = label_anchor(label.position, mid, cx, cy, radius, inner_radius);
+
+                let label_color = match label.position {
+                    Position::Outside => {
+                        if let Some(c) = label.color {
+                            c.resolve(background, text_pair, &seed, None)
+                        } else {
+                            text_pair.resolve(background, None)
+                        }
+                    }
+                    _ => {
+                        let slice_fill = slice_colors[i];
+                        if let Some(c) = label.color {
+                            c.resolve(slice_fill, text_pair, &seed, Some(background))
+                        } else {
+                            text_pair.resolve(slice_fill, Some(background))
+                        }
+                    }
                 };
 
-                // Resolve the font: label's family/weight/style layered
-                // on top of the theme's data-label default.
+                // Outside leader line: slice edge -> knee -> label edge
+                if matches!(label.position, Position::Outside) {
+                    let leader_color = crate::core::Color {
+                        a: 0.4,
+                        ..text_pair.on_light
+                    };
+                    let p0 = crate::core::Point::new(cx + radius * mid.cos(), cy + radius * mid.sin());
+                    let p1 = crate::core::Point::new(
+                        cx + (radius + OUTSIDE_LEADER_KNEE) * mid.cos(),
+                        cy + (radius + OUTSIDE_LEADER_KNEE) * mid.sin(),
+                    );
+                    let p2 = crate::core::Point::new(lx, p1.y);
+
+                    let leader_path = Path::new(|b| {
+                        b.move_to(p0);
+                        b.line_to(p1);
+                        b.line_to(p2);
+                    });
+                    frame.stroke(&leader_path, Stroke::default().with_color(leader_color).with_width(1.0));
+                }
+
                 let font = label
                     .text
                     .resolved_font(theme.data_label_text().resolved_font(theme.font()));
@@ -311,8 +351,8 @@ where
                     color: label_color,
                     size: font_size,
                     font,
-                    align_x: crate::core::alignment::Horizontal::Center.into(),
-                    align_y: crate::core::alignment::Vertical::Center,
+                    align_x: align_x.into(),
+                    align_y,
                     line_height: crate::core::text::LineHeight::default(),
                     shaping: crate::core::text::Shaping::Basic,
                     ..CanvasText::default()
@@ -320,12 +360,11 @@ where
             }
         }
 
-        // Draw selection highlight
+        // Selection highlights
         let mut selection_frame = Frame::new(renderer, layout_bounds.size());
 
         if let Some(target) = selection {
             use crate::target::Target;
-            use crate::widget::canvas::Stroke;
 
             let inner_color = crate::core::Color::from_rgba(0.0, 0.0, 0.0, 0.5);
             let outer_color = crate::core::Color::from_rgba(1.0, 1.0, 1.0, 0.6);
@@ -347,7 +386,6 @@ where
                 }
             };
 
-            // Label selection highlights
             for (i, maybe_rect) in state.label_rects.iter().enumerate() {
                 if !should_highlight_label(i) {
                     continue;
@@ -385,9 +423,6 @@ where
                 let start = *start_angle;
                 let end = *end_angle;
 
-                // Apply gap offset (same as draw)
-                let has_gap = self.data.gap > 0.0 && self.data.slices.len() > 1;
-                let gap_offset = self.data.gap / 2.0;
                 let (scx, scy) = if has_gap {
                     let mid = (start + end) / 2.0;
                     (cx + gap_offset * mid.cos(), cy + gap_offset * mid.sin())
@@ -395,7 +430,6 @@ where
                     (cx, cy)
                 };
 
-                // Build the wedge path for stroking
                 let highlight_path = Path::new(|builder| {
                     if inner_radius > 0.0 {
                         let inner_start =
@@ -422,13 +456,10 @@ where
                     }
                 });
 
-                // Outer white stroke (slightly expanded)
                 selection_frame.stroke(
                     &highlight_path,
                     Stroke::default().with_color(outer_color).with_width(3.0),
                 );
-
-                // Inner black stroke
                 selection_frame.stroke(
                     &highlight_path,
                     Stroke::default().with_color(inner_color).with_width(1.5),
@@ -447,6 +478,112 @@ where
         renderer.with_translation(translation, |renderer| {
             renderer.draw_geometry(selection_geometry);
         });
+    }
+}
+
+/// Returns a per-slice flag indicating whether the slice's label should
+/// be displayed under the slice's `Show` policy.
+fn compute_visibility(pie: &crate::mark::pie::Pie, total: f64) -> Vec<bool> {
+    pie.slices
+        .iter()
+        .map(|s| match s.label.as_ref().map(|l| l.show) {
+            None => true,
+            Some(Show::All) => true,
+            Some(Show::Threshold(t)) => {
+                let frac = (s.value.max(0.0) / total) as f32;
+                frac >= t.clamp(0.0, 1.0)
+            }
+            Some(Show::Top(n)) => {
+                if n == 0 {
+                    return false;
+                }
+                let mut values: Vec<f64> = pie.slices.iter().map(|s| s.value.max(0.0)).collect();
+                values.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+                let cutoff = values.get(n.saturating_sub(1)).copied().unwrap_or(f64::INFINITY);
+                s.value.max(0.0) >= cutoff && s.value.max(0.0) > 0.0
+            }
+        })
+        .collect()
+}
+
+/// Computes the anchor point and alignment for a slice label.
+fn label_anchor(
+    position: Position,
+    mid: f32,
+    cx: f32,
+    cy: f32,
+    radius: f32,
+    inner_radius: f32,
+) -> (
+    f32,
+    f32,
+    crate::core::alignment::Horizontal,
+    crate::core::alignment::Vertical,
+) {
+    use crate::core::alignment::{Horizontal, Vertical};
+    match position {
+        Position::Inside => {
+            let label_r = if inner_radius > 0.0 {
+                inner_radius + (radius - inner_radius) * 0.5
+            } else {
+                radius * 0.65
+            };
+            (
+                cx + label_r * mid.cos(),
+                cy + label_r * mid.sin(),
+                Horizontal::Center,
+                Vertical::Center,
+            )
+        }
+        Position::Edge => {
+            let label_r = radius * 0.92;
+            (
+                cx + label_r * mid.cos(),
+                cy + label_r * mid.sin(),
+                Horizontal::Center,
+                Vertical::Center,
+            )
+        }
+        Position::Outside => {
+            let label_r = radius + OUTSIDE_LABEL_OFFSET;
+            let h = if mid.cos() >= 0.0 {
+                Horizontal::Left
+            } else {
+                Horizontal::Right
+            };
+            (cx + label_r * mid.cos(), cy + label_r * mid.sin(), h, Vertical::Center)
+        }
+    }
+}
+
+/// Geometry inputs shared between layout and the renderer for label placement.
+struct LabelGeometry {
+    position: Position,
+    mid: f32,
+    cx: f32,
+    cy: f32,
+    radius: f32,
+    inner_radius: f32,
+}
+
+/// Computes the bounding rect for a label given its geometry and text size.
+fn label_rect(g: LabelGeometry, text_width: f32, text_height: f32) -> crate::core::Rectangle {
+    let (lx, ly, align_x, align_y) = label_anchor(g.position, g.mid, g.cx, g.cy, g.radius, g.inner_radius);
+    let x = match align_x {
+        crate::core::alignment::Horizontal::Left => lx,
+        crate::core::alignment::Horizontal::Center => lx - text_width / 2.0,
+        crate::core::alignment::Horizontal::Right => lx - text_width,
+    };
+    let y = match align_y {
+        crate::core::alignment::Vertical::Top => ly,
+        crate::core::alignment::Vertical::Center => ly - text_height / 2.0,
+        crate::core::alignment::Vertical::Bottom => ly - text_height,
+    };
+    crate::core::Rectangle {
+        x,
+        y,
+        width: text_width,
+        height: text_height,
     }
 }
 

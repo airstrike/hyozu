@@ -33,22 +33,32 @@ impl Property {
                     slice.color = *color;
                 }
             }
-            Property::Label(p) => {
-                for slice in pie.slices_mut() {
-                    apply_label_property(p, slice);
-                }
-            }
+            Property::Label(p) => apply_chart_label(p, pie),
             Property::SliceLabel { index, property } => {
                 if let Some(slice) = pie.slices_mut().get_mut(*index) {
-                    apply_label_property(property, slice);
+                    apply_slice_label(property, slice);
                 }
             }
         }
     }
 }
 
-fn apply_label_property(p: &label::Property, slice: &mut crate::data::mark::pie::Slice) {
+fn apply_chart_label(p: &label::Property, pie: &mut crate::data::mark::pie::Pie) {
     match p {
+        label::Property::Position(v) => pie.set_label_position(*v),
+        label::Property::Show(v) => pie.set_label_show(*v),
+        label::Property::Color(c) => pie.set_label_color(*c),
+        label::Property::Size(s) => pie.set_label_size(*s),
+        label::Property::Weight(w) => pie.set_label_weight(*w),
+        label::Property::Style(s) => pie.set_label_style(*s),
+        label::Property::Fill(f) => pie.set_label_fill(*f),
+    }
+}
+
+fn apply_slice_label(p: &label::Property, slice: &mut crate::data::mark::pie::Slice) {
+    match p {
+        label::Property::Position(v) => slice.set_label_position(*v),
+        label::Property::Show(v) => slice.set_label_show(*v),
         label::Property::Color(c) => slice.set_label_color(*c),
         label::Property::Size(s) => slice.set_label_size(*s),
         label::Property::Weight(w) => slice.set_label_weight(*w),

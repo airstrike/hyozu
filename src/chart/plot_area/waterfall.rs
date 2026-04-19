@@ -4,6 +4,7 @@ use crate::core::widget::{Tree, tree};
 use crate::core::{Rectangle, Size};
 use crate::data::Datum;
 use crate::mark::waterfall::EntryKind;
+use crate::mark::waterfall::label::Position;
 use crate::widget::canvas::{Frame, Path, Stroke, Text as CanvasText};
 
 use crate::core::text;
@@ -17,6 +18,8 @@ pub struct State {
     pub kinds: Vec<EntryKind>,
     /// Top Y position of each bar (for connector lines)
     pub tops: Vec<f32>,
+    /// Estimated label rectangles (None = no label drawn for that entry)
+    pub label_rects: Vec<Option<Rectangle>>,
 }
 
 /// A Waterfall series that renders waterfall charts.
@@ -27,6 +30,13 @@ where
 {
     pub(super) data: &'a crate::mark::waterfall::Waterfall,
     _marker: std::marker::PhantomData<(Message, Renderer)>,
+}
+
+/// A label resolved for a single waterfall entry.
+struct LabelDraw {
+    text: String,
+    position: Position,
+    size: f32,
 }
 
 impl<'a, Message, Renderer> Waterfall<'a, Message, Renderer>
@@ -50,6 +60,7 @@ where
                 rects: Vec::new(),
                 kinds: Vec::new(),
                 tops: Vec::new(),
+                label_rects: Vec::new(),
             }),
             children: Vec::new(),
         }
@@ -68,6 +79,7 @@ where
             state.rects.clear();
             state.kinds.clear();
             state.tops.clear();
+            state.label_rects.clear();
             return Node::new(Size::ZERO);
         }
 
@@ -88,7 +100,6 @@ where
 
             match entry.kind {
                 EntryKind::Total => {
-                    // Total bar starts from zero
                     running_total = entry.value;
                     let top_y = plane.to_pixel(Datum::new(0.0, entry.value)).y;
                     let height = (zero_y - top_y).abs();
@@ -120,7 +131,7 @@ where
                 }
                 EntryKind::Decrease => {
                     let prev_total = running_total;
-                    running_total += entry.value; // value is negative
+                    running_total += entry.value;
                     let top_y = plane.to_pixel(Datum::new(0.0, prev_total)).y;
                     let bottom_y = plane.to_pixel(Datum::new(0.0, running_total)).y;
                     let height = (bottom_y - top_y).abs();
@@ -139,7 +150,56 @@ where
             state.kinds.push(entry.kind);
         }
 
+        state.label_rects = self.compute_label_rects(state);
+
         Node::new(Size::ZERO)
+    }
+
+    fn compute_label_rects(&self, state: &State) -> Vec<Option<Rectangle>> {
+        let total_entries = self.data.entries.len();
+        let chart_label = self.data.label.as_ref();
+        let default_size = 12.0;
+
+        self.data
+            .entries
+            .iter()
+            .zip(state.rects.iter())
+            .enumerate()
+            .map(|(i, (entry, rect))| {
+                let LabelDraw { text, position, size } = resolve_label(entry, chart_label, default_size)?;
+
+                if !chart_label
+                    .map(|l| l.show.allows(i, total_entries, entry.kind))
+                    .unwrap_or(true)
+                {
+                    return None;
+                }
+
+                let (lx, ly, align_x, align_y) = label_position(rect, position, entry.kind, entry.value);
+
+                let char_width = size * 0.6;
+                let text_width = text.len() as f32 * char_width + 6.0;
+                let text_height = size * 1.2 + 4.0;
+
+                let x = match align_x {
+                    crate::core::alignment::Horizontal::Left => lx,
+                    crate::core::alignment::Horizontal::Center => lx - text_width / 2.0,
+                    crate::core::alignment::Horizontal::Right => lx - text_width,
+                };
+                let y = match align_y {
+                    crate::core::alignment::Vertical::Top => ly,
+                    crate::core::alignment::Vertical::Center => ly - text_height / 2.0,
+                    crate::core::alignment::Vertical::Bottom => ly - text_height,
+                };
+
+                Some(Rectangle {
+                    x,
+                    y,
+                    width: text_width,
+                    height: text_height,
+                })
+            })
+            .collect()
     }
 
     /// Draws the waterfall chart
@@ -169,10 +229,11 @@ where
         let layout_bounds = layout.bounds();
         let mut frame = Frame::new(renderer, layout_bounds.size());
 
-        // Waterfall uses semantic colors directly from the design system.
         let increase_color = crate::color::Color::Success.resolve(background, text_pair, &seed, None);
         let decrease_color = crate::color::Color::Danger.resolve(background, text_pair, &seed, None);
         let total_color = crate::color::Color::Primary.resolve(background, text_pair, &seed, None);
+
+        let mut bar_colors: Vec<crate::core::Color> = Vec::with_capacity(state.rects.len());
 
         // Draw bars
         for (i, (rect, entry)) in state.rects.iter().zip(self.data.entries.iter()).enumerate() {
@@ -185,6 +246,7 @@ where
                     EntryKind::Total => total_color,
                 }
             };
+            bar_colors.push(color);
 
             let path = Path::new(|builder| {
                 builder.rectangle(
@@ -195,7 +257,7 @@ where
             frame.fill(&path, color);
         }
 
-        // Draw connector lines between bars
+        // Connector lines
         if self.data.connector && state.rects.len() > 1 {
             let connector_color = crate::core::Color {
                 a: 0.4,
@@ -205,8 +267,6 @@ where
             for i in 0..state.rects.len() - 1 {
                 let from_rect = &state.rects[i];
                 let to_rect = &state.rects[i + 1];
-
-                // Connect from the running total level of current bar to next bar
                 let y = state.tops[i];
 
                 let path = Path::new(|builder| {
@@ -218,37 +278,161 @@ where
             }
         }
 
-        // Draw labels above bars
-        let label_size = theme.font_size();
-        let label_color = theme.text_color().resolve(background, text_pair, &seed, None);
+        // Labels
+        let chart_label = self.data.label.as_ref();
+        let theme_default_size = theme.font_size();
+        let total_entries = self.data.entries.len();
 
-        for (rect, entry) in state.rects.iter().zip(self.data.entries.iter()) {
-            if let Some(label_text) = &entry.label {
-                let negative = entry.value < 0.0;
-                let (y, align_y) = if negative {
-                    (rect.y + rect.height + 4.0, crate::core::alignment::Vertical::Top)
-                } else {
-                    (rect.y - 4.0, crate::core::alignment::Vertical::Bottom)
-                };
+        for (i, (rect, entry)) in state.rects.iter().zip(self.data.entries.iter()).enumerate() {
+            let LabelDraw {
+                text: label_text,
+                position,
+                size,
+            } = match resolve_label(entry, chart_label, theme_default_size) {
+                Some(d) => d,
+                None => continue,
+            };
 
-                frame.fill_text(CanvasText {
-                    content: label_text.clone(),
-                    position: crate::core::Point::new(rect.x + rect.width / 2.0, y),
-                    color: label_color,
-                    size: label_size.into(),
-                    font: theme.font(),
-                    align_x: crate::core::alignment::Horizontal::Center.into(),
-                    align_y,
-                    line_height: crate::core::text::LineHeight::default(),
-                    shaping: crate::core::text::Shaping::Basic,
-                    ..CanvasText::default()
-                });
+            if !chart_label
+                .map(|l| l.show.allows(i, total_entries, entry.kind))
+                .unwrap_or(true)
+            {
+                continue;
             }
+
+            let (lx, ly, align_x, align_y) = label_position(rect, position, entry.kind, entry.value);
+
+            // Background fill
+            if let Some(label) = chart_label
+                && let Some(fill_spec) = label.fill
+                && let Some(Some(lr)) = state.label_rects.get(i)
+            {
+                let fill_resolved = fill_spec.resolve(background, text_pair, &seed, None);
+                let fill_path = Path::new(|b| {
+                    b.rectangle(
+                        crate::core::Point::new(lr.x, lr.y),
+                        crate::core::Size::new(lr.width, lr.height),
+                    );
+                });
+                frame.fill(&fill_path, fill_resolved);
+            }
+
+            let label_color_spec = chart_label
+                .and_then(|l| l.color)
+                .unwrap_or(crate::color::Color::CONTRAST);
+            let label_color = match position {
+                Position::Above => label_color_spec.resolve(background, text_pair, &seed, None),
+                _ => label_color_spec.resolve(bar_colors[i], text_pair, &seed, Some(background)),
+            };
+
+            let base_font = theme.data_label_text().resolved_font(theme.font());
+            let mut font = chart_label
+                .map(|l| l.text.resolved_font(base_font))
+                .unwrap_or(base_font);
+            if let Some(w) = chart_label.and_then(|l| l.text.weight) {
+                font.weight = w;
+            }
+            if let Some(s) = chart_label.and_then(|l| l.text.style) {
+                font.style = s;
+            }
+
+            frame.fill_text(CanvasText {
+                content: label_text,
+                position: crate::core::Point::new(lx, ly),
+                color: label_color,
+                size: size.into(),
+                font,
+                align_x: align_x.into(),
+                align_y,
+                line_height: crate::core::text::LineHeight::default(),
+                shaping: crate::core::text::Shaping::Basic,
+                ..CanvasText::default()
+            });
         }
 
         let geometry = frame.into_geometry();
         renderer.with_translation(crate::core::Vector::new(layout_bounds.x, layout_bounds.y), |renderer| {
             renderer.draw_geometry(geometry);
         });
+    }
+}
+
+/// Resolves the rendered text, position, and font size for an entry's label.
+///
+/// Per-entry static `text` overrides chart-wide `Label.format(value)`. When
+/// neither source produces text the entry has no label.
+fn resolve_label(
+    entry: &crate::mark::waterfall::Entry,
+    chart_label: Option<&crate::mark::waterfall::Label>,
+    default_size: f32,
+) -> Option<LabelDraw> {
+    let position = chart_label.map(|l| l.position).unwrap_or(Position::Above);
+    let size = chart_label
+        .and_then(|l| l.text.size.map(|p| p.0))
+        .unwrap_or(default_size);
+
+    if let Some(static_text) = &entry.text {
+        return Some(LabelDraw {
+            text: static_text.clone(),
+            position,
+            size,
+        });
+    }
+
+    let label = chart_label?;
+    let text = (label.format)(entry.value);
+    if text.is_empty() {
+        return None;
+    }
+    Some(LabelDraw { text, position, size })
+}
+
+/// Computes label position and alignment for a waterfall bar.
+///
+/// `Above` flips below the bar for negative values so labels always sit on the
+/// outside edge (above for positive bars, below for negative).
+fn label_position(
+    rect: &Rectangle,
+    position: Position,
+    kind: EntryKind,
+    value: f64,
+) -> (
+    f32,
+    f32,
+    crate::core::alignment::Horizontal,
+    crate::core::alignment::Vertical,
+) {
+    use crate::core::alignment::{Horizontal, Vertical};
+
+    let negative = match kind {
+        EntryKind::Decrease => true,
+        EntryKind::Increase => false,
+        EntryKind::Total => value < 0.0,
+    };
+    let cx = rect.x + rect.width / 2.0;
+
+    match position {
+        Position::Above => {
+            if negative {
+                (cx, rect.y + rect.height + 4.0, Horizontal::Center, Vertical::Top)
+            } else {
+                (cx, rect.y - 4.0, Horizontal::Center, Vertical::Bottom)
+            }
+        }
+        Position::End => {
+            if negative {
+                (cx, rect.y + rect.height - 4.0, Horizontal::Center, Vertical::Bottom)
+            } else {
+                (cx, rect.y + 4.0, Horizontal::Center, Vertical::Top)
+            }
+        }
+        Position::Center => (cx, rect.y + rect.height / 2.0, Horizontal::Center, Vertical::Center),
+        Position::Base => {
+            if negative {
+                (cx, rect.y + 4.0, Horizontal::Center, Vertical::Top)
+            } else {
+                (cx, rect.y + rect.height - 4.0, Horizontal::Center, Vertical::Bottom)
+            }
+        }
     }
 }
