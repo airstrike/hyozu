@@ -1,12 +1,12 @@
-//! KPI panel — a 2×3 grid of scalar chips.
+//! KPI panel — a 3×2 grid of scalar chips.
 //!
-//! Each chip renders one metric's current scalar value with an inline
-//! picker to change which metric it shows. The panel emits one
-//! `tatami::Query` with [`tatami::Axes::Scalar`] and one metric per
-//! pinned slot; the result's values array aligns to the pinned-slot
-//! sequence (unpinned slots skipped).
+//! Each chip is display-only: big formatted value with the metric's name
+//! beneath. The panel emits one `tatami::Query` with [`tatami::Axes::Scalar`]
+//! and one metric per pinned slot; the result's values array aligns to the
+//! pinned-slot sequence (unpinned slots skipped). Slots are configured via
+//! [`crate::DashboardSpec`]; there's no runtime picker.
 
-use iced::widget::{Column, Renderer, Row, container, pick_list, text};
+use iced::widget::{Column, Renderer, Row, container, text};
 use iced::{Alignment, Element, Length, Theme};
 
 use tatami::query::{Options, Tuple};
@@ -14,10 +14,10 @@ use tatami::schema::{Name, Schema};
 
 use crate::{dashboard, metric};
 
-/// How many scalar chips the KPI panel renders. Laid out as 2 rows × 3 cols.
+/// How many scalar chips the KPI panel renders. Laid out as 3 rows × 2 cols.
 pub const SLOTS: usize = 6;
 /// Chips per row in the panel body.
-const CHIPS_PER_ROW: usize = 3;
+const CHIPS_PER_ROW: usize = 2;
 
 /// Per-panel bindings — one metric pick per chip slot.
 #[derive(Debug, Clone)]
@@ -85,42 +85,12 @@ impl State {
     }
 }
 
-/// Messages produced by the chip pickers.
-#[derive(Debug, Clone)]
-#[non_exhaustive]
-pub enum Message {
-    /// User picked (or cleared) a metric for the slot at `index`.
-    SlotPicked {
-        /// Slot index in [0, [`SLOTS`]).
-        index: usize,
-        /// New pick — `None` clears the slot.
-        pick: Option<metric::Pick>,
-    },
-}
-
-/// Apply a picker change. Returns `true` when the query must re-fire.
-pub fn apply(state: &mut State, msg: Message) -> bool {
-    match msg {
-        Message::SlotPicked { index, pick } => {
-            let Some(slot) = state.metrics.get_mut(index) else {
-                return false;
-            };
-            if *slot == pick {
-                return false;
-            }
-            *slot = pick;
-            true
-        }
-    }
-}
-
-/// Render the 2×3 chip grid from the query's scalar result.
+/// Render the 3×2 chip grid from the query's scalar result.
 #[must_use]
 pub fn render<'a>(
     results: &'a tatami::Results,
     schema: &'a Schema,
     state: &State,
-    metric_options: Vec<metric::Choice>,
 ) -> Element<'a, dashboard::Message, Theme, Renderer> {
     let values: &[tatami::Cell] = match results {
         tatami::Results::Scalar(s) => s.values(),
@@ -133,7 +103,7 @@ pub fn render<'a>(
 
     for (i, pick) in state.metrics.iter().enumerate() {
         let value_cell = slot_indices[i].and_then(|idx| values.get(idx));
-        row_children.push(chip(i, *pick, value_cell, metric_options.clone()));
+        row_children.push(chip(*pick, schema, value_cell));
         if row_children.len() == CHIPS_PER_ROW {
             let finished = std::mem::replace(&mut row_children, Vec::with_capacity(CHIPS_PER_ROW));
             rows.push(
@@ -153,50 +123,34 @@ pub fn render<'a>(
         );
     }
 
-    container(Column::with_children(rows).spacing(8))
+    container(Column::with_children(rows).spacing(12))
         .padding([8, 12])
         .into()
 }
 
-/// Render one chip: big value on top, inline metric picker below.
+/// Render one chip: big value on top, metric name beneath.
 fn chip<'a>(
-    slot_index: usize,
     pick: Option<metric::Pick>,
+    schema: &'a Schema,
     value_cell: Option<&tatami::Cell>,
-    options: Vec<metric::Choice>,
 ) -> Element<'a, dashboard::Message, Theme, Renderer> {
     let value_text = match (pick, value_cell) {
         (Some(_), Some(cell)) => format_cell(cell),
         _ => "—".to_owned(),
     };
+    let label = pick.and_then(|p| metric::label(schema, p)).unwrap_or("(unset)");
 
-    let selected = pick.and_then(|p| options.iter().find(|c| c.pick == p).cloned());
-    let picker = pick_list(selected, options, |c: &metric::Choice| c.label.clone())
-        .on_select(move |c: metric::Choice| {
-            dashboard::Message::Kpi(Message::SlotPicked {
-                index: slot_index,
-                pick: Some(c.pick),
-            })
-        })
-        .placeholder("(pick metric)")
-        .text_size(10)
-        .padding([2, 6])
-        .width(Length::Fill);
-
-    Column::with_children([text(value_text).size(22).into(), picker.into()])
-        .spacing(4)
+    Column::with_children([text(value_text).size(22).into(), text(label.to_owned()).size(11).into()])
+        .spacing(2)
         .align_x(Alignment::Start)
         .width(Length::Fill)
         .into()
 }
 
-/// No title-bar chrome — the per-chip pickers live in the body.
+/// KPI has no title-bar controls — chips are display-only.
 #[must_use]
-pub fn chrome<'a>(
-    _state: &State,
-    _metric_options: Vec<metric::Choice>,
-) -> Element<'a, dashboard::Message, Theme, Renderer> {
-    text("").into()
+pub fn chrome<'a>() -> Element<'a, dashboard::Message, Theme, Renderer> {
+    Row::new().into()
 }
 
 fn format_cell(cell: &tatami::Cell) -> String {
@@ -268,27 +222,5 @@ mod tests {
         assert_eq!(indices[0], Some(0));
         assert_eq!(indices[1], None);
         assert_eq!(indices[3], Some(1));
-    }
-
-    #[test]
-    fn apply_picks_and_clears() {
-        let mut state = State::default();
-        assert!(apply(&mut state, Message::SlotPicked {
-            index: 2,
-            pick: Some(metric::Pick::Metric(5)),
-        },));
-        assert_eq!(state.metrics[2], Some(metric::Pick::Metric(5)));
-        assert!(apply(&mut state, Message::SlotPicked { index: 2, pick: None },));
-        assert!(state.metrics[2].is_none());
-    }
-
-    #[test]
-    fn apply_out_of_range_is_noop() {
-        let mut state = State::default();
-        let unchanged = apply(&mut state, Message::SlotPicked {
-            index: 999,
-            pick: Some(metric::Pick::Metric(0)),
-        });
-        assert!(!unchanged);
     }
 }

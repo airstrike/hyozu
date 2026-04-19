@@ -50,8 +50,6 @@ pub enum Tile {
 pub enum Message {
     /// A panel's query completed.
     PanelDone(Panel, Result<tatami::Results, String>),
-    /// User interacted with the KPI panel's chrome.
-    Kpi(kpi::Message),
     /// User interacted with the Map panel's chrome.
     Map(map::Message),
     /// User interacted with the Rail panel's chrome.
@@ -290,13 +288,6 @@ impl Dashboard {
                 self.panels.insert(panel, QueryState::Err(error));
                 Task::none()
             }
-            Message::Kpi(msg) => {
-                if kpi::apply(&mut self.kpi, msg) {
-                    self.dispatch(Panel::Kpi).unwrap_or_else(Task::none)
-                } else {
-                    Task::none()
-                }
-            }
             Message::Map(msg) => {
                 if map::apply(&mut self.map, &self.schema, msg) {
                     self.dispatch(Panel::Map).unwrap_or_else(Task::none)
@@ -427,9 +418,7 @@ impl Dashboard {
     fn panel_body(&self, panel: Panel) -> Element<'_, Message> {
         let state = self.panels.get(&panel);
         match (panel, state) {
-            (Panel::Kpi, Some(QueryState::Ok(results))) => {
-                kpi::render(results, &self.schema, &self.kpi, metric::choices(&self.schema))
-            }
+            (Panel::Kpi, Some(QueryState::Ok(results))) => kpi::render(results, &self.schema, &self.kpi),
             (Panel::Map, Some(QueryState::Ok(_))) => match self.map_data.as_ref() {
                 Some(data) => hyozu::chart(data)
                     .height(Length::Fill)
@@ -461,7 +450,7 @@ impl Dashboard {
         metric_options: Vec<metric::Choice>,
     ) -> Element<'_, Message> {
         match panel {
-            Panel::Kpi => kpi::chrome(&self.kpi, metric_options),
+            Panel::Kpi => kpi::chrome(),
             Panel::Map => map::chrome(&self.schema, &self.map, dim_options, metric_options),
             Panel::Rail => rail::chrome(&self.schema, &self.rail, dim_options, metric_options),
             Panel::Line => line::chrome(&self.schema, &self.line, dim_options, metric_options),
