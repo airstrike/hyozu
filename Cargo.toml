@@ -9,9 +9,17 @@ iced_widget = { version = "0.15.0-dev", features = ["canvas"] }
 jiff = "0.2"
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
+# Tatami cube adapter — feature-gated. Lives in `src/tatami/` and converts
+# tatami::Results variants into hyozu marks + iced Elements. Path dep on the
+# local tatami core crate; no Polars transitive (tatami-inmem is not pulled in).
+tatami = { path = "../tatami/tatami", optional = true }
 
 [features]
 geojson = ["dep:serde", "dep:serde_json"]
+# Enables the `hyozu::tatami` adapter module — converters from tatami OLAP
+# cube query results into hyozu marks and iced widgets. Pull in with
+# `hyozu = { ..., features = ["tatami"] }` from downstream dashboards.
+tatami = ["dep:tatami"]
 
 [dev-dependencies]
 iced = { version = "0.15.0-dev", features = ["debug", "tokio"] }

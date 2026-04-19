@@ -13,6 +13,8 @@ pub mod props;
 pub mod scale;
 pub mod sparkline;
 pub mod target;
+#[cfg(feature = "tatami")]
+pub mod tatami;
 pub mod text;
 pub mod theme;
 
