@@ -1,74 +1,54 @@
-//! drill_down — Hewton Hotels multi-panel sales dashboard.
+//! Hewton Hotels dashboard binary.
 //!
-//! Loads three assets in parallel at startup: a facts CSV parsed via Polars
-//! on the blocking thread pool, plus a Natural Earth admin_1 GeoJSON
-//! fetched over HTTPS. Per-state centroids are derived from the loaded
-//! GeoJSON, so there are only two async asset slots to track. Once all
-//! assets are in, the app constructs an `InMemoryCube` from the DataFrame
-//! + schema and hands off to the `Dashboard`.
+//! Loads the hewton CSV + Natural Earth admin_1 GeoJSON in parallel, builds
+//! an `InMemoryCube`, resolves the cube's hewton-specific vocabulary into
+//! schema indices once, and hands the whole thing to the schema-blind
+//! `drill_down::Dashboard` as a `DashboardSpec`. Every name referenced
+//! below lives either here or in `data::schema::hewton_schema`.
 
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use iced::widget::{column, container, text};
 use iced::{Element, Length, Task};
 
+use hyozu::MapScope;
 use polars_core::prelude::DataFrame;
+use tatami::query::{MemberRef, Path};
+use tatami::schema::{Name, Schema};
 use tatami_inmem::InMemoryCube;
 
-use drill_down::ui::dashboard::{self, Dashboard};
-use drill_down::{data, ui};
+use drill_down::panel::{kpi, line, map, rail};
+use drill_down::{DashboardSpec, axis, dashboard, data, metric};
 
 /// Natural Earth 110m admin_1 states/provinces GeoJSON. Features carry a
-/// `postal` property (two-letter USPS code) that becomes the feature id; the
-/// choropleth entries and centroid lookup key off that code.
+/// `postal` property (two-letter USPS code) that becomes the feature id;
+/// the choropleth entries and centroid lookup key off that code.
 const STATES_URL: &str = "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_1_states_provinces.geojson";
 
 fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
-        .title("Drill Down — Hewton Hotels")
+        .title("Drill Down \u{2014} Hewton Hotels")
         .window_size((1400.0, 900.0))
         .run()
 }
 
-/// Top-level application state. The large variants are boxed so the enum's
-/// stack footprint stays flat across state transitions.
 enum App {
-    /// Assets are loading in parallel. Each slot starts `None` and is
-    /// populated by its `*Loaded` message.
     Loading(Box<LoadingState>),
-    /// Both assets loaded and the cube was constructed.
-    Loaded(Box<Dashboard>),
-    /// An unrecoverable error occurred during load or cube construction.
+    Loaded(Box<dashboard::Dashboard>),
     Failed(data::Error),
 }
 
-/// In-flight asset slots while loading.
 struct LoadingState {
     facts: Option<DataFrame>,
     geo: Option<Arc<hyozu::GeoData>>,
 }
 
-/// Application-level messages.
 #[derive(Debug)]
 enum Message {
-    /// Fact CSV finished loading (success or failure).
     FactsLoaded(Result<DataFrame, data::Error>),
-    /// GeoJSON finished loading (success or failure).
     GeoLoaded(Result<Arc<hyozu::GeoData>, data::Error>),
-    /// A panel's query finished.
-    PanelDone(ui::Panel, Result<tatami::Results, String>),
-    /// The user clicked a measure toggle.
-    SetMeasure(ui::Measure),
-    /// The user clicked a period toggle.
-    #[allow(dead_code)]
-    SetPeriod(ui::Period),
-    /// Back button.
-    Back,
-    /// Forward button.
-    Forward,
-    /// Retry loading after a failure.
-    #[allow(dead_code)]
-    Retry,
+    Dashboard(dashboard::Message),
 }
 
 impl App {
@@ -102,62 +82,19 @@ impl App {
                 *self = App::Failed(e);
                 Task::none()
             }
-            Message::PanelDone(panel, outcome) => {
+            Message::Dashboard(msg) => {
                 if let App::Loaded(dashboard) = self {
-                    dashboard
-                        .update(dashboard::Message::PanelDone(panel, outcome))
-                        .map(lift_dashboard_message)
+                    dashboard.update(msg).map(Message::Dashboard)
                 } else {
                     Task::none()
                 }
-            }
-            Message::SetMeasure(m) => {
-                if let App::Loaded(dashboard) = self {
-                    let v = ui::View {
-                        measure: m,
-                        ..dashboard.view
-                    };
-                    dashboard.set_view(v).map(lift_dashboard_message)
-                } else {
-                    Task::none()
-                }
-            }
-            Message::SetPeriod(p) => {
-                if let App::Loaded(dashboard) = self {
-                    let v = ui::View {
-                        period: p,
-                        ..dashboard.view
-                    };
-                    dashboard.set_view(v).map(lift_dashboard_message)
-                } else {
-                    Task::none()
-                }
-            }
-            Message::Back => {
-                if let App::Loaded(dashboard) = self {
-                    dashboard.back().map(lift_dashboard_message)
-                } else {
-                    Task::none()
-                }
-            }
-            Message::Forward => {
-                if let App::Loaded(dashboard) = self {
-                    dashboard.forward().map(lift_dashboard_message)
-                } else {
-                    Task::none()
-                }
-            }
-            Message::Retry => {
-                let (fresh, task) = App::new();
-                *self = fresh;
-                task
             }
         }
     }
 
     fn view(&self) -> Element<'_, Message> {
         match self {
-            App::Loading(_) => container(text("Loading…").size(24))
+            App::Loading(_) => container(text("Loading\u{2026}").size(24))
                 .center_x(Length::Fill)
                 .center_y(Length::Fill)
                 .into(),
@@ -167,18 +104,10 @@ impl App {
                     .center_y(Length::Fill)
                     .into()
             }
-            App::Loaded(dashboard) => dashboard.view().map(lift_dashboard_message),
+            App::Loaded(dashboard) => dashboard.view().map(Message::Dashboard),
         }
     }
 
-    /// Check whether both assets are loaded; if so, derive centroids, build
-    /// the cube, and transition to `Loaded`. On cube-build failure,
-    /// transition to `Failed`.
-    ///
-    /// Checks presence *before* consuming any slot — a naive destructure via
-    /// `facts.take()` / `geo.take()` drains those slots even when the match
-    /// fails, which permanently strands the loader if the other asset hasn't
-    /// arrived yet.
     fn try_transition(&mut self) -> Task<Message> {
         let App::Loading(state) = self else {
             return Task::none();
@@ -196,7 +125,7 @@ impl App {
                 return Task::none();
             }
         };
-        let cube = match InMemoryCube::new(df, schema) {
+        let cube = match InMemoryCube::new(df, schema.clone()) {
             Ok(c) => Arc::new(c),
             Err(e) => {
                 *self = App::Failed(e.into());
@@ -205,27 +134,147 @@ impl App {
         };
         let centroids = Arc::new(data::Centroids::from_geo(&geo));
 
-        let initial_query = ui::queries::nation_default();
-        let (dashboard, task) = Dashboard::new(cube, geo, centroids, initial_query, ui::View::default());
+        let spec = match build_spec(&schema) {
+            Ok(s) => s,
+            Err(e) => {
+                *self = App::Failed(data::Error::Parse {
+                    asset: "DashboardSpec",
+                    detail: e,
+                });
+                return Task::none();
+            }
+        };
+        let (dashboard, task) = dashboard::Dashboard::new(cube, schema, geo, centroids, spec);
         *self = App::Loaded(Box::new(dashboard));
-        task.map(lift_dashboard_message)
+        task.map(Message::Dashboard)
     }
 }
 
-/// Lift a `dashboard::Message` into the outer `Message`. Every variant of
-/// `dashboard::Message` has a matching outer variant; when dashboard grows
-/// a new variant, extend this match in lockstep.
-fn lift_dashboard_message(msg: dashboard::Message) -> Message {
-    match msg {
-        dashboard::Message::PanelDone(p, r) => Message::PanelDone(p, r),
-        dashboard::Message::SetMeasure(m) => Message::SetMeasure(m),
-        dashboard::Message::SetPeriod(p) => Message::SetPeriod(p),
-        dashboard::Message::Back => Message::Back,
-        dashboard::Message::Forward => Message::Forward,
-    }
+// ── Hewton-specific spec binding ───────────────────────────────────────────
+
+/// Resolve hewton's vocabulary against the schema and assemble the
+/// concrete [`DashboardSpec`] for this binary. This is the only place
+/// names appear — everything else is indices.
+fn build_spec(schema: &Schema) -> Result<DashboardSpec, String> {
+    let geo_dim = dim_index(schema, "Geography")?;
+    let geo_state_level = level_index(schema, geo_dim, "Default", "State")?;
+    let geo_country_level = level_index(schema, geo_dim, "Default", "Country")?;
+
+    let brand_tier_dim = dim_index(schema, "BrandTier")?;
+    let brand_tier_level = level_index(schema, brand_tier_dim, "Default", "Tier")?;
+
+    let time_dim = dim_index(schema, "Time")?;
+    let quarter_level = level_index(schema, time_dim, "Fiscal", "Quarter")?;
+
+    let revenue = metric::Pick::Metric(metric_index(schema, "Revenue")?);
+    let room_nights_sold = metric::Pick::Measure(measure_index(schema, "room_nights_sold")?);
+
+    let initial_slicer = vec![
+        MemberRef::new(
+            parse_name("Time")?,
+            parse_name("Fiscal")?,
+            Path::of(parse_name("FY2026")?),
+        ),
+        MemberRef::scenario(parse_name("Actual")?),
+    ];
+
+    let kpi = kpi::State { metric: Some(revenue) };
+    let map = map::State {
+        rows: axis::Pick::Pick {
+            dim: geo_dim,
+            hierarchy: geo_state_level.hierarchy,
+            level: geo_state_level.level,
+        },
+        fill: Some(revenue),
+        size: Some(room_nights_sold),
+        scope: MapScope::UnitedStates,
+    };
+    let rail = rail::State {
+        rows: axis::Pick::Pick {
+            dim: brand_tier_dim,
+            hierarchy: brand_tier_level.hierarchy,
+            level: brand_tier_level.level,
+        },
+        metric: Some(revenue),
+        top_n: NonZeroUsize::new(10).expect("10 > 0"),
+    };
+    let line = line::State {
+        rows: axis::Pick::Pick {
+            dim: time_dim,
+            hierarchy: quarter_level.hierarchy,
+            level: quarter_level.level,
+        },
+        metric: Some(revenue),
+    };
+
+    let _ = geo_country_level;
+
+    Ok(DashboardSpec {
+        title: "Hewton Hotels".to_owned(),
+        initial_slicer,
+        kpi,
+        map,
+        rail,
+        line,
+    })
 }
 
-// ── Async load helpers ────────────────────────────────────────────────────
+struct LevelIndex {
+    hierarchy: usize,
+    level: usize,
+}
+
+fn parse_name(s: &str) -> Result<Name, String> {
+    Name::parse(s).map_err(|e| format!("name {s}: {e}"))
+}
+
+fn dim_index(schema: &Schema, name: &str) -> Result<usize, String> {
+    schema
+        .dimensions
+        .iter()
+        .position(|d| d.name.as_str() == name)
+        .ok_or_else(|| format!("dimension {name} not in schema"))
+}
+
+fn level_index(schema: &Schema, dim: usize, hierarchy: &str, level: &str) -> Result<LevelIndex, String> {
+    let d = schema
+        .dimensions
+        .get(dim)
+        .ok_or_else(|| format!("dim index {dim} out of range"))?;
+    let h_idx = d
+        .hierarchies
+        .iter()
+        .position(|h| h.name.as_str() == hierarchy)
+        .ok_or_else(|| format!("hierarchy {hierarchy} not under dim {}", d.name.as_str()))?;
+    let h = &d.hierarchies[h_idx];
+    let l_idx = h
+        .levels
+        .iter()
+        .position(|l| l.name.as_str() == level)
+        .ok_or_else(|| format!("level {level} not under {}/{hierarchy}", d.name.as_str()))?;
+    Ok(LevelIndex {
+        hierarchy: h_idx,
+        level: l_idx,
+    })
+}
+
+fn measure_index(schema: &Schema, name: &str) -> Result<usize, String> {
+    schema
+        .measures
+        .iter()
+        .position(|m| m.name.as_str() == name)
+        .ok_or_else(|| format!("measure {name} not in schema"))
+}
+
+fn metric_index(schema: &Schema, name: &str) -> Result<usize, String> {
+    schema
+        .metrics
+        .iter()
+        .position(|m| m.name.as_str() == name)
+        .ok_or_else(|| format!("metric {name} not in schema"))
+}
+
+// ── Async load helpers ─────────────────────────────────────────────────────
 
 async fn load_bytes(asset: &'static str) -> Result<Vec<u8>, data::Error> {
     let path = format!("{}/assets/{asset}", env!("CARGO_MANIFEST_DIR"));

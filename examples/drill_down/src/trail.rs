@@ -1,11 +1,9 @@
 //! Navigation trail — a linear history of `tatami::Query` entries with a
 //! cursor for back/forward.
 //!
-//! The `push` discipline is truncate-on-diverge (pushing while the cursor
-//! is not at the end discards the future) and adjacent-duplicate no-op
-//! (pushing a query identical to the current one leaves the trail
-//! unchanged). These match icebreaker's `History` semantics and mirror the
-//! pre-tatami draft of this example.
+//! `push` is truncate-on-diverge (pushing while the cursor is not at the
+//! end discards the future) and adjacent-duplicate no-op (pushing a query
+//! identical to the current one leaves the trail unchanged).
 
 /// Ordered stack of queries plus a cursor pointing at the currently-active
 /// entry.
@@ -38,8 +36,6 @@ impl Trail {
     /// `current()`) is a no-op.
     pub fn push(&mut self, q: tatami::Query) {
         if self.entries[self.cursor] == q {
-            // Adjacent-duplicate: no-op. Drop any forward history too,
-            // matching icebreaker's "committing to the branch" semantics.
             self.entries.truncate(self.cursor + 1);
             return;
         }
@@ -78,11 +74,8 @@ impl Trail {
         self.cursor + 1 < self.entries.len()
     }
 
-    /// Rebuild a trail from persisted entries. Empty input yields an
-    /// empty-cursor panic-guarded default — callers should prefer
-    /// [`Trail::new`] when they have a valid initial query.
-    ///
-    /// Returns `None` if `entries` is empty.
+    /// Rebuild a trail from persisted entries. Returns `None` if `entries`
+    /// is empty.
     #[must_use]
     pub fn from_data(entries: Vec<tatami::Query>) -> Option<Self> {
         if entries.is_empty() {
@@ -145,7 +138,6 @@ mod tests {
         trail.push(q("B"));
         trail.push(q("C"));
         assert!(trail.back());
-        // cursor at B; push D → should drop C and land on D
         trail.push(q("D"));
         assert_eq!(trail.current().metrics[0].as_str(), "D");
         assert!(!trail.can_forward());

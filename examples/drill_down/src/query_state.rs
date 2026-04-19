@@ -2,7 +2,6 @@
 //!
 //! Each panel's latest `tatami::Query` is either in flight, completed
 //! successfully with a `Results`, or completed with an error string.
-//! Mirrors hewton's `QueryState`.
 
 /// Per-panel state of the most recent async query.
 #[derive(Debug)]
