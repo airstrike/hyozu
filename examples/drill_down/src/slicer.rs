@@ -14,8 +14,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use iced::widget::{Row, button, pick_list, row, text};
-use iced::{Alignment, Element, Length, Task};
+use iced::widget::{Column, Row, button, container, pick_list, row, text};
+use iced::{Alignment, Element, Length, Padding, Task};
 
 use tatami::query::{MemberRef, Tuple};
 use tatami::schema::{Dimension, Schema};
@@ -23,10 +23,21 @@ use tatami_inmem::InMemoryCube;
 
 /// Fixed picker width in logical pixels.
 const PICKER_WIDTH: f32 = 180.0;
-/// Spacing between blocks in the slicer row.
-const ROW_SPACING: f32 = 8.0;
+/// Blocks per grid row. Six schema dims typically fit as 2 × 3.
+const BLOCKS_PER_ROW: usize = 3;
+/// Horizontal spacing between blocks in a grid row.
+const ROW_SPACING: f32 = 12.0;
+/// Vertical spacing between stacked rows.
+const COLUMN_SPACING: f32 = 6.0;
 /// Spacing between children within a single dim block.
 const BLOCK_SPACING: f32 = 4.0;
+/// Padding around the slicer grid so chips don't hug the outer container.
+const GRID_PADDING: Padding = Padding {
+    top: 4.0,
+    right: 8.0,
+    bottom: 4.0,
+    left: 8.0,
+};
 /// Font size for dim labels and hints.
 const LABEL_SIZE: f32 = 12.0;
 /// Font size for picker text.
@@ -156,19 +167,35 @@ impl State {
     }
 }
 
-/// Render the slicer row — one block per schema dim, laid out horizontally
-/// with wrapping.
+/// Render the slicer grid — one block per schema dim, arranged with
+/// [`BLOCKS_PER_ROW`] blocks per row so six dims land as a compact 2×3.
 pub fn view<'a>(state: &'a State, schema: &'a Schema) -> Element<'a, Message> {
-    let blocks: Vec<Element<'a, Message>> = schema
-        .dimensions
-        .iter()
-        .enumerate()
-        .map(|(dim_index, dim)| dim_block(dim_index, dim, state))
-        .collect();
-    Row::with_children(blocks)
-        .spacing(ROW_SPACING)
-        .align_y(Alignment::Center)
-        .wrap()
+    let mut row_children: Vec<Element<'a, Message>> = Vec::with_capacity(BLOCKS_PER_ROW);
+    let mut rows: Vec<Element<'a, Message>> = Vec::new();
+
+    for (dim_index, dim) in schema.dimensions.iter().enumerate() {
+        row_children.push(dim_block(dim_index, dim, state));
+        if row_children.len() == BLOCKS_PER_ROW {
+            let finished = std::mem::replace(&mut row_children, Vec::with_capacity(BLOCKS_PER_ROW));
+            rows.push(
+                Row::with_children(finished)
+                    .spacing(ROW_SPACING)
+                    .align_y(Alignment::Center)
+                    .into(),
+            );
+        }
+    }
+    if !row_children.is_empty() {
+        rows.push(
+            Row::with_children(row_children)
+                .spacing(ROW_SPACING)
+                .align_y(Alignment::Center)
+                .into(),
+        );
+    }
+
+    container(Column::with_children(rows).spacing(COLUMN_SPACING))
+        .padding(GRID_PADDING)
         .into()
 }
 

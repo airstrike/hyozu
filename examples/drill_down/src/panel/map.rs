@@ -190,6 +190,7 @@ pub fn chrome<'a>(
     let dim_picker = pick_list(selected_dim, dim_options, |c: &axis::DimChoice| c.label.clone())
         .on_select(|c: axis::DimChoice| dashboard::Message::Map(Message::RowsDimPicked(Some(c))))
         .placeholder("(rows)")
+        .text_size(12)
         .width(Length::Fixed(140.0));
 
     let level_element: Element<'a, dashboard::Message, Theme, Renderer> = match state.rows {
@@ -202,6 +203,7 @@ pub fn chrome<'a>(
             pick_list(selected, options, |c: &axis::LevelChoice| c.label.clone())
                 .on_select(|c: axis::LevelChoice| dashboard::Message::Map(Message::RowsLevelPicked(Some(c))))
                 .placeholder("(level)")
+                .text_size(12)
                 .width(Length::Fixed(140.0))
                 .into()
         }
@@ -216,6 +218,7 @@ pub fn chrome<'a>(
     })
     .on_select(|c: metric::Choice| dashboard::Message::Map(Message::FillPicked(Some(c.pick))))
     .placeholder("(fill)")
+    .text_size(12)
     .width(Length::Fixed(160.0));
 
     let size_selected = state
@@ -224,21 +227,24 @@ pub fn chrome<'a>(
     let size_picker = pick_list(size_selected, metric_options, |c: &metric::Choice| c.label.clone())
         .on_select(|c: metric::Choice| dashboard::Message::Map(Message::SizePicked(Some(c.pick))))
         .placeholder("(size)")
+        .text_size(12)
         .width(Length::Fixed(160.0));
 
-    row![
-        text("Rows").size(12),
-        dim_picker,
-        level_element,
-        text("Fill").size(12),
-        fill_picker,
-        text("Size").size(12),
-        size_picker,
-    ]
-    .spacing(6)
-    .align_y(Alignment::Center)
-    .wrap()
-    .into()
+    let rows_group = row![text("Rows").size(12), dim_picker, level_element]
+        .spacing(4)
+        .align_y(Alignment::Center);
+    let fill_group = row![text("Fill").size(12), fill_picker]
+        .spacing(4)
+        .align_y(Alignment::Center);
+    let size_group = row![text("Size").size(12), size_picker]
+        .spacing(4)
+        .align_y(Alignment::Center);
+
+    row![rows_group, fill_group, size_group]
+        .spacing(12)
+        .align_y(Alignment::Center)
+        .wrap()
+        .into()
 }
 
 fn variant_tag(results: &tatami::Results) -> &'static str {

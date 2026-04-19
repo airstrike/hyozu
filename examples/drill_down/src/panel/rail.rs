@@ -95,7 +95,10 @@ pub fn apply(state: &mut State, schema: &Schema, message: Message) -> bool {
 /// Render the rail card body from a cached `Data`.
 #[must_use]
 pub fn render<'a>(data: &'a hyozu::Data) -> Element<'a, dashboard::Message, Theme, Renderer> {
-    hyozu::chart(data).height(Length::Fixed(280.0)).into()
+    hyozu::chart(data)
+        .height(Length::Fixed(280.0))
+        .style(hyozu::chart::transparent)
+        .into()
 }
 
 /// Fallback text for shapes the panel can't render.
@@ -118,6 +121,7 @@ pub fn chrome<'a>(
     let dim_picker = pick_list(selected_dim, dim_options, |c: &axis::DimChoice| c.label.clone())
         .on_select(|c: axis::DimChoice| dashboard::Message::Rail(Message::RowsDimPicked(Some(c))))
         .placeholder("(rows)")
+        .text_size(12)
         .width(Length::Fixed(140.0));
 
     let level_element: Element<'a, dashboard::Message, Theme, Renderer> = match state.rows {
@@ -130,6 +134,7 @@ pub fn chrome<'a>(
             pick_list(selected, options, |c: &axis::LevelChoice| c.label.clone())
                 .on_select(|c: axis::LevelChoice| dashboard::Message::Rail(Message::RowsLevelPicked(Some(c))))
                 .placeholder("(level)")
+                .text_size(12)
                 .width(Length::Fixed(140.0))
                 .into()
         }
@@ -142,19 +147,21 @@ pub fn chrome<'a>(
     let metric_picker = pick_list(metric_selected, metric_options, |c: &metric::Choice| c.label.clone())
         .on_select(|c: metric::Choice| dashboard::Message::Rail(Message::MetricPicked(Some(c.pick))))
         .placeholder("(metric)")
+        .text_size(12)
         .width(Length::Fixed(180.0));
 
-    row![
-        text("Rows").size(12),
-        dim_picker,
-        level_element,
-        text("Metric").size(12),
-        metric_picker,
-    ]
-    .spacing(6)
-    .align_y(Alignment::Center)
-    .wrap()
-    .into()
+    let rows_group = row![text("Rows").size(12), dim_picker, level_element]
+        .spacing(4)
+        .align_y(Alignment::Center);
+    let metric_group = row![text("Metric").size(12), metric_picker]
+        .spacing(4)
+        .align_y(Alignment::Center);
+
+    row![rows_group, metric_group]
+        .spacing(12)
+        .align_y(Alignment::Center)
+        .wrap()
+        .into()
 }
 
 fn variant_tag(results: &tatami::Results) -> &'static str {

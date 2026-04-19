@@ -4,7 +4,7 @@
 //! metric. When the metric pick is cleared the panel shows a placeholder
 //! and does not fire.
 
-use iced::widget::{Renderer, pick_list, row, text};
+use iced::widget::{Renderer, container, pick_list, row, text};
 use iced::{Alignment, Element, Length, Theme};
 
 use tatami::query::{Options, Tuple};
@@ -68,7 +68,7 @@ pub fn render<'a>(
         .metric
         .and_then(|p| metric::label(schema, p))
         .unwrap_or("(metric)");
-    match results {
+    let body: Element<'a, dashboard::Message, Theme, Renderer> = match results {
         tatami::Results::Scalar(scalar) => hyozu::tatami::card(scalar, hyozu::tatami::KpiLayout {
             title,
             subtitle: None,
@@ -79,7 +79,8 @@ pub fn render<'a>(
         other => text(format!("unexpected KPI shape: {}", variant_tag(other)))
             .size(14)
             .into(),
-    }
+    };
+    container(body).padding([8, 12]).into()
 }
 
 /// Chrome row — a metric picker. Shown above the card body regardless of
@@ -95,6 +96,7 @@ pub fn chrome<'a>(
     let picker = pick_list(selected, metric_options, |c: &metric::Choice| c.label.clone())
         .on_select(|c: metric::Choice| dashboard::Message::Kpi(Message::MetricPicked(Some(c.pick))))
         .placeholder("(metric)")
+        .text_size(12)
         .width(Length::Fixed(180.0));
 
     row![text("Metric").size(12), picker]

@@ -431,6 +431,7 @@ impl Dashboard {
             (Panel::Map, Some(QueryState::Ok(_))) => match self.map_data.as_ref() {
                 Some(data) => hyozu::chart(data)
                     .height(Length::Fill)
+                    .style(hyozu::chart::transparent)
                     .on_action(Message::MapClicked)
                     .into(),
                 None => text("(map data unavailable)").size(14).into(),
@@ -488,8 +489,8 @@ mod style {
         container::Style {
             background: Some(palette.background.base.color.into()),
             border: iced::Border {
-                width: 1.0,
-                color: palette.background.strong.color,
+                width: 0.0,
+                color: iced::Color::TRANSPARENT,
                 radius: 6.0.into(),
             },
             ..Default::default()
@@ -501,7 +502,7 @@ mod style {
         container::Style {
             background: Some(palette.background.base.color.into()),
             border: iced::Border {
-                width: 2.0,
+                width: 1.0,
                 color: palette.primary.base.color,
                 radius: 6.0.into(),
             },
