@@ -4,7 +4,7 @@
 //! back-navigation through drill/filter history preserves the current view.
 
 /// The metric family on display.
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Measure {
     /// Revenue (USD). Default.
@@ -16,6 +16,11 @@ pub enum Measure {
     Adr,
     /// Revenue per available room (USD).
     RevPar,
+}
+
+impl Measure {
+    /// Every variant, in the order they render in the measure switcher.
+    pub const ALL: [Self; 4] = [Self::Revenue, Self::Occupancy, Self::Adr, Self::RevPar];
 }
 
 /// The time-axis granularity for the time-series panel.

@@ -39,16 +39,30 @@ pub fn measure_metric(measure: Measure) -> Name {
     }
 }
 
-/// KPI panel — scalar query returning the current measure.
+/// Name of the month-over-month companion metric for a [`Measure`].
+/// Each is declared in `data::schema::hewton_schema` as a Lag-based
+/// pct-change expression.
+#[must_use]
+pub fn measure_mom_metric(measure: Measure) -> Name {
+    match measure {
+        Measure::Revenue => n("RevenueMoM"),
+        Measure::Occupancy => n("OccupancyMoM"),
+        Measure::Adr => n("AdrMoM"),
+        Measure::RevPar => n("RevParMoM"),
+    }
+}
+
+/// KPI panel — scalar query returning the current measure + its MoM delta.
 ///
-/// Phase 1 returns a simple scalar with a single metric. Phase 2 will add
-/// the MoM comparison metric as a second slot.
+/// Metric slot 0 = primary value; slot 1 = month-over-month change.
+/// `hyozu::tatami::card` reads those indices via `KpiLayout::primary` and
+/// `KpiLayout::delta`.
 #[must_use]
 pub fn kpi(current: &Query, view: &View) -> Query {
     Query {
         axes: Axes::Scalar,
         slicer: current.slicer.clone(),
-        metrics: vec![measure_metric(view.measure)],
+        metrics: vec![measure_metric(view.measure), measure_mom_metric(view.measure)],
         options: Options::default(),
     }
 }

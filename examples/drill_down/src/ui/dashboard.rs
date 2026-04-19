@@ -1,33 +1,44 @@
 //! Dashboard state + the per-panel async dispatch plumbing.
 //!
-//! Phase 1 wires the navigation + per-panel async-result flow end-to-end
-//! against a constructed `InMemoryCube`. Rendering is a simple column of
-//! per-panel text stubs; real marks land in later phases.
+//! Phase 1 wired the navigation + per-panel async-result flow end-to-end
+//! against a constructed `InMemoryCube`. Phase 2 specializes the KPI
+//! panel's rendering through `hyozu::tatami::card`, adds a header with a
+//! measure switcher + back/forward buttons, and grows the dashboard's
+//! Message enum to carry view-toggle + navigation intents.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use iced::widget::{Column, column, container, text};
+use iced::widget::{Column, button, column, container, row, text};
 use iced::{Element, Length, Task};
 
 use tatami::Cube;
 use tatami_inmem::InMemoryCube;
 
+use crate::ui::kpi;
 use crate::ui::panel::Panel;
 use crate::ui::query_state::QueryState;
 use crate::ui::trail::Trail;
-use crate::ui::view::View;
+use crate::ui::view::{Measure, Period, View};
 
 /// Messages consumed by the Dashboard.
 ///
-/// The Dashboard itself only emits and handles `PanelDone`; the outer
-/// `App` layer maps `SetMeasure`, `SetPeriod`, `Back`, and `Forward`
-/// onto the `Dashboard`'s methods.
-#[derive(Debug)]
+/// The outer `App` layer lifts these via `lift_dashboard_message` — it
+/// translates dashboard-internal intents into the top-level `Message`
+/// enum and routes them back through the Dashboard's typed methods.
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum Message {
     /// A panel's query finished.
     PanelDone(Panel, Result<tatami::Results, String>),
+    /// User picked a new active measure from the header switcher.
+    SetMeasure(Measure),
+    /// User picked a new period grain.
+    SetPeriod(Period),
+    /// Back button pressed.
+    Back,
+    /// Forward button pressed.
+    Forward,
 }
 
 /// Dashboard state. The `cube` is shared across per-panel async tasks
@@ -133,29 +144,117 @@ impl Dashboard {
         Task::batch(tasks)
     }
 
-    /// Handle a `PanelDone` message — update the panel's state. Returns
-    /// `Task::none` for now; later phases may chain follow-up dispatches.
+    /// Handle a dashboard message — either a panel result landed, or the
+    /// user interacted with the header.
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::PanelDone(panel, Ok(results)) => {
                 self.panels.insert(panel, QueryState::Ok(results));
+                Task::none()
             }
             Message::PanelDone(panel, Err(error)) => {
                 self.panels.insert(panel, QueryState::Err(error));
+                Task::none()
             }
+            Message::SetMeasure(m) => self.set_view(View {
+                measure: m,
+                ..self.view
+            }),
+            Message::SetPeriod(p) => self.set_view(View { period: p, ..self.view }),
+            Message::Back => self.back(),
+            Message::Forward => self.forward(),
+            // `Message` is `#[non_exhaustive]`; surface future variants
+            // loudly rather than silently dropping them.
+            #[allow(unreachable_patterns)]
+            _ => Task::none(),
         }
-        Task::none()
     }
 
-    /// Render the Phase 1 text-stub view — a column of one card per panel.
+    /// Render the dashboard: a header row with the measure switcher +
+    /// back/forward buttons, then one card per panel.
     pub fn view(&self) -> Element<'_, Message> {
-        let cards = Panel::ALL
-            .iter()
-            .map(|&panel| render_card(panel, self.panels.get(&panel)));
-        container(Column::with_children(cards).spacing(12).padding(16).width(Length::Fill))
+        let header = self.render_header();
+        let cards = Panel::ALL.iter().map(|&panel| self.render_card(panel));
+        container(
+            column![header, Column::with_children(cards).spacing(12).width(Length::Fill)]
+                .spacing(16)
+                .padding(16)
+                .width(Length::Fill),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+    }
+
+    /// Render the header: measure switcher + back/forward buttons. The
+    /// measure switcher is a button row; the active measure is visually
+    /// distinct via a different button style.
+    fn render_header(&self) -> Element<'_, Message> {
+        let measure_row = Measure::ALL.iter().fold(row![].spacing(4), |acc, &m| {
+            let label = text(measure_label(m)).size(13);
+            let b = if m == self.view.measure {
+                button(label).style(button::primary)
+            } else {
+                button(label).style(button::secondary)
+            };
+            acc.push(b.on_press(Message::SetMeasure(m)).padding([4, 10]))
+        });
+
+        let back = {
+            let b = button(text("◀").size(13)).padding([4, 8]);
+            if self.trail.can_back() {
+                b.on_press(Message::Back)
+            } else {
+                b
+            }
+        };
+        let forward = {
+            let b = button(text("▶").size(13)).padding([4, 8]);
+            if self.trail.can_forward() {
+                b.on_press(Message::Forward)
+            } else {
+                b
+            }
+        };
+
+        row![
+            text("Hewton").size(20),
+            iced::widget::Space::new().width(Length::Fill),
+            measure_row,
+            iced::widget::Space::new().width(Length::Fixed(16.0)),
+            back,
+            forward,
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center)
+        .into()
+    }
+
+    /// Render a single panel card. Kpi panel routes through the
+    /// `hyozu::tatami::card` adapter when its query resolved as a scalar;
+    /// every other panel still uses the text stub pending Phase 2b+.
+    fn render_card(&self, panel: Panel) -> Element<'_, Message> {
+        let state = self.panels.get(&panel);
+        let body: Element<'_, Message> = match (panel, state) {
+            (Panel::Kpi, Some(QueryState::Ok(results))) => kpi::render(results, self.view.measure),
+            (_, None) => text("(no task)").size(14).into(),
+            (_, Some(QueryState::Running)) => text("Running…").size(14).into(),
+            (_, Some(QueryState::Ok(results))) => text(format!("Ok: {}", describe(results))).size(14).into(),
+            (_, Some(QueryState::Err(message))) => text(format!("Err: {message}")).size(14).into(),
+        };
+        container(column![text(panel.heading()).size(18), body].spacing(4))
+            .padding(12)
             .width(Length::Fill)
-            .height(Length::Fill)
             .into()
+    }
+}
+
+fn measure_label(m: Measure) -> &'static str {
+    match m {
+        Measure::Revenue => "Revenue",
+        Measure::Occupancy => "Occupancy",
+        Measure::Adr => "ADR",
+        Measure::RevPar => "RevPAR",
     }
 }
 
@@ -165,20 +264,6 @@ fn run(cube: Arc<InMemoryCube>, panel: Panel, q: tatami::Query) -> Task<Message>
         let outcome = cube.query(&q).await.map_err(|e| e.to_string());
         Message::PanelDone(panel, outcome)
     })
-}
-
-/// Phase 1 per-panel text stub — heading + state description.
-fn render_card<'a>(panel: Panel, state: Option<&'a QueryState>) -> Element<'a, Message> {
-    let body = match state {
-        None => "(no task)".to_string(),
-        Some(QueryState::Running) => "Running…".to_string(),
-        Some(QueryState::Ok(results)) => format!("Ok: {}", describe(results)),
-        Some(QueryState::Err(message)) => format!("Err: {message}"),
-    };
-    container(column![text(panel.heading()).size(18), text(body).size(14)].spacing(4))
-        .padding(12)
-        .width(Length::Fill)
-        .into()
 }
 
 fn describe(results: &tatami::Results) -> &'static str {

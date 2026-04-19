@@ -5,6 +5,7 @@
 //! and [`queries`] builders. Real panel rendering lands in later phases.
 
 pub mod dashboard;
+pub mod kpi;
 pub mod panel;
 pub mod queries;
 pub mod query_state;

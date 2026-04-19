@@ -30,6 +30,9 @@ pub fn hewton_schema() -> Result<Schema, schema::Error> {
         .metric(revpar())
         .metric(revenue_yoy())
         .metric(revenue_mom())
+        .metric(adr_mom())
+        .metric(occupancy_mom())
+        .metric(revpar_mom())
         .build()
 }
 
@@ -111,8 +114,25 @@ fn revenue_yoy() -> Metric {
 }
 
 fn revenue_mom() -> Metric {
-    let prev = lag(ref_("Revenue"), "Time", 1);
-    Metric::new(n("RevenueMoM"), div(sub(ref_("Revenue"), prev.clone()), prev)).with_format("0.0%".into())
+    mom_metric("RevenueMoM", "Revenue")
+}
+
+fn adr_mom() -> Metric {
+    mom_metric("AdrMoM", "ADR")
+}
+
+fn occupancy_mom() -> Metric {
+    mom_metric("OccupancyMoM", "Occupancy")
+}
+
+fn revpar_mom() -> Metric {
+    mom_metric("RevParMoM", "RevPAR")
+}
+
+/// Month-over-month change of any metric: `(cur - prev) / prev`.
+fn mom_metric(mom_name: &str, base: &str) -> Metric {
+    let prev = lag(ref_(base), "Time", 1);
+    Metric::new(n(mom_name), div(sub(ref_(base), prev.clone()), prev)).with_format("0.0%".into())
 }
 
 // ── Local helpers — keep call sites readable ───────────────────────────────
