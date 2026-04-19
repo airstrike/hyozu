@@ -33,6 +33,20 @@ pub use violin::{Violin, violin, violin_entry, violin_from_data};
 pub use waterfall::{Waterfall, waterfall};
 pub use xy::{Xy, xy};
 
+/// Visual style of the legend swatch next to an entry's label.
+#[derive(Debug, Clone, Default)]
+pub enum LegendSwatch {
+    /// Filled rounded square. Default for fill-based marks (bars, pie, etc.).
+    #[default]
+    Square,
+    /// Horizontal line with an optional marker overlay — used for line and
+    /// area series.
+    Line {
+        style: line::LineStyle,
+        marker: Option<line::marker::Marker>,
+    },
+}
+
 /// A single entry in the chart legend.
 #[derive(Debug, Clone)]
 pub struct LegendEntry {
@@ -40,6 +54,8 @@ pub struct LegendEntry {
     pub name: String,
     /// Optional color for the swatch. When `None`, the palette index is used.
     pub color: Option<crate::color::Color>,
+    /// Visual style of the swatch preceding the label.
+    pub swatch: LegendSwatch,
 }
 
 /// Represents a visual mark in a chart (bars, lines, scatter, etc.)
@@ -77,6 +93,10 @@ impl Mark {
                     s.name.as_ref().map(|name| LegendEntry {
                         name: name.clone(),
                         color: s.color,
+                        swatch: LegendSwatch::Line {
+                            style: line::LineStyle::Solid,
+                            marker: None,
+                        },
                     })
                 })
                 .collect(),
@@ -87,6 +107,7 @@ impl Mark {
                     s.name.as_ref().map(|name| LegendEntry {
                         name: name.clone(),
                         color: s.color,
+                        swatch: LegendSwatch::Square,
                     })
                 })
                 .collect(),
@@ -97,6 +118,10 @@ impl Mark {
                     vec![LegendEntry {
                         name: name.clone(),
                         color: line.color,
+                        swatch: LegendSwatch::Line {
+                            style: line.style.clone(),
+                            marker: line.marker.clone(),
+                        },
                     }]
                 })
                 .unwrap_or_default(),
@@ -107,6 +132,7 @@ impl Mark {
                     s.name.as_ref().map(|name| LegendEntry {
                         name: name.clone(),
                         color: s.color,
+                        swatch: LegendSwatch::Square,
                     })
                 })
                 .collect(),
@@ -117,6 +143,7 @@ impl Mark {
                     vec![LegendEntry {
                         name: name.clone(),
                         color: xy.color,
+                        swatch: LegendSwatch::Square,
                     }]
                 })
                 .unwrap_or_default(),
@@ -127,6 +154,7 @@ impl Mark {
                     e.name.as_ref().map(|name| LegendEntry {
                         name: name.clone(),
                         color: e.color,
+                        swatch: LegendSwatch::Square,
                     })
                 })
                 .collect(),
@@ -137,6 +165,7 @@ impl Mark {
                     e.name.as_ref().map(|name| LegendEntry {
                         name: name.clone(),
                         color: e.color,
+                        swatch: LegendSwatch::Square,
                     })
                 })
                 .collect(),
@@ -146,6 +175,7 @@ impl Mark {
                 .map(|item| LegendEntry {
                     name: item.label.clone(),
                     color: item.color,
+                    swatch: LegendSwatch::Square,
                 })
                 .collect(),
             Mark::BubbleMap(bm) => bm
@@ -155,6 +185,7 @@ impl Mark {
                     p.name.as_ref().map(|name| LegendEntry {
                         name: name.clone(),
                         color: p.color,
+                        swatch: LegendSwatch::Square,
                     })
                 })
                 .collect(),

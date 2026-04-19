@@ -96,7 +96,7 @@ where
 
         let background = theme.background_color();
         let text_pair = theme.text_pair();
-        let seed = theme.palette_seed();
+        let seed = theme.seed();
 
         let layout_bounds = layout.bounds();
         let mut frame = Frame::new(renderer, layout_bounds.size());
@@ -392,7 +392,7 @@ fn draw_needle<R: geometry::Renderer>(
     start_angle: f32,
     value_angle: f32,
     text_pair: crate::color::Pair,
-    seed: &crate::palette::PaletteSeed,
+    seed: &crate::palette::Seed,
     background: crate::core::Color,
 ) {
     let angle = start_angle + value_angle;
@@ -490,7 +490,7 @@ fn build_zone_stops(
     range: f64,
     background: crate::core::Color,
     text_pair: crate::color::Pair,
-    seed: &crate::palette::PaletteSeed,
+    seed: &crate::palette::Seed,
 ) -> Stops {
     let mut stops: Stops = Vec::new();
     for zone in &data.zones {

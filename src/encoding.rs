@@ -39,7 +39,7 @@ use std::sync::Arc;
 
 use crate::color::Color;
 use crate::data::Datum;
-use crate::palette::{Palette, PaletteSeed, Resolved};
+use crate::palette::{Palette, Resolved, Seed};
 
 pub mod channel;
 
@@ -314,7 +314,7 @@ impl Encoding<Fill> {
     pub(crate) fn resolve_fill(
         &self,
         points: &[Datum],
-        seed: &PaletteSeed,
+        seed: &Seed,
         chart_default: Option<&Palette>,
     ) -> Vec<Option<Color>> {
         self.plan_fill(points).materialize(seed, chart_default)
@@ -357,7 +357,7 @@ impl FillPlan {
     /// `.palette()` override, chart-level inheritance, or the Categorical
     /// fallback) and looks up each cached index. No String allocations,
     /// no extractor calls — those happened at plan time.
-    pub(crate) fn materialize(&self, seed: &PaletteSeed, chart_default: Option<&Palette>) -> Vec<Option<Color>> {
+    pub(crate) fn materialize(&self, seed: &Seed, chart_default: Option<&Palette>) -> Vec<Option<Color>> {
         match self {
             FillPlan::Static(v) => v.clone(),
             FillPlan::Ordinal {
@@ -562,12 +562,12 @@ impl Encoding<Size> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::palette::PaletteSeed;
+    use crate::palette::Seed;
 
     /// Build a stable test seed with distinct base colors so the seed-derived
     /// categorical palette is guaranteed to produce distinguishable slots.
-    fn test_seed() -> PaletteSeed {
-        PaletteSeed {
+    fn test_seed() -> Seed {
+        Seed {
             primary: crate::core::Color::from_rgb8(50, 100, 200),
             secondary: crate::core::Color::from_rgb8(200, 50, 100),
             success: crate::core::Color::from_rgb8(100, 200, 50),

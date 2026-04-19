@@ -208,7 +208,7 @@ where
 
         let background = theme.background_color();
         let text_pair = theme.text_pair();
-        let seed = theme.palette_seed();
+        let seed = theme.seed();
 
         // Get the layout bounds to offset the line to its actual screen position
         let layout_bounds = layout.bounds();

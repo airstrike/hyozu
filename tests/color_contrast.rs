@@ -1,4 +1,5 @@
 use hyozu::design::Design;
+use hyozu::palette::{Palette, Resolved};
 use iced::Theme;
 
 /// Comprehensive test ensuring all themes provide acceptable contrast (≥ 2.0)
@@ -34,10 +35,10 @@ fn test_all_themes_bar_labels_comprehensive() {
     for theme in &themes {
         let background = theme.background_color();
         let text_pair = theme.text_pair();
-        let seed = theme.palette_seed();
-        let data_colors = theme.data_colors();
+        let seed = Design::seed(&theme);
+        let palette = Resolved::resolve(&Palette::Categorical, &seed, 5);
 
-        for (i, color_spec) in data_colors.iter().enumerate().take(5) {
+        for (i, color_spec) in palette.colors().iter().enumerate().take(5) {
             let bar_color = color_spec.resolve(background, text_pair, &seed, None);
             let label_color = text_pair.resolve(bar_color, Some(background));
             let contrast = bar_color.relative_contrast(label_color);
@@ -116,15 +117,15 @@ fn test_dark_theme_debug() {
     let theme = Theme::Dark;
     let background = theme.background_color();
     let text_pair = theme.text_pair();
-    let seed = theme.palette_seed();
-    let data_colors = theme.data_colors();
+    let seed = Design::seed(&theme);
+    let palette = Resolved::resolve(&Palette::Categorical, &seed, 3);
 
     println!("\n=== Theme::Dark Debug ===");
     println!("Background: lum={:.3}", background.relative_luminance());
     println!("text_pair.on_light: lum={:.3}", text_pair.on_light.relative_luminance());
     println!("text_pair.on_dark: lum={:.3}", text_pair.on_dark.relative_luminance());
 
-    for (i, color_spec) in data_colors.iter().enumerate().take(3) {
+    for (i, color_spec) in palette.colors().iter().enumerate().take(3) {
         let bar_color = color_spec.resolve(background, text_pair, &seed, None);
         let label_color = text_pair.resolve(bar_color, Some(background));
         let contrast = bar_color.relative_contrast(label_color);
@@ -155,15 +156,15 @@ fn test_solarized_light_debug() {
     let theme = Theme::SolarizedLight;
     let background = theme.background_color();
     let text_pair = theme.text_pair();
-    let seed = theme.palette_seed();
-    let data_colors = theme.data_colors();
+    let seed = Design::seed(&theme);
+    let palette = Resolved::resolve(&Palette::Categorical, &seed, 5);
 
     println!("\n=== Solarized Light Debug ===");
     println!("Background: lum={:.3}", background.relative_luminance());
     println!("text_pair.on_light: lum={:.3}", text_pair.on_light.relative_luminance());
     println!("text_pair.on_dark: lum={:.3}", text_pair.on_dark.relative_luminance());
 
-    for (i, color_spec) in data_colors.iter().enumerate().take(5) {
+    for (i, color_spec) in palette.colors().iter().enumerate().take(5) {
         let bar_color = color_spec.resolve(background, text_pair, &seed, None);
         let label_color = text_pair.resolve(bar_color, Some(background));
         let contrast = bar_color.relative_contrast(label_color);
@@ -194,15 +195,15 @@ fn test_gruvbox_light_debug() {
     let theme = Theme::GruvboxLight;
     let background = theme.background_color();
     let text_pair = theme.text_pair();
-    let seed = theme.palette_seed();
-    let data_colors = theme.data_colors();
+    let seed = Design::seed(&theme);
+    let palette = Resolved::resolve(&Palette::Categorical, &seed, 5);
 
     println!("\n=== GruvboxLight Debug ===");
     println!("Background: lum={:.3}", background.relative_luminance());
     println!("text_pair.on_light: lum={:.3}", text_pair.on_light.relative_luminance());
     println!("text_pair.on_dark: lum={:.3}", text_pair.on_dark.relative_luminance());
 
-    for (i, color_spec) in data_colors.iter().enumerate().take(5) {
+    for (i, color_spec) in palette.colors().iter().enumerate().take(5) {
         let bar_color = color_spec.resolve(background, text_pair, &seed, None);
         let label_color = text_pair.resolve(bar_color, Some(background));
         let contrast = bar_color.relative_contrast(label_color);

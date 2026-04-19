@@ -104,7 +104,7 @@ where
         let layout_bounds = layout.bounds();
         let background = theme.background_color();
         let text_pair = theme.text_pair();
-        let seed = theme.palette_seed();
+        let seed = theme.seed();
 
         let (v_min, v_max) = self.data.compute_range();
         let rows = self.data.rows();

@@ -281,7 +281,7 @@ where
 
     /// Resolves the palette using the given design.
     pub(crate) fn resolve_palette(&self, design: &dyn crate::design::Design) -> palette::Resolved {
-        let seed = design.palette_seed();
+        let seed = design.seed();
         palette::Resolved::resolve(&self.palette, &seed, self.color_slots)
     }
 
@@ -679,7 +679,7 @@ where
         D: design::Design + ?Sized,
     {
         // Resolve palette for this draw call
-        let seed = design.palette_seed();
+        let seed = design.seed();
         let resolved = palette::Resolved::resolve(&self.palette, &seed, self.color_slots);
 
         // Navigate layout children in the same order as layout()

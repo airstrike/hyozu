@@ -203,7 +203,7 @@ where
         let state = tree.state.downcast_ref::<State>();
         let background = theme.background_color();
         let text_pair = theme.text_pair();
-        let seed = theme.palette_seed();
+        let seed = theme.seed();
         let layout_bounds = layout.bounds();
 
         // ── Land polygons ──────────────────────────────────────────

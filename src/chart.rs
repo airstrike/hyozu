@@ -772,7 +772,7 @@ fn draw_tooltip_overlay<Message>(
 
     let background = design.background_color();
     let text_pair = design.text_pair();
-    let seed = design.palette_seed();
+    let seed = design.seed();
     let text_color = design.text_color().resolve(background, text_pair, &seed, None);
     let palette = scene.resolve_palette(design);
 
@@ -1095,12 +1095,9 @@ pub fn default(design: &dyn design::Design) -> Style {
         border: crate::core::Border {
             width: 1.0,
             radius: 5.0.into(),
-            color: design.divider_color().resolve(
-                design.background_color(),
-                design.text_pair(),
-                &design.palette_seed(),
-                None,
-            ),
+            color: design
+                .divider_color()
+                .resolve(design.background_color(), design.text_pair(), &design.seed(), None),
         },
     }
 }
@@ -1117,12 +1114,9 @@ pub fn bordered(design: &dyn design::Design) -> Style {
         border: crate::core::Border {
             width: 1.0,
             radius: 0.0.into(),
-            color: design.divider_color().resolve(
-                design.background_color(),
-                design.text_pair(),
-                &design.palette_seed(),
-                None,
-            ),
+            color: design
+                .divider_color()
+                .resolve(design.background_color(), design.text_pair(), &design.seed(), None),
         },
     }
 }
@@ -1134,12 +1128,9 @@ pub fn filled(design: &dyn design::Design) -> Style {
         border: crate::core::Border {
             width: 1.0,
             radius: 5.0.into(),
-            color: design.divider_color().resolve(
-                design.background_color(),
-                design.text_pair(),
-                &design.palette_seed(),
-                None,
-            ),
+            color: design
+                .divider_color()
+                .resolve(design.background_color(), design.text_pair(), &design.seed(), None),
         },
     }
 }

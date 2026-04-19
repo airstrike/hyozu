@@ -839,7 +839,7 @@ where
 
         let bg = design.background_color();
         let text_pair = design.text_pair();
-        let seed = design.palette_seed();
+        let seed = design.seed();
 
         let shows_major_x = x_axis.map(|a| a.shows_grid()).unwrap_or(false);
         let shows_major_y = y_axis.map(|a| a.shows_grid()).unwrap_or(false);
@@ -1025,7 +1025,7 @@ where
 
         let bg = design.background_color();
         let text_pair = design.text_pair();
-        let seed = design.palette_seed();
+        let seed = design.seed();
 
         // Same snap functions as `draw_gridlines` — this is what makes the
         // border lines structurally coincide with the extreme gridlines.

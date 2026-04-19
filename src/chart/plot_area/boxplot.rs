@@ -200,7 +200,7 @@ where
 
         let background = theme.background_color();
         let text_pair = theme.text_pair();
-        let seed = theme.palette_seed();
+        let seed = theme.seed();
 
         let layout_bounds = layout.bounds();
         let mut frame = Frame::new(renderer, layout_bounds.size());
@@ -229,7 +229,7 @@ where
         palette: &crate::palette::Resolved,
         background: crate::core::Color,
         text_pair: crate::color::Pair,
-        seed: &crate::palette::PaletteSeed,
+        seed: &crate::palette::Seed,
     ) {
         for (i, (entry, el)) in self.data.entries.iter().zip(state.entries_layout.iter()).enumerate() {
             let rect = &state.box_rects[i];
@@ -307,7 +307,7 @@ where
         palette: &crate::palette::Resolved,
         background: crate::core::Color,
         text_pair: crate::color::Pair,
-        seed: &crate::palette::PaletteSeed,
+        seed: &crate::palette::Seed,
     ) {
         for (i, (entry, el)) in self.data.entries.iter().zip(state.entries_layout.iter()).enumerate() {
             let rect = &state.box_rects[i];

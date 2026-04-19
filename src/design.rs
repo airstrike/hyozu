@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use crate::color::{Color, Pair};
 use crate::core::{Font, theme};
-use crate::palette::PaletteSeed;
+use crate::palette::Seed;
 
 /// Design system trait for chart styling.
 ///
@@ -20,14 +20,15 @@ pub trait Design {
 
     /// Returns an ordered palette of colors for data visualization.
     /// The first color is used for the first series, second for the second series, etc.
-    ///
-    /// Deprecated: prefer `palette_seed()` with the palette system.
+    #[deprecated(note = "implement `seed()` directly instead of relying on data_colors fallback")]
     fn data_colors(&self) -> Vec<Color>;
 
     /// Returns the seed colors for palette generation.
     ///
-    /// The default implementation derives a seed from `data_colors()`.
-    fn palette_seed(&self) -> PaletteSeed {
+    /// The default implementation derives a seed from `data_colors()` for
+    /// backwards compatibility with older `Design` impls.
+    fn seed(&self) -> Seed {
+        #[allow(deprecated)]
         let colors = self.data_colors();
         let bg = self.background_color();
         let get = |i: usize| {
@@ -48,7 +49,7 @@ pub trait Design {
                 crate::palette::shift_lightness(base, bg, wrap)
             }
         };
-        PaletteSeed {
+        Seed {
             primary: get(0),
             secondary: get(1),
             success: get(2),
@@ -166,12 +167,13 @@ impl<T: Design> Design for &T {
         (*self).text_pair()
     }
 
+    #[allow(deprecated)]
     fn data_colors(&self) -> Vec<Color> {
         (*self).data_colors()
     }
 
-    fn palette_seed(&self) -> PaletteSeed {
-        (*self).palette_seed()
+    fn seed(&self) -> Seed {
+        (*self).seed()
     }
 
     fn divider_color(&self) -> Color {
@@ -245,9 +247,9 @@ impl Design for theme::Theme {
         ]
     }
 
-    fn palette_seed(&self) -> PaletteSeed {
+    fn seed(&self) -> Seed {
         let palette = self.palette();
-        PaletteSeed {
+        Seed {
             primary: palette.primary.base.color,
             secondary: palette.secondary.base.color,
             success: palette.success.base.color,

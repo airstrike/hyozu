@@ -126,7 +126,7 @@ where
 
         let background = theme.background_color();
         let text_pair = theme.text_pair();
-        let seed = theme.palette_seed();
+        let seed = theme.seed();
 
         let line_color = if let Some(color) = self.data.color {
             color.resolve(background, text_pair, &seed, None)

@@ -214,16 +214,7 @@ where
             return;
         }
 
-        let base_color = self.color.unwrap_or_else(|| {
-            let colors = theme.data_colors();
-            colors
-                .first()
-                .and_then(|c| match c {
-                    crate::color::Color::Fixed(c) => Some(*c),
-                    _ => None,
-                })
-                .unwrap_or(crate::core::Color::BLACK)
-        });
+        let base_color = self.color.unwrap_or_else(|| theme.seed().primary);
 
         let comp = Computed::from_values(self.values);
 

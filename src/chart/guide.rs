@@ -1346,7 +1346,7 @@ where
 
         let background = design.background_color();
         let text_pair = design.text_pair();
-        let seed = design.palette_seed();
+        let seed = design.seed();
 
         let axis_color = self
             .axis

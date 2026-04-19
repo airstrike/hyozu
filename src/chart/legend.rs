@@ -3,9 +3,13 @@ use std::collections::HashSet;
 use crate::core::layout::{Limits, Node};
 use crate::core::text::paragraph;
 use crate::core::widget::{Tree, tree};
-use crate::core::{Rectangle, Size, text};
+use crate::core::{Point, Rectangle, Size, text};
 use crate::data::legend::Position;
-use crate::data::mark::LegendEntry;
+use crate::data::mark::{LegendEntry, LegendSwatch};
+use crate::line::LineStyle;
+use crate::line::marker::Shape;
+use crate::widget::canvas::{Frame, LineCap, LineDash, Path, Stroke};
+use crate::widget::renderer::geometry;
 
 /// Gap between swatch and text label.
 const SWATCH_TEXT_GAP: f32 = 4.0;
@@ -13,8 +17,11 @@ const SWATCH_TEXT_GAP: f32 = 4.0;
 const ENTRY_GAP: f32 = 16.0;
 /// Vertical padding above/below the legend.
 const PADDING_V: f32 = 4.0;
-/// Swatch size as a proportion of font size.
+/// Square swatch size as a proportion of font size.
 const SWATCH_SCALE: f32 = 0.85;
+/// Line swatch width as a proportion of font size — wider than a square so the
+/// stroke actually reads as a line rather than a dash.
+const LINE_SWATCH_SCALE: f32 = 2.0;
 /// Default font size for legend text (2px smaller than default 12.0 label size).
 const DEFAULT_FONT_SIZE: f32 = 10.0;
 
@@ -39,7 +46,7 @@ where
 /// A Legend displays a key for the chart's data series.
 pub struct Legend<'a, Message, Renderer>
 where
-    Renderer: text::Renderer<Font = crate::core::Font>,
+    Renderer: text::Renderer<Font = crate::core::Font> + geometry::Renderer,
 {
     entries: Vec<LegendEntry>,
     position: Position,
@@ -51,7 +58,7 @@ where
 
 impl<'a, Message, Renderer> Legend<'a, Message, Renderer>
 where
-    Renderer: text::Renderer<Font = crate::core::Font>,
+    Renderer: text::Renderer<Font = crate::core::Font> + geometry::Renderer,
 {
     /// Create a new Legend from entries and configuration.
     pub fn new(
@@ -121,7 +128,6 @@ where
 
         let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
         let font_size = self.text.resolved_size(DEFAULT_FONT_SIZE);
-        let swatch_size = font_size * SWATCH_SCALE;
 
         // Measure each entry's text width
         state.widths.clear();
@@ -146,11 +152,12 @@ where
             state.widths.push(state.paragraph.min_width());
         }
 
-        // Compute entry widths (swatch + gap + text)
-        let entry_widths: Vec<f32> = state
-            .widths
+        // Compute entry widths (swatch + gap + text) — swatch width varies by kind.
+        let entry_widths: Vec<f32> = self
+            .entries
             .iter()
-            .map(|tw| swatch_size + SWATCH_TEXT_GAP + tw)
+            .zip(state.widths.iter())
+            .map(|(entry, tw)| swatch_width(&entry.swatch, font_size) + SWATCH_TEXT_GAP + tw)
             .collect();
 
         let row_height = font_size + PADDING_V * 2.0;
@@ -220,10 +227,11 @@ where
             };
             for &(entry_idx, x_offset) in row {
                 let text_width = state.widths.get(entry_idx).copied().unwrap_or(0.0);
+                let sw = swatch_width(&self.entries[entry_idx].swatch, font_size);
                 entry_rects[entry_idx] = Some(Rectangle {
                     x: row_start_x + x_offset,
                     y: row_y,
-                    width: swatch_size + SWATCH_TEXT_GAP + text_width,
+                    width: sw + SWATCH_TEXT_GAP + text_width,
                     height: font_size,
                 });
             }
@@ -258,11 +266,11 @@ where
         let bounds = layout.bounds();
         let background = design.background_color();
         let text_pair = design.text_pair();
-        let seed = design.palette_seed();
+        let seed = design.seed();
         let legend_default = design.legend_text();
         let font = self.text.resolved_font(legend_default.resolved_font(design.font()));
         let font_size = self.text.resolved_size(legend_default.resolved_size(DEFAULT_FONT_SIZE));
-        let swatch_size = font_size * SWATCH_SCALE;
+        let square_size = font_size * SWATCH_SCALE;
         let text_color = design.text_color().resolve(background, text_pair, &seed, None);
         let row_height = font_size + PADDING_V * 2.0;
 
@@ -298,23 +306,44 @@ where
                 };
                 let swatch_color = dim(raw_swatch);
 
-                // Draw swatch
-                renderer.fill_quad(
-                    crate::core::renderer::Quad {
-                        bounds: crate::core::Rectangle {
+                let sw = swatch_width(&entry.swatch, font_size);
+
+                match &entry.swatch {
+                    LegendSwatch::Square => {
+                        renderer.fill_quad(
+                            crate::core::renderer::Quad {
+                                bounds: crate::core::Rectangle {
+                                    x,
+                                    y: row_y + (font_size - square_size) / 2.0,
+                                    width: square_size,
+                                    height: square_size,
+                                },
+                                border: crate::core::Border {
+                                    radius: 2.0.into(),
+                                    ..Default::default()
+                                },
+                                ..Default::default()
+                            },
+                            swatch_color,
+                        );
+                    }
+                    LegendSwatch::Line { style, marker } => {
+                        draw_line_swatch(
+                            renderer,
                             x,
-                            y: row_y + (font_size - swatch_size) / 2.0,
-                            width: swatch_size,
-                            height: swatch_size,
-                        },
-                        border: crate::core::Border {
-                            radius: 2.0.into(),
-                            ..Default::default()
-                        },
-                        ..Default::default()
-                    },
-                    swatch_color,
-                );
+                            row_y,
+                            sw,
+                            font_size,
+                            style,
+                            marker.as_ref(),
+                            swatch_color,
+                            background,
+                            text_pair,
+                            &seed,
+                            &dim,
+                        );
+                    }
+                }
 
                 // Draw text label
                 renderer.fill_text(
@@ -335,7 +364,7 @@ where
                         letter_spacing: Default::default(),
                         weight: None,
                     },
-                    crate::core::Point::new(x + swatch_size + SWATCH_TEXT_GAP, row_y),
+                    crate::core::Point::new(x + sw + SWATCH_TEXT_GAP, row_y),
                     dim(text_color),
                     *viewport,
                 );
@@ -344,4 +373,146 @@ where
             }
         }
     }
+}
+
+/// Returns the width of the swatch drawn next to a legend entry, in pixels.
+fn swatch_width(swatch: &LegendSwatch, font_size: f32) -> f32 {
+    match swatch {
+        LegendSwatch::Square => font_size * SWATCH_SCALE,
+        LegendSwatch::Line { .. } => font_size * LINE_SWATCH_SCALE,
+    }
+}
+
+/// Draws a horizontal line swatch with an optional marker overlay.
+#[allow(clippy::too_many_arguments)]
+fn draw_line_swatch<Renderer>(
+    renderer: &mut Renderer,
+    x: f32,
+    row_y: f32,
+    width: f32,
+    font_size: f32,
+    style: &LineStyle,
+    marker: Option<&crate::line::marker::Marker>,
+    line_color: crate::core::Color,
+    background: crate::core::Color,
+    text_pair: crate::color::Pair,
+    seed: &crate::palette::Seed,
+    dim: &dyn Fn(crate::core::Color) -> crate::core::Color,
+) where
+    Renderer: geometry::Renderer,
+{
+    let cy = font_size / 2.0;
+    let mut frame = Frame::new(renderer, Size::new(width, font_size));
+
+    let line_path = Path::new(|builder| {
+        builder.move_to(Point::new(0.0, cy));
+        builder.line_to(Point::new(width, cy));
+    });
+
+    let dash_stack: &[f32] = match style {
+        LineStyle::Solid => &[],
+        LineStyle::Dashed => &[8.0, 4.0],
+        LineStyle::Dotted => &[1.0, 3.0],
+        LineStyle::Custom { segments } => segments.as_slice(),
+    };
+
+    let mut stroke = Stroke::default().with_width(1.5).with_color(line_color);
+    stroke.line_dash = LineDash {
+        segments: dash_stack,
+        offset: 0,
+    };
+    if matches!(style, LineStyle::Dotted) {
+        stroke = stroke.with_line_cap(LineCap::Round);
+    }
+    frame.stroke(&line_path, stroke);
+
+    if let Some(marker) = marker {
+        let marker_fill = marker
+            .color
+            .map(|c| c.resolve(background, text_pair, seed, None))
+            .unwrap_or(line_color);
+        let marker_fill = dim(marker_fill);
+        // Cap marker so it fits in the swatch height while respecting config.
+        let size = marker.size.min(font_size).max(2.0);
+        let half = size / 2.0;
+        let cx = width / 2.0;
+        let center = Point::new(cx, cy);
+
+        let marker_path = Path::new(|builder| match marker.shape {
+            Shape::Circle => {
+                builder.circle(center, half);
+            }
+            Shape::Square => {
+                builder.rectangle(Point::new(cx - half, cy - half), Size::new(size, size));
+            }
+            Shape::Diamond => {
+                builder.move_to(Point::new(cx, cy - half));
+                builder.line_to(Point::new(cx + half, cy));
+                builder.line_to(Point::new(cx, cy + half));
+                builder.line_to(Point::new(cx - half, cy));
+                builder.close();
+            }
+            Shape::Triangle => {
+                builder.move_to(Point::new(cx, cy - half));
+                builder.line_to(Point::new(cx + half, cy + half));
+                builder.line_to(Point::new(cx - half, cy + half));
+                builder.close();
+            }
+            Shape::TriangleDown => {
+                builder.move_to(Point::new(cx, cy + half));
+                builder.line_to(Point::new(cx + half, cy - half));
+                builder.line_to(Point::new(cx - half, cy - half));
+                builder.close();
+            }
+            Shape::Cross => {
+                let arm = half * 0.3;
+                builder.move_to(Point::new(cx - arm, cy - half));
+                builder.line_to(Point::new(cx + arm, cy - half));
+                builder.line_to(Point::new(cx + arm, cy - arm));
+                builder.line_to(Point::new(cx + half, cy - arm));
+                builder.line_to(Point::new(cx + half, cy + arm));
+                builder.line_to(Point::new(cx + arm, cy + arm));
+                builder.line_to(Point::new(cx + arm, cy + half));
+                builder.line_to(Point::new(cx - arm, cy + half));
+                builder.line_to(Point::new(cx - arm, cy + arm));
+                builder.line_to(Point::new(cx - half, cy + arm));
+                builder.line_to(Point::new(cx - half, cy - arm));
+                builder.line_to(Point::new(cx - arm, cy - arm));
+                builder.close();
+            }
+            Shape::X => {
+                let diag = half * 0.707;
+                builder.move_to(Point::new(cx - diag, cy - diag));
+                builder.line_to(Point::new(cx + diag, cy + diag));
+                builder.move_to(Point::new(cx + diag, cy - diag));
+                builder.line_to(Point::new(cx - diag, cy + diag));
+            }
+        });
+
+        if marker.shape != Shape::X {
+            frame.fill(&marker_path, marker_fill);
+        }
+
+        if let Some(stroke_spec) = marker.stroke {
+            let stroke_color = dim(stroke_spec.resolve(background, text_pair, seed, None));
+            frame.stroke(
+                &marker_path,
+                Stroke::default()
+                    .with_width(marker.stroke_width)
+                    .with_color(stroke_color),
+            );
+        } else if marker.shape == Shape::X {
+            frame.stroke(
+                &marker_path,
+                Stroke::default()
+                    .with_width(marker.stroke_width.max(2.0))
+                    .with_color(marker_fill),
+            );
+        }
+    }
+
+    let geometry = frame.into_geometry();
+    renderer.with_translation(crate::core::Vector::new(x, row_y), |renderer| {
+        renderer.draw_geometry(geometry);
+    });
 }

@@ -105,7 +105,7 @@ where
 
 /// Seed colors extracted from a theme, used to generate palettes.
 #[derive(Debug, Clone, Copy)]
-pub struct PaletteSeed {
+pub struct Seed {
     pub primary: crate::core::Color,
     pub secondary: crate::core::Color,
     pub success: crate::core::Color,
@@ -122,7 +122,7 @@ pub struct Resolved {
 
 impl Resolved {
     /// Resolve a palette strategy into concrete colors.
-    pub fn resolve(palette: &Palette, seed: &PaletteSeed, n: usize) -> Self {
+    pub fn resolve(palette: &Palette, seed: &Seed, n: usize) -> Self {
         let n = n.max(1);
         let colors = match palette {
             Palette::Categorical => generate_categorical(seed, n),
@@ -315,7 +315,7 @@ pub fn shift_lightness(color: crate::core::Color, background: crate::core::Color
 // === Color generation algorithms ===
 
 /// Generate categorical colors: distinct hues from theme's semantic colors.
-fn generate_categorical(seed: &PaletteSeed, n: usize) -> Vec<Color> {
+fn generate_categorical(seed: &Seed, n: usize) -> Vec<Color> {
     // Base pool reordered for max visual separation:
     // primary, secondary, success, warning, danger
     let base_pool = [seed.primary, seed.secondary, seed.success, seed.warning, seed.danger];
@@ -438,7 +438,7 @@ pub(crate) fn sample_gradient(stops: &[crate::core::Color], t: f32) -> crate::co
 /// Stops are wrapper [`Color`]s — semantic seed slots are resolved
 /// through `seed`, and adaptive `Contrast` stops fall back to
 /// `seed.primary` (same rule as [`Color::resolve_seed`]).
-fn generate_gradient(stops: &[Color], seed: &PaletteSeed, n: usize) -> Vec<Color> {
+fn generate_gradient(stops: &[Color], seed: &Seed, n: usize) -> Vec<Color> {
     if stops.is_empty() {
         return vec![Color::Fixed(crate::core::Color::BLACK); n];
     }
@@ -474,8 +474,8 @@ fn interpolate_hue(h1: f32, h2: f32, t: f32) -> f32 {
 mod tests {
     use super::*;
 
-    fn test_seed() -> PaletteSeed {
-        PaletteSeed {
+    fn test_seed() -> Seed {
+        Seed {
             primary: crate::core::Color::from_rgb(0.2, 0.4, 0.8),
             secondary: crate::core::Color::from_rgb(0.6, 0.3, 0.7),
             success: crate::core::Color::from_rgb(0.2, 0.7, 0.3),

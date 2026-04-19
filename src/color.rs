@@ -217,7 +217,7 @@ impl Color {
         self,
         background: crate::core::Color,
         design_pair: Pair,
-        seed: &crate::palette::PaletteSeed,
+        seed: &crate::palette::Seed,
         fallback: Option<crate::core::Color>,
     ) -> crate::core::Color {
         match self {
@@ -243,7 +243,7 @@ impl Color {
     /// Adaptive [`Color::Contrast`] variants don't carry a single-hue
     /// interpretation in this context, so they fall back to
     /// [`PaletteSeed::primary`].
-    pub fn resolve_seed(self, seed: &crate::palette::PaletteSeed) -> crate::core::Color {
+    pub fn resolve_seed(self, seed: &crate::palette::Seed) -> crate::core::Color {
         match self {
             Color::Fixed(c) => c,
             Color::Primary => seed.primary,

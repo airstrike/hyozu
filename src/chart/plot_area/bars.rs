@@ -645,7 +645,7 @@ where
         // The design's palette seed is used by fill encodings to build a
         // categorical sub-palette sized to the distinct-key count. Theme is
         // invariant across series, so compute the seed once per draw.
-        let seed = theme.palette_seed();
+        let seed = theme.seed();
 
         // Draw each series
         for (series_idx, (series, rects)) in self.data.series.iter().zip(state.series_rects.iter()).enumerate() {

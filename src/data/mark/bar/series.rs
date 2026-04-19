@@ -4,7 +4,7 @@ use crate::core::Pixels;
 use crate::core::font::{Style, Weight};
 use crate::data::{Datum, IntoDatums};
 use crate::encoding::{Encoding, channel};
-use crate::palette::{Palette, PaletteSeed};
+use crate::palette::{Palette, Seed};
 
 /// A single series of bars within a bar chart.
 #[derive(Debug, Clone)]
@@ -73,13 +73,7 @@ impl Series {
     /// `chart_default` is the user's `Data::palette(...)` setting (if any),
     /// threaded through so encodings built without an explicit `.palette(...)`
     /// override can inherit the chart's flavor. See `GOG.md` D17.
-    pub fn resolved_color_at(
-        &self,
-        i: usize,
-        seed: &PaletteSeed,
-        chart_default: Option<&Palette>,
-        fallback: Color,
-    ) -> Color {
+    pub fn resolved_color_at(&self, i: usize, seed: &Seed, chart_default: Option<&Palette>, fallback: Color) -> Color {
         // 1. point_colors override
         if let Some(pc) = self.point_color(i) {
             return *pc;
@@ -295,8 +289,8 @@ mod tests {
     use super::*;
     use crate::encoding;
 
-    fn test_seed() -> PaletteSeed {
-        PaletteSeed {
+    fn test_seed() -> Seed {
+        Seed {
             primary: crate::core::Color::from_rgb8(50, 100, 200),
             secondary: crate::core::Color::from_rgb8(200, 50, 100),
             success: crate::core::Color::from_rgb8(100, 200, 50),

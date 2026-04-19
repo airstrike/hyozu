@@ -114,7 +114,7 @@ where
         // Get text color from theme, resolved relative to background
         let background = design.background_color();
         let text_pair = design.text_pair();
-        let seed = design.palette_seed();
+        let seed = design.seed();
         let text_color = design.text_color().resolve(background, text_pair, &seed, None);
 
         // Resolve typography: per-chart style wins, then theme title default,
