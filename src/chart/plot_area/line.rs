@@ -10,7 +10,7 @@ use crate::widget::renderer::geometry;
 
 use crate::core::{Point, Rectangle};
 use crate::line::label::{Position, Show};
-use crate::line::marker::{self, Shape};
+use crate::line::marker;
 
 /// State for a Line - stores positioned line points and label info
 pub struct State {
@@ -147,7 +147,7 @@ where
 
                 // Resolve position and rect - either auto with hit-testing or fixed
                 let (resolved_position, label_rect) = match label_config.position {
-                    Position::Auto => find_best_label_placement(
+                    Position::Auto => place_label(
                         *pixel_point,
                         label_width,
                         label_height,
@@ -170,7 +170,7 @@ where
                         .map(|(rect, _)| rect)
                         .unwrap_or(start_rect);
                         // Guarantee visibility at edges even if no valid slot exists.
-                        (other, clamp_rect_to_bounds(rect, plane.bounds))
+                        (other, clamp_to_bounds(rect, plane.bounds))
                     }
                 };
 
@@ -220,12 +220,8 @@ where
             palette.get(color_offset).resolve(background, text_pair, &seed, None)
         };
 
-        let thickness = 1.5;
-
-        // Create a frame for drawing
         let mut frame = Frame::new(renderer, layout_bounds.size());
 
-        // Build a path from all points
         let path = Path::new(|builder| {
             if let Some(first) = state.pixel_points.first() {
                 builder.move_to(crate::core::Point::new(first.x, first.y));
@@ -235,18 +231,8 @@ where
             }
         });
 
-        // Build the stroke with the configured dash pattern.
-        // The `LineDash::segments` field borrows `&[f32]` for the duration of
-        // the `frame.stroke()` call only, so we can point it at either a stack
-        // slice or the `Custom` vec via a local binding.
-        let dash_stack: &[f32] = match &self.data.style {
-            LineStyle::Solid => &[],
-            LineStyle::Dashed => &[8.0, 4.0],
-            LineStyle::Dotted => &[1.0, 3.0],
-            LineStyle::Custom { segments } => segments.as_slice(),
-        };
-
-        let mut stroke = Stroke::default().with_width(thickness).with_color(color);
+        let dash_stack = dash_segments(&self.data.style);
+        let mut stroke = Stroke::default().with_width(self.data.width).with_color(color);
         stroke.line_dash = LineDash {
             segments: dash_stack,
             offset: 0,
@@ -263,160 +249,18 @@ where
             renderer.draw_geometry(geometry);
         });
 
-        // Draw markers if configured
         if let Some(marker_config) = &self.data.marker {
-            let marker_color = if let Some(marker_color_spec) = marker_config.color {
-                marker_color_spec.resolve(background, text_pair, &seed, None)
-            } else {
-                color
-            };
-
-            let num_points = state.pixel_points.len();
-
-            // Find min/max Y indices for MinMax modes
-            let minmax_indices: Vec<usize> = match marker_config.show {
-                marker::Show::MinMaxFirst | marker::Show::MinMaxAll | marker::Show::MinMaxLast => {
-                    let (min_val, max_val) = self
-                        .data
-                        .points
-                        .iter()
-                        .fold((f64::INFINITY, f64::NEG_INFINITY), |(min, max), p| {
-                            (min.min(p.y), max.max(p.y))
-                        });
-
-                    match marker_config.show {
-                        marker::Show::MinMaxFirst => {
-                            let min_idx = self.data.points.iter().position(|p| p.y == min_val);
-                            let max_idx = self.data.points.iter().position(|p| p.y == max_val);
-                            [min_idx, max_idx].into_iter().flatten().collect()
-                        }
-                        marker::Show::MinMaxLast => {
-                            let min_idx = self.data.points.iter().rposition(|p| p.y == min_val);
-                            let max_idx = self.data.points.iter().rposition(|p| p.y == max_val);
-                            [min_idx, max_idx].into_iter().flatten().collect()
-                        }
-                        marker::Show::MinMaxAll => self
-                            .data
-                            .points
-                            .iter()
-                            .enumerate()
-                            .filter(|(_, p)| p.y == min_val || p.y == max_val)
-                            .map(|(i, _)| i)
-                            .collect(),
-                        _ => vec![],
-                    }
-                }
-                _ => vec![],
-            };
-
-            // Create a frame for markers
             let mut marker_frame = Frame::new(renderer, layout_bounds.size());
-
-            for (idx, pixel_point) in state.pixel_points.iter().enumerate() {
-                // Check if this point should show a marker
-                let should_show = match marker_config.show {
-                    marker::Show::Any => true,
-                    marker::Show::FirstOnly => idx == 0,
-                    marker::Show::LastOnly => idx == num_points - 1,
-                    marker::Show::FirstAndLast => idx == 0 || idx == num_points - 1,
-                    marker::Show::MinMaxFirst | marker::Show::MinMaxAll | marker::Show::MinMaxLast => {
-                        minmax_indices.contains(&idx)
-                    }
-                };
-
-                if !should_show {
-                    continue;
-                }
-
-                let size = marker_config.size;
-                let half = size / 2.0;
-
-                // Build path for the marker shape
-                let path = Path::new(|builder| {
-                    match marker_config.shape {
-                        Shape::Circle => {
-                            builder.circle(*pixel_point, half);
-                        }
-                        Shape::Square => {
-                            builder.rectangle(
-                                Point::new(pixel_point.x - half, pixel_point.y - half),
-                                crate::core::Size::new(size, size),
-                            );
-                        }
-                        Shape::Diamond => {
-                            builder.move_to(Point::new(pixel_point.x, pixel_point.y - half));
-                            builder.line_to(Point::new(pixel_point.x + half, pixel_point.y));
-                            builder.line_to(Point::new(pixel_point.x, pixel_point.y + half));
-                            builder.line_to(Point::new(pixel_point.x - half, pixel_point.y));
-                            builder.close();
-                        }
-                        Shape::Triangle => {
-                            // Pointing up
-                            builder.move_to(Point::new(pixel_point.x, pixel_point.y - half));
-                            builder.line_to(Point::new(pixel_point.x + half, pixel_point.y + half));
-                            builder.line_to(Point::new(pixel_point.x - half, pixel_point.y + half));
-                            builder.close();
-                        }
-                        Shape::TriangleDown => {
-                            // Pointing down
-                            builder.move_to(Point::new(pixel_point.x, pixel_point.y + half));
-                            builder.line_to(Point::new(pixel_point.x + half, pixel_point.y - half));
-                            builder.line_to(Point::new(pixel_point.x - half, pixel_point.y - half));
-                            builder.close();
-                        }
-                        Shape::Cross => {
-                            // Plus sign (+)
-                            let arm = half * 0.3;
-                            builder.move_to(Point::new(pixel_point.x - arm, pixel_point.y - half));
-                            builder.line_to(Point::new(pixel_point.x + arm, pixel_point.y - half));
-                            builder.line_to(Point::new(pixel_point.x + arm, pixel_point.y - arm));
-                            builder.line_to(Point::new(pixel_point.x + half, pixel_point.y - arm));
-                            builder.line_to(Point::new(pixel_point.x + half, pixel_point.y + arm));
-                            builder.line_to(Point::new(pixel_point.x + arm, pixel_point.y + arm));
-                            builder.line_to(Point::new(pixel_point.x + arm, pixel_point.y + half));
-                            builder.line_to(Point::new(pixel_point.x - arm, pixel_point.y + half));
-                            builder.line_to(Point::new(pixel_point.x - arm, pixel_point.y + arm));
-                            builder.line_to(Point::new(pixel_point.x - half, pixel_point.y + arm));
-                            builder.line_to(Point::new(pixel_point.x - half, pixel_point.y - arm));
-                            builder.line_to(Point::new(pixel_point.x - arm, pixel_point.y - arm));
-                            builder.close();
-                        }
-                        Shape::X => {
-                            let diag = half * 0.707; // cos(45°)
-                            // We'll draw a simplified X using lines
-                            builder.move_to(Point::new(pixel_point.x - diag, pixel_point.y - diag));
-                            builder.line_to(Point::new(pixel_point.x + diag, pixel_point.y + diag));
-                            builder.move_to(Point::new(pixel_point.x + diag, pixel_point.y - diag));
-                            builder.line_to(Point::new(pixel_point.x - diag, pixel_point.y + diag));
-                        }
-                    }
-                });
-
-                // Fill the marker (except for X which is stroke-only)
-                if marker_config.shape != Shape::X {
-                    marker_frame.fill(&path, marker_color);
-                }
-
-                // Stroke the marker if configured
-                if let Some(stroke_color_spec) = marker_config.stroke {
-                    let stroke_color = stroke_color_spec.resolve(background, text_pair, &seed, None);
-                    marker_frame.stroke(
-                        &path,
-                        Stroke::default()
-                            .with_width(marker_config.stroke_width)
-                            .with_color(stroke_color),
-                    );
-                } else if marker_config.shape == Shape::X {
-                    // X shape needs stroke to be visible
-                    marker_frame.stroke(
-                        &path,
-                        Stroke::default()
-                            .with_width(marker_config.stroke_width.max(2.0))
-                            .with_color(marker_color),
-                    );
-                }
-            }
-
+            draw_markers(
+                &mut marker_frame,
+                &state.pixel_points,
+                &self.data.points,
+                marker_config,
+                color,
+                background,
+                text_pair,
+                &seed,
+            );
             let marker_geometry = marker_frame.into_geometry();
             renderer.with_translation(crate::core::Vector::new(layout_bounds.x, layout_bounds.y), |renderer| {
                 renderer.draw_geometry(marker_geometry);
@@ -498,6 +342,174 @@ where
             });
         }
     }
+}
+
+/// Returns the dash pattern segments for a [`LineStyle`].
+///
+/// Borrows `Custom`'s segment vec; the returned slice is only valid for as
+/// long as the borrowed `style`.
+pub(super) fn dash_segments(style: &LineStyle) -> &[f32] {
+    match style {
+        LineStyle::Solid => &[],
+        LineStyle::Dashed => &[8.0, 4.0],
+        LineStyle::Dotted => &[1.0, 3.0],
+        LineStyle::Custom { segments } => segments.as_slice(),
+    }
+}
+
+/// Draws the markers for a polyline series into `frame`.
+///
+/// Used by both line and area renderers so marker semantics (Show filter,
+/// shape paths, fill+stroke layering) stay identical across mark types.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn draw_markers<R>(
+    frame: &mut Frame<R>,
+    pixel_points: &[Point],
+    raw_points: &[crate::data::Datum],
+    config: &marker::Marker,
+    base_color: crate::core::Color,
+    background: crate::core::Color,
+    text_pair: crate::color::Pair,
+    seed: &crate::palette::Seed,
+) where
+    R: geometry::Renderer,
+{
+    use marker::{Shape, Show};
+
+    let marker_color = config
+        .color
+        .map(|spec| spec.resolve(background, text_pair, seed, None))
+        .unwrap_or(base_color);
+
+    let n = pixel_points.len();
+    if n == 0 {
+        return;
+    }
+
+    let minmax_indices: Vec<usize> = match config.show {
+        Show::MinMaxFirst | Show::MinMaxAll | Show::MinMaxLast => {
+            let (min_val, max_val) = raw_points
+                .iter()
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| {
+                    (lo.min(p.y), hi.max(p.y))
+                });
+            match config.show {
+                Show::MinMaxFirst => {
+                    let lo = raw_points.iter().position(|p| p.y == min_val);
+                    let hi = raw_points.iter().position(|p| p.y == max_val);
+                    [lo, hi].into_iter().flatten().collect()
+                }
+                Show::MinMaxLast => {
+                    let lo = raw_points.iter().rposition(|p| p.y == min_val);
+                    let hi = raw_points.iter().rposition(|p| p.y == max_val);
+                    [lo, hi].into_iter().flatten().collect()
+                }
+                Show::MinMaxAll => raw_points
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, p)| p.y == min_val || p.y == max_val)
+                    .map(|(i, _)| i)
+                    .collect(),
+                _ => vec![],
+            }
+        }
+        _ => vec![],
+    };
+
+    for (idx, point) in pixel_points.iter().enumerate() {
+        let visible = match config.show {
+            Show::Any => true,
+            Show::FirstOnly => idx == 0,
+            Show::LastOnly => idx == n - 1,
+            Show::FirstAndLast => idx == 0 || idx == n - 1,
+            Show::MinMaxFirst | Show::MinMaxAll | Show::MinMaxLast => minmax_indices.contains(&idx),
+        };
+        if !visible {
+            continue;
+        }
+
+        let path = build_marker_path(config.shape, *point, config.size);
+
+        if config.shape != Shape::X {
+            frame.fill(&path, marker_color);
+        }
+
+        if let Some(stroke_spec) = config.stroke {
+            let stroke_color = stroke_spec.resolve(background, text_pair, seed, None);
+            frame.stroke(
+                &path,
+                Stroke::default()
+                    .with_width(config.stroke_width)
+                    .with_color(stroke_color),
+            );
+        } else if config.shape == Shape::X {
+            frame.stroke(
+                &path,
+                Stroke::default()
+                    .with_width(config.stroke_width.max(2.0))
+                    .with_color(marker_color),
+            );
+        }
+    }
+}
+
+/// Builds the path for a single marker shape centered on `point`.
+fn build_marker_path(shape: marker::Shape, point: Point, size: f32) -> Path {
+    use marker::Shape;
+    let half = size / 2.0;
+    Path::new(|builder| match shape {
+        Shape::Circle => {
+            builder.circle(point, half);
+        }
+        Shape::Square => {
+            builder.rectangle(
+                Point::new(point.x - half, point.y - half),
+                crate::core::Size::new(size, size),
+            );
+        }
+        Shape::Diamond => {
+            builder.move_to(Point::new(point.x, point.y - half));
+            builder.line_to(Point::new(point.x + half, point.y));
+            builder.line_to(Point::new(point.x, point.y + half));
+            builder.line_to(Point::new(point.x - half, point.y));
+            builder.close();
+        }
+        Shape::Triangle => {
+            builder.move_to(Point::new(point.x, point.y - half));
+            builder.line_to(Point::new(point.x + half, point.y + half));
+            builder.line_to(Point::new(point.x - half, point.y + half));
+            builder.close();
+        }
+        Shape::TriangleDown => {
+            builder.move_to(Point::new(point.x, point.y + half));
+            builder.line_to(Point::new(point.x + half, point.y - half));
+            builder.line_to(Point::new(point.x - half, point.y - half));
+            builder.close();
+        }
+        Shape::Cross => {
+            let arm = half * 0.3;
+            builder.move_to(Point::new(point.x - arm, point.y - half));
+            builder.line_to(Point::new(point.x + arm, point.y - half));
+            builder.line_to(Point::new(point.x + arm, point.y - arm));
+            builder.line_to(Point::new(point.x + half, point.y - arm));
+            builder.line_to(Point::new(point.x + half, point.y + arm));
+            builder.line_to(Point::new(point.x + arm, point.y + arm));
+            builder.line_to(Point::new(point.x + arm, point.y + half));
+            builder.line_to(Point::new(point.x - arm, point.y + half));
+            builder.line_to(Point::new(point.x - arm, point.y + arm));
+            builder.line_to(Point::new(point.x - half, point.y + arm));
+            builder.line_to(Point::new(point.x - half, point.y - arm));
+            builder.line_to(Point::new(point.x - arm, point.y - arm));
+            builder.close();
+        }
+        Shape::X => {
+            let diag = half * 0.707;
+            builder.move_to(Point::new(point.x - diag, point.y - diag));
+            builder.line_to(Point::new(point.x + diag, point.y + diag));
+            builder.move_to(Point::new(point.x + diag, point.y - diag));
+            builder.line_to(Point::new(point.x - diag, point.y + diag));
+        }
+    })
 }
 
 /// Compute label rectangle for a given position (pixel coordinates)
@@ -645,7 +657,7 @@ fn search_from_position(
 /// Shift `rect` so it fits inside `bounds` without resizing. If the rect is
 /// larger than the bounds on an axis, that axis is left anchored at the
 /// bounds origin (prefers showing the left/top portion of the text).
-pub(super) fn clamp_rect_to_bounds(rect: Rectangle, bounds: Rectangle) -> Rectangle {
+pub(super) fn clamp_to_bounds(rect: Rectangle, bounds: Rectangle) -> Rectangle {
     let mut x = rect.x;
     if x + rect.width > bounds.x + bounds.width {
         x = bounds.x + bounds.width - rect.width;
@@ -664,7 +676,7 @@ pub(super) fn clamp_rect_to_bounds(rect: Rectangle, bounds: Rectangle) -> Rectan
 }
 
 /// Find the best position for a label, returning both the position and final rect
-pub(super) fn find_best_label_placement(
+pub(super) fn place_label(
     point: Point,
     label_width: f32,
     label_height: f32,
@@ -717,7 +729,7 @@ pub(super) fn find_best_label_placement(
     });
 
     let rect = match plot_bounds {
-        Some(bounds) => clamp_rect_to_bounds(rect, bounds),
+        Some(bounds) => clamp_to_bounds(rect, bounds),
         None => rect,
     };
 
@@ -785,8 +797,7 @@ mod tests {
         let existing: Vec<Rectangle> = vec![];
         let obstacles: Vec<Rectangle> = vec![];
 
-        let (pos, rect) =
-            find_best_label_placement(point, LABEL_WIDTH, LABEL_HEIGHT, &segments, &existing, &obstacles, None);
+        let (pos, rect) = place_label(point, LABEL_WIDTH, LABEL_HEIGHT, &segments, &existing, &obstacles, None);
 
         // Should pick Above (first priority)
         assert_eq!(pos, Position::Above);
@@ -802,8 +813,7 @@ mod tests {
         let existing: Vec<Rectangle> = vec![];
         let obstacles: Vec<Rectangle> = vec![];
 
-        let (pos, _rect) =
-            find_best_label_placement(point, LABEL_WIDTH, LABEL_HEIGHT, &segments, &existing, &obstacles, None);
+        let (pos, _rect) = place_label(point, LABEL_WIDTH, LABEL_HEIGHT, &segments, &existing, &obstacles, None);
 
         // Above would intersect the vertical line, should pick Below
         assert_eq!(pos, Position::Below);
@@ -821,7 +831,7 @@ mod tests {
             Rectangle::new(Point::new(0.0, 200.0), crate::core::Size::new(200.0, 30.0)), // bottom axis
         ];
 
-        let (pos, rect) = find_best_label_placement(
+        let (pos, rect) = place_label(
             point,
             LABEL_WIDTH,
             LABEL_HEIGHT,
@@ -854,7 +864,7 @@ mod tests {
         let existing: Vec<Rectangle> = vec![];
         let obstacles: Vec<Rectangle> = vec![];
 
-        let (_pos, rect) = find_best_label_placement(
+        let (_pos, rect) = place_label(
             point,
             LABEL_WIDTH,
             LABEL_HEIGHT,
@@ -882,7 +892,7 @@ mod tests {
         let existing: Vec<Rectangle> = vec![];
         let obstacles: Vec<Rectangle> = vec![];
 
-        let (pos, _rect) = find_best_label_placement(
+        let (pos, _rect) = place_label(
             point,
             LABEL_WIDTH,
             LABEL_HEIGHT,
@@ -905,7 +915,7 @@ mod tests {
         let existing: Vec<Rectangle> = vec![];
         let obstacles: Vec<Rectangle> = vec![];
 
-        let (_pos, rect) = find_best_label_placement(
+        let (_pos, rect) = place_label(
             point,
             LABEL_WIDTH,
             LABEL_HEIGHT,
@@ -938,7 +948,7 @@ mod tests {
         let existing: Vec<Rectangle> = vec![];
         let obstacles: Vec<Rectangle> = vec![];
 
-        let (_pos, rect) = find_best_label_placement(
+        let (_pos, rect) = place_label(
             point,
             wide_label,
             LABEL_HEIGHT,
@@ -972,7 +982,7 @@ mod tests {
         let obstacles: Vec<Rectangle> = vec![];
         let bounds = plot_bounds();
 
-        let (_pos, rect) = find_best_label_placement(
+        let (_pos, rect) = place_label(
             point,
             label_width,
             label_height,
@@ -1011,7 +1021,7 @@ mod tests {
         let existing: Vec<Rectangle> = vec![];
         let obstacles: Vec<Rectangle> = vec![];
 
-        let (_pos, rect) = find_best_label_placement(
+        let (_pos, rect) = place_label(
             point,
             label_width,
             label_height,
@@ -1042,8 +1052,7 @@ mod tests {
         )];
         let obstacles: Vec<Rectangle> = vec![];
 
-        let (pos, _rect) =
-            find_best_label_placement(point, LABEL_WIDTH, LABEL_HEIGHT, &segments, &existing, &obstacles, None);
+        let (pos, _rect) = place_label(point, LABEL_WIDTH, LABEL_HEIGHT, &segments, &existing, &obstacles, None);
 
         // Above overlaps existing, should pick Below
         assert_eq!(pos, Position::Below);

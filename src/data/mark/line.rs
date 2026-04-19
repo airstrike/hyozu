@@ -27,7 +27,7 @@ impl<T: IntoDatums> IntoLines for T {
 ///
 /// Patterns other than `Solid` are rendered using the underlying iced
 /// `Stroke::line_dash` field.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub enum LineStyle {
     /// Solid, continuous line (default).
     #[default]

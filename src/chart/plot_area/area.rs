@@ -1,12 +1,15 @@
 use super::Plane;
-use super::line::{alignment_for_position, clamp_rect_to_bounds, compute_label_rect, find_best_label_placement};
+use super::line::{
+    alignment_for_position, clamp_to_bounds, compute_label_rect, dash_segments, draw_markers, place_label,
+};
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
 use crate::core::{Point, Rectangle, Size};
 use crate::data::Datum;
+use crate::line::LineStyle;
 use crate::line::label::{Position, Show};
 use crate::widget::canvas::gradient::Linear;
-use crate::widget::canvas::{Fill, Frame, Path, Stroke, Text as CanvasText};
+use crate::widget::canvas::{Fill, Frame, LineCap, LineDash, Path, Stroke, Text as CanvasText};
 use crate::widget::renderer::geometry;
 
 pub struct State {
@@ -212,7 +215,7 @@ where
                 let label_width = label_text.len() as f32 * char_width;
                 let label_height = label_size * 1.2;
 
-                let (resolved_position, label_rect) = find_best_label_placement(
+                let (resolved_position, label_rect) = place_label(
                     *pixel_point,
                     label_width,
                     label_height,
@@ -245,7 +248,7 @@ where
                 // Guarantee the label stays inside the plot area even at the
                 // first/last data point, where the centered ideal rect would
                 // otherwise bleed past the edge and get clipped.
-                let label_rect = clamp_rect_to_bounds(label_rect, plane.bounds);
+                let label_rect = clamp_to_bounds(label_rect, plane.bounds);
 
                 placed_rects.push(label_rect);
                 state.series_label_texts[series_idx].push(label_text);
@@ -340,10 +343,13 @@ where
                         builder.line_to(*p);
                     }
                 });
-                stroke_frame.stroke(
-                    &stroke_path,
-                    Stroke::default().with_width(stroke_width).with_color(base_color),
-                );
+                let segments = dash_segments(&series.style);
+                let mut stroke = Stroke::default().with_width(stroke_width).with_color(base_color);
+                stroke.line_dash = LineDash { segments, offset: 0 };
+                if matches!(series.style, LineStyle::Dotted) {
+                    stroke = stroke.with_line_cap(LineCap::Round);
+                }
+                stroke_frame.stroke(&stroke_path, stroke);
             }
         }
 
@@ -358,6 +364,41 @@ where
         renderer.with_translation(translation, |renderer| {
             renderer.draw_geometry(stroke_geometry);
         });
+
+        let needs_marker_frame = self.data.series.iter().any(|s| s.marker.is_some());
+        if needs_marker_frame {
+            let mut marker_frame = Frame::new(renderer, layout_bounds.size());
+            for (series_idx, series) in self.data.series.iter().enumerate() {
+                let Some(marker_config) = &series.marker else {
+                    continue;
+                };
+                let upper = &state.series_points[series_idx];
+                if upper.is_empty() {
+                    continue;
+                }
+                let base_color = if let Some(c) = series.color {
+                    c.resolve(background, text_pair, &seed, None)
+                } else {
+                    palette
+                        .get(color_offset + series_idx)
+                        .resolve(background, text_pair, &seed, None)
+                };
+                draw_markers(
+                    &mut marker_frame,
+                    upper,
+                    &series.points,
+                    marker_config,
+                    base_color,
+                    background,
+                    text_pair,
+                    &seed,
+                );
+            }
+            let marker_geometry = marker_frame.into_geometry();
+            renderer.with_translation(translation, |renderer| {
+                renderer.draw_geometry(marker_geometry);
+            });
+        }
 
         // Draw data labels per series. All series share one frame so that
         // we only emit a single `draw_geometry` for labels regardless of

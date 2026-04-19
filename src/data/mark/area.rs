@@ -1,9 +1,14 @@
 use crate::color::Color;
 use crate::data::axis::{self, Axis, Kind, Orientation, Placement};
+pub use crate::data::mark::line::LineStyle;
 use crate::data::{Datum, IntoDatums};
 
 pub mod label {
     pub use crate::data::mark::line::label::*;
+}
+
+pub mod marker {
+    pub use crate::data::mark::line::marker::*;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -20,6 +25,11 @@ pub struct Series {
     pub(crate) stroke: Option<f32>,
     pub(crate) opacity: f32,
     pub(crate) name: Option<String>,
+    /// Dash pattern for the upper envelope stroke. Has no effect when
+    /// `stroke` is `None`.
+    pub(crate) style: LineStyle,
+    /// Optional marker drawn at each data point on the upper envelope.
+    pub(crate) marker: Option<marker::Marker>,
     /// Data label configuration. Reuses the line chart label type since the
     /// placement semantics are identical (labels sit above/around points on a
     /// polyline envelope).
@@ -34,6 +44,8 @@ impl Series {
             stroke: Some(1.5),
             opacity: 0.4,
             name: None,
+            style: LineStyle::Solid,
+            marker: None,
             label: None,
         }
     }
@@ -53,6 +65,11 @@ impl Series {
         self
     }
 
+    /// Alias for `stroke(...)` for symmetry with `Line::width`.
+    pub fn width(self, width: f32) -> Self {
+        self.stroke(width)
+    }
+
     pub fn no_stroke(mut self) -> Self {
         self.stroke = None;
         self
@@ -61,6 +78,28 @@ impl Series {
     pub fn opacity(mut self, opacity: f32) -> Self {
         self.opacity = opacity.clamp(0.0, 1.0);
         self
+    }
+
+    /// Sets the dash pattern for the upper-envelope stroke.
+    ///
+    /// Has no effect when the stroke is removed via [`no_stroke`](Self::no_stroke).
+    pub fn style(mut self, style: LineStyle) -> Self {
+        self.style = style;
+        self
+    }
+
+    /// Configure markers drawn at each data point on the upper envelope.
+    ///
+    /// Accepts a [`marker::Marker`] or anything that converts into one (e.g.
+    /// `Shape::Circle` or `Shape::Diamond + Show::FirstAndLast`).
+    pub fn markers(mut self, marker: impl Into<Option<marker::Marker>>) -> Self {
+        self.marker = marker.into();
+        self
+    }
+
+    /// Returns a mutable reference to the marker configuration.
+    pub fn marker_mut(&mut self) -> Option<&mut marker::Marker> {
+        self.marker.as_mut()
     }
 
     /// Configure data labels for this area series.
@@ -84,6 +123,16 @@ impl Series {
     /// Sets the fill opacity in place (clamped to `[0.0, 1.0]`).
     pub fn set_opacity(&mut self, opacity: f32) {
         self.opacity = opacity.clamp(0.0, 1.0);
+    }
+
+    /// Sets the dash pattern in place.
+    pub fn set_style(&mut self, style: LineStyle) {
+        self.style = style;
+    }
+
+    /// Replaces the entire marker configuration in place.
+    pub fn set_marker(&mut self, marker: Option<marker::Marker>) {
+        self.marker = marker;
     }
 
     /// Replaces the entire label configuration.
@@ -193,6 +242,16 @@ impl Series {
     /// Returns the fill opacity.
     pub fn opacity_value(&self) -> f32 {
         self.opacity
+    }
+
+    /// Returns the dash pattern.
+    pub fn style_value(&self) -> &LineStyle {
+        &self.style
+    }
+
+    /// Returns a reference to the marker configuration, if any.
+    pub fn marker(&self) -> Option<&marker::Marker> {
+        self.marker.as_ref()
     }
 
     /// Returns a reference to the label configuration, if any.
@@ -349,6 +408,18 @@ impl Area {
     pub fn x_axis() -> Axis {
         Axis::new(Orientation::Bottom)
             .with_kind(Kind::Index)
+            .labels(Placement::OnTicks)
+            .with_ticks(axis::tick::Ticks::continuous())
+    }
+
+    /// Creates a time-based x-axis for area charts with timestamp data.
+    ///
+    /// - `Kind::Time` for timestamp bounds
+    /// - Smart label formatting based on scale (HH:MM, Jun 15, Jun 2024, etc.)
+    /// - Continuous tick style
+    pub fn time_axis() -> Axis {
+        Axis::new(Orientation::Bottom)
+            .with_kind(Kind::Time)
             .labels(Placement::OnTicks)
             .with_ticks(axis::tick::Ticks::continuous())
     }

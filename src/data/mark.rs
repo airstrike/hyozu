@@ -94,8 +94,8 @@ impl Mark {
                         name: name.clone(),
                         color: s.color,
                         swatch: LegendSwatch::Line {
-                            style: line::LineStyle::Solid,
-                            marker: None,
+                            style: s.style.clone(),
+                            marker: s.marker.clone(),
                         },
                     })
                 })

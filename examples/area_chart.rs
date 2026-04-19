@@ -1,7 +1,9 @@
 use iced::Task;
 use iced::widget::center;
 
+use hyozu::mark::area::LineStyle;
 use hyozu::mark::area::label::{Label, Position, Show};
+use hyozu::mark::area::marker::Shape;
 use hyozu::{area, areas, chart, data, palette};
 
 pub fn main() -> iced::Result {
@@ -29,9 +31,11 @@ impl App {
                 areas([
                     area([218, 250, 230, 270, 240, 280, 260])
                         .with_name("Revenue")
+                        .markers(Shape::Circle)
                         .data_labels(Label::new().show(Show::FirstAndLast)),
                     area([150, 180, 160, 200, 170, 210, 190])
                         .with_name("Expenses")
+                        .style(LineStyle::Dashed)
                         .data_labels(Label::new().show(Show::Any) + Position::Below),
                 ])
                 .stacked(),

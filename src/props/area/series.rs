@@ -4,6 +4,7 @@ use crate::color::Color;
 use crate::core::Pixels;
 use crate::data::mark::area::Series;
 use crate::data::mark::line::label::{self, Label};
+use crate::data::mark::line::{LineStyle, marker};
 use crate::map::Map;
 
 /// A property of an area series.
@@ -15,6 +16,10 @@ pub enum Property {
     Opacity(f32),
     /// Stroke width. `None` removes the upper-line stroke.
     Stroke(Option<f32>),
+    /// Dash pattern for the upper-line stroke.
+    Style(LineStyle),
+    /// Marker configuration drawn at each data point on the upper envelope.
+    Marker(Option<marker::Marker>),
     /// Replaces the entire data label configuration.
     Label(Option<Label>),
     /// Just the label position (keeps existing label config).
@@ -42,6 +47,8 @@ impl Property {
             Property::Color(c) => series.set_color(*c),
             Property::Opacity(o) => series.set_opacity(*o),
             Property::Stroke(s) => series.set_stroke(*s),
+            Property::Style(s) => series.set_style(s.clone()),
+            Property::Marker(m) => series.set_marker(m.clone()),
             Property::Label(l) => series.set_label(l.clone()),
             Property::LabelPosition(p) => series.set_label_position(*p),
             Property::LabelShow(s) => series.set_label_show(*s),
@@ -67,6 +74,16 @@ pub fn Opacity(value: f32) -> Property {
 #[allow(non_snake_case)]
 pub fn Stroke(value: Option<f32>) -> Property {
     Property::Stroke(value)
+}
+
+#[allow(non_snake_case)]
+pub fn Style(value: LineStyle) -> Property {
+    Property::Style(value)
+}
+
+#[allow(non_snake_case)]
+pub fn Marker(value: Option<marker::Marker>) -> Property {
+    Property::Marker(value)
 }
 
 #[allow(non_snake_case)]
