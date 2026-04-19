@@ -1,8 +1,7 @@
 //! Per-panel `tatami::Query` builders.
 //!
-//! Phase 1 ships minimally-valid queries that evaluate without error
-//! against the hewton cube. The shapes will tighten in later phases, but
-//! the `Panel::query` dispatch surface is already in place.
+//! Each constructor emits a concrete `tatami::Query` for its panel, keyed on
+//! the current trail entry and the active view.
 
 use std::num::NonZeroUsize;
 
@@ -67,10 +66,11 @@ pub fn kpi(current: &Query, view: &View) -> Query {
     }
 }
 
-/// Map panel — one row per State, with the current measure.
+/// Map panel — one row per State, carrying two metrics.
 ///
-/// Phase 1 ships a single-metric Series query; Phase 2 will add
-/// `room_nights_sold` as the bubble-size metric.
+/// Metric slot 0 is the active measure (drives choropleth fill); slot 1 is
+/// `room_nights_sold` (drives centroid bubble size). The panel renderer reads
+/// the two rows in that order.
 #[must_use]
 pub fn map(current: &Query, view: &View) -> Query {
     Query {
@@ -78,7 +78,7 @@ pub fn map(current: &Query, view: &View) -> Query {
             rows: Set::members(n("Geography"), n("Default"), n("State")),
         },
         slicer: current.slicer.clone(),
-        metrics: vec![measure_metric(view.measure)],
+        metrics: vec![measure_metric(view.measure), n("room_nights_sold")],
         options: Options::default(),
     }
 }
@@ -99,9 +99,6 @@ pub fn rail(current: &Query, view: &View) -> Query {
 }
 
 /// Time-series panel — one row per fiscal quarter for the current slicer.
-///
-/// Phase 1 uses a fixed Quarter grain; Phase 3 will drive grain from
-/// `view.period`.
 #[must_use]
 pub fn line(current: &Query, view: &View) -> Query {
     Query {

@@ -26,6 +26,15 @@ pub enum Error {
         detail: String,
     },
 
+    /// An HTTPS fetch for a remote asset failed.
+    #[error("fetch {url}: {detail}")]
+    Fetch {
+        /// The URL whose fetch failed.
+        url: String,
+        /// Human-readable failure detail from the HTTP / body pipeline.
+        detail: String,
+    },
+
     /// A `tokio::task::spawn_blocking` join failed.
     #[error("join: {0}")]
     Join(#[from] tokio::task::JoinError),

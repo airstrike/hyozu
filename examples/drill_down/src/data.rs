@@ -4,8 +4,10 @@
 //! example in `~/projects/tatami/examples/hewton/`) and a typed
 //! [`error::Error`] covering IO, parse, and cube-construction failure modes.
 
+pub mod centroids;
 pub mod error;
 pub mod schema;
 
+pub use centroids::Centroids;
 pub use error::Error;
 pub use schema::hewton_schema;

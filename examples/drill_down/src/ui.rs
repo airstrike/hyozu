@@ -1,11 +1,14 @@
 //! UI layer — dashboard state, navigation trail, per-panel async state.
 //!
-//! Phase 1 ships the plumbing: [`trail::Trail`], [`view::View`],
-//! [`panel::Panel`], [`query_state::QueryState`], [`dashboard::Dashboard`],
-//! and [`queries`] builders. Real panel rendering lands in later phases.
+//! The [`trail::Trail`] carries back/forward history; [`view::View`] carries
+//! the active measure + period; [`panel::Panel`] enumerates the rendered
+//! panels; [`query_state::QueryState`] tracks each panel's async state;
+//! [`dashboard::Dashboard`] owns the cube handle plus geo/centroids and
+//! dispatches per-panel `tatami::Query`s.
 
 pub mod dashboard;
 pub mod kpi;
+pub mod map_panel;
 pub mod panel;
 pub mod queries;
 pub mod query_state;

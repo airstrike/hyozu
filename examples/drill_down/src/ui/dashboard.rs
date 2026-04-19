@@ -1,10 +1,9 @@
 //! Dashboard state + the per-panel async dispatch plumbing.
 //!
-//! Phase 1 wired the navigation + per-panel async-result flow end-to-end
-//! against a constructed `InMemoryCube`. Phase 2 specializes the KPI
-//! panel's rendering through `hyozu::tatami::card`, adds a header with a
-//! measure switcher + back/forward buttons, and grows the dashboard's
-//! Message enum to carry view-toggle + navigation intents.
+//! Owns the cube, the navigation trail, and the per-panel async state.
+//! Specializes two panels through hyozu adapters: the KPI strip via
+//! `hyozu::tatami::card` and the Map panel via `ui::map_panel::render`.
+//! Remaining panels fall through to a text stub until their slices land.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -12,22 +11,26 @@ use std::sync::Arc;
 use iced::widget::{Column, button, column, container, row, text};
 use iced::{Element, Length, Task};
 
+use hyozu::GeoData;
 use tatami::Cube;
 use tatami_inmem::InMemoryCube;
 
-use crate::ui::kpi;
+use crate::data;
 use crate::ui::panel::Panel;
 use crate::ui::query_state::QueryState;
 use crate::ui::trail::Trail;
 use crate::ui::view::{Measure, Period, View};
+use crate::ui::{kpi, map_panel};
 
 /// Messages consumed by the Dashboard.
 ///
 /// The outer `App` layer lifts these via `lift_dashboard_message` — it
 /// translates dashboard-internal intents into the top-level `Message`
 /// enum and routes them back through the Dashboard's typed methods.
+///
+/// Kept exhaustive so the binary's lifter can match every variant; when
+/// adding a new variant, extend the lifter in lockstep.
 #[derive(Debug, Clone)]
-#[non_exhaustive]
 pub enum Message {
     /// A panel's query finished.
     PanelDone(Panel, Result<tatami::Results, String>),
@@ -49,29 +52,47 @@ pub enum Message {
 pub struct Dashboard {
     /// Shared handle to the OLAP cube.
     pub cube: Arc<InMemoryCube>,
+    /// Shared GeoJSON for the map panel's choropleth + bubble marks.
+    pub geo: Arc<GeoData>,
+    /// Per-state centroid lookup, derived from `geo` at construction.
+    pub centroids: Arc<data::Centroids>,
     /// Back/forward navigation history of queries.
     pub trail: Trail,
     /// Measure + period view mode.
     pub view: View,
-    /// iced theme — held on the dashboard so Phase 6 can toggle it.
+    /// iced theme applied to the dashboard's widgets.
     pub theme: iced::Theme,
     /// Per-panel async query state.
     pub panels: HashMap<Panel, QueryState>,
+    /// Cached chart `Data` for the map panel. Rebuilt when the map panel's
+    /// result lands; `None` while the query is pending or the results shape
+    /// was unexpected. Stored on the dashboard so the chart widget's
+    /// `&Data` borrow stays valid for the rendered frame.
+    pub map_data: Option<hyozu::Data>,
 }
 
 impl Dashboard {
     /// Construct a dashboard and return the initial per-panel dispatch.
-    pub fn new(cube: Arc<InMemoryCube>, initial: tatami::Query, view: View) -> (Self, Task<Message>) {
+    pub fn new(
+        cube: Arc<InMemoryCube>,
+        geo: Arc<GeoData>,
+        centroids: Arc<data::Centroids>,
+        initial: tatami::Query,
+        view: View,
+    ) -> (Self, Task<Message>) {
         let mut panels = HashMap::with_capacity(Panel::ALL.len());
         for panel in Panel::ALL {
             panels.insert(panel, QueryState::Running);
         }
         let mut dashboard = Self {
             cube,
+            geo,
+            centroids,
             trail: Trail::new(initial),
             view,
             theme: iced::Theme::Light,
             panels,
+            map_data: None,
         };
         let task = dashboard.dispatch();
         (dashboard, task)
@@ -118,6 +139,7 @@ impl Dashboard {
         let trail_q = self.trail.current().clone();
         let view = self.view;
         let cube = self.cube.clone();
+        self.map_data = None;
         let tasks: Vec<Task<Message>> = Panel::ALL
             .iter()
             .map(|&panel| {
@@ -133,6 +155,7 @@ impl Dashboard {
         let trail_q = self.trail.current().clone();
         let view = self.view;
         let cube = self.cube.clone();
+        self.map_data = None;
         let tasks: Vec<Task<Message>> = Panel::ALL
             .iter()
             .filter(|&&p| p != Panel::Chips)
@@ -149,10 +172,16 @@ impl Dashboard {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::PanelDone(panel, Ok(results)) => {
+                if panel == Panel::Map {
+                    self.map_data = map_panel::build_data(&results, &self.geo, &self.centroids);
+                }
                 self.panels.insert(panel, QueryState::Ok(results));
                 Task::none()
             }
             Message::PanelDone(panel, Err(error)) => {
+                if panel == Panel::Map {
+                    self.map_data = None;
+                }
                 self.panels.insert(panel, QueryState::Err(error));
                 Task::none()
             }
@@ -163,10 +192,6 @@ impl Dashboard {
             Message::SetPeriod(p) => self.set_view(View { period: p, ..self.view }),
             Message::Back => self.back(),
             Message::Forward => self.forward(),
-            // `Message` is `#[non_exhaustive]`; surface future variants
-            // loudly rather than silently dropping them.
-            #[allow(unreachable_patterns)]
-            _ => Task::none(),
         }
     }
 
@@ -230,13 +255,18 @@ impl Dashboard {
         .into()
     }
 
-    /// Render a single panel card. Kpi panel routes through the
-    /// `hyozu::tatami::card` adapter when its query resolved as a scalar;
-    /// every other panel still uses the text stub pending Phase 2b+.
+    /// Render a single panel card. The Kpi panel routes through the
+    /// `hyozu::tatami::card` adapter, the Map panel through
+    /// `ui::map_panel::render` over the cached map `Data`; remaining panels
+    /// fall through to a text stub until their slices land.
     fn render_card(&self, panel: Panel) -> Element<'_, Message> {
         let state = self.panels.get(&panel);
         let body: Element<'_, Message> = match (panel, state) {
             (Panel::Kpi, Some(QueryState::Ok(results))) => kpi::render(results, self.view.measure),
+            (Panel::Map, Some(QueryState::Ok(results))) => match self.map_data.as_ref() {
+                Some(data) => map_panel::render(data, self.view.measure),
+                None => map_panel::fallback(results),
+            },
             (_, None) => text("(no task)").size(14).into(),
             (_, Some(QueryState::Running)) => text("Running…").size(14).into(),
             (_, Some(QueryState::Ok(results))) => text(format!("Ok: {}", describe(results))).size(14).into(),
