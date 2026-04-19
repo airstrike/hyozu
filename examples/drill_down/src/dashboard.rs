@@ -26,7 +26,7 @@ use crate::panel::{Panel, kpi, line, map, rail};
 use crate::query_state::QueryState;
 use crate::spec::DashboardSpec;
 use crate::trail::Trail;
-use crate::{axis, data, metric};
+use crate::{axis, data, metric, slicer};
 
 /// Grid column count.
 pub const COLS: u16 = 12;
@@ -58,6 +58,8 @@ pub enum Message {
     Rail(rail::Message),
     /// User interacted with the Line panel's chrome.
     Line(line::Message),
+    /// User interacted with the top-of-page slicer row.
+    Slicer(slicer::Message),
     /// User clicked a chart element — currently used to drill on the map.
     MapClicked(Action),
     /// A tile was dragged, resized, or clicked.
@@ -83,6 +85,9 @@ pub struct Dashboard {
     pub title: String,
     /// Back/forward navigation history of slicer queries.
     pub trail: Trail,
+    /// Unified slicer state — every schema dim renders a picker, pinned
+    /// members form the active filter tuple fed to every panel's query.
+    pub slicer: slicer::State,
     /// Per-panel async result state.
     pub panels: HashMap<Panel, QueryState>,
     /// Per-panel bindings.
@@ -120,10 +125,13 @@ impl Dashboard {
             line,
         } = spec;
 
-        let slicer = Tuple::of(initial_slicer).unwrap_or_else(|_| Tuple::empty());
+        let seed_tuple = Tuple::of(initial_slicer).unwrap_or_else(|_| Tuple::empty());
+        let mut slicer_state = slicer::State::default();
+        slicer_state.sync_from_tuple(&seed_tuple, &schema);
+
         let initial = tatami::Query {
             axes: tatami::Axes::Scalar,
-            slicer,
+            slicer: slicer_state.to_tuple(),
             metrics: Vec::new(),
             options: Options::default(),
         };
@@ -141,6 +149,12 @@ impl Dashboard {
             .with_item(0, 2, 12, 1, Tile::Panel(Panel::Line));
         let grid = tile_grid::State::with_configuration(config);
 
+        let slicer_tasks: Vec<Task<Message>> = slicer_state
+            .load_options(&cube, &schema)
+            .into_iter()
+            .map(|t| t.map(Message::Slicer))
+            .collect();
+
         let mut dashboard = Self {
             cube,
             schema,
@@ -148,6 +162,7 @@ impl Dashboard {
             centroids,
             title,
             trail: Trail::new(initial),
+            slicer: slicer_state,
             panels,
             kpi,
             map,
@@ -159,7 +174,8 @@ impl Dashboard {
             grid,
             focus: None,
         };
-        let task = dashboard.dispatch_all();
+        let panel_tasks = dashboard.dispatch_all();
+        let task = Task::batch(std::iter::once(panel_tasks).chain(slicer_tasks));
         (dashboard, task)
     }
 
@@ -217,18 +233,36 @@ impl Dashboard {
         self.dispatch_all()
     }
 
-    /// Move back; re-dispatch when the cursor moves.
+    /// Build a query from the current slicer pins, push it onto the
+    /// trail, and re-dispatch every panel. Called after any slicer
+    /// change (picker edit, drill click, pin clear).
+    pub fn navigate_from_pins(&mut self) -> Task<Message> {
+        let slicer_tuple = self.slicer.to_tuple();
+        let query = tatami::Query {
+            axes: tatami::Axes::Scalar,
+            slicer: slicer_tuple,
+            metrics: Vec::new(),
+            options: Options::default(),
+        };
+        self.navigate(query)
+    }
+
+    /// Move back; re-dispatch when the cursor moves and sync the slicer
+    /// pins to the restored trail entry.
     pub fn back(&mut self) -> Task<Message> {
         if self.trail.back() {
+            self.slicer.sync_from_tuple(&self.trail.current().slicer, &self.schema);
             self.dispatch_all()
         } else {
             Task::none()
         }
     }
 
-    /// Move forward; re-dispatch when the cursor moves.
+    /// Move forward; re-dispatch when the cursor moves and sync the
+    /// slicer pins to the restored trail entry.
     pub fn forward(&mut self) -> Task<Message> {
         if self.trail.forward() {
+            self.slicer.sync_from_tuple(&self.trail.current().slicer, &self.schema);
             self.dispatch_all()
         } else {
             Task::none()
@@ -284,6 +318,10 @@ impl Dashboard {
                     Task::none()
                 }
             }
+            Message::Slicer(msg) => {
+                self.slicer.update(msg);
+                self.navigate_from_pins()
+            }
             Message::MapClicked(Action::Clicked(hyozu::Target::Feature { id, .. })) => {
                 let feature_id = id.as_str().to_owned();
                 let series = match self.panels.get(&Panel::Map) {
@@ -297,21 +335,12 @@ impl Dashboard {
                     eprintln!("map drill: no member resolved for feature id {feature_id:?}");
                     return Task::none();
                 };
-                let mut next = self.trail.current().clone();
-                let mut members: Vec<_> = next
-                    .slicer
-                    .members()
-                    .iter()
-                    .filter(|m| m.dim != member.dim)
-                    .cloned()
-                    .collect();
-                members.push(member);
-                let Ok(slicer) = Tuple::of(members) else {
-                    eprintln!("map drill: slicer construction failed for feature id {feature_id:?}");
+                let Some(dim_index) = self.map.rows.dim() else {
+                    eprintln!("map drill: map rows pick has no dim");
                     return Task::none();
                 };
-                next.slicer = slicer;
-                self.navigate(next)
+                self.slicer.pin(dim_index, member);
+                self.navigate_from_pins()
             }
             Message::MapClicked(_) => Task::none(),
             Message::GridAction(action) => {
@@ -329,6 +358,7 @@ impl Dashboard {
     /// Render the dashboard.
     pub fn view(&self) -> Element<'_, Message> {
         let header = self.render_header();
+        let slicer_row = slicer::view(&self.slicer, &self.schema).map(Message::Slicer);
         let dim_options = axis::dim_choices(&self.schema);
         let metric_options = metric::choices(&self.schema);
 
@@ -352,7 +382,7 @@ impl Dashboard {
         .on_action(Message::GridAction);
 
         container(
-            column![header, scrollable(grid).width(Fill).spacing(5)]
+            column![header, slicer_row, scrollable(grid).width(Fill).spacing(5)]
                 .spacing(8)
                 .padding(12)
                 .width(Fill),

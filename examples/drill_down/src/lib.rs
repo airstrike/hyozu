@@ -12,6 +12,7 @@ pub mod data;
 pub mod metric;
 pub mod panel;
 pub mod query_state;
+pub mod slicer;
 pub mod spec;
 pub mod trail;
 
