@@ -20,7 +20,7 @@ use crate::ui::panel::Panel;
 use crate::ui::query_state::QueryState;
 use crate::ui::trail::Trail;
 use crate::ui::view::{Measure, Period, View};
-use crate::ui::{kpi, map_panel};
+use crate::ui::{kpi, map_panel, right_rail, time_series};
 
 /// Messages consumed by the Dashboard.
 ///
@@ -69,6 +69,14 @@ pub struct Dashboard {
     /// was unexpected. Stored on the dashboard so the chart widget's
     /// `&Data` borrow stays valid for the rendered frame.
     pub map_data: Option<hyozu::Data>,
+    /// Cached chart `Data` for the rail panel. Rebuilt when the rail panel's
+    /// `Results::Series` lands; `None` while pending or on an unexpected
+    /// shape.
+    pub rail_data: Option<hyozu::Data>,
+    /// Cached chart `Data` for the line panel. Rebuilt when the line panel's
+    /// `Results::Series` lands; `None` while pending or on an unexpected
+    /// shape.
+    pub line_data: Option<hyozu::Data>,
 }
 
 impl Dashboard {
@@ -93,6 +101,8 @@ impl Dashboard {
             theme: iced::Theme::Light,
             panels,
             map_data: None,
+            rail_data: None,
+            line_data: None,
         };
         let task = dashboard.dispatch();
         (dashboard, task)
@@ -140,6 +150,8 @@ impl Dashboard {
         let view = self.view;
         let cube = self.cube.clone();
         self.map_data = None;
+        self.rail_data = None;
+        self.line_data = None;
         let tasks: Vec<Task<Message>> = Panel::ALL
             .iter()
             .map(|&panel| {
@@ -156,6 +168,8 @@ impl Dashboard {
         let view = self.view;
         let cube = self.cube.clone();
         self.map_data = None;
+        self.rail_data = None;
+        self.line_data = None;
         let tasks: Vec<Task<Message>> = Panel::ALL
             .iter()
             .filter(|&&p| p != Panel::Chips)
@@ -172,15 +186,27 @@ impl Dashboard {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::PanelDone(panel, Ok(results)) => {
-                if panel == Panel::Map {
-                    self.map_data = map_panel::build_data(&results, &self.geo, &self.centroids);
+                match panel {
+                    Panel::Map => {
+                        self.map_data = map_panel::build_data(&results, &self.geo, &self.centroids);
+                    }
+                    Panel::Rail => {
+                        self.rail_data = right_rail::build_data(&results);
+                    }
+                    Panel::Line => {
+                        self.line_data = time_series::build_data(&results);
+                    }
+                    Panel::Kpi | Panel::Chips => {}
                 }
                 self.panels.insert(panel, QueryState::Ok(results));
                 Task::none()
             }
             Message::PanelDone(panel, Err(error)) => {
-                if panel == Panel::Map {
-                    self.map_data = None;
+                match panel {
+                    Panel::Map => self.map_data = None,
+                    Panel::Rail => self.rail_data = None,
+                    Panel::Line => self.line_data = None,
+                    Panel::Kpi | Panel::Chips => {}
                 }
                 self.panels.insert(panel, QueryState::Err(error));
                 Task::none()
@@ -256,9 +282,9 @@ impl Dashboard {
     }
 
     /// Render a single panel card. The Kpi panel routes through the
-    /// `hyozu::tatami::card` adapter, the Map panel through
-    /// `ui::map_panel::render` over the cached map `Data`; remaining panels
-    /// fall through to a text stub until their slices land.
+    /// `hyozu::tatami::card` adapter; Map, Rail, and Line route through their
+    /// per-panel modules over cached `Data`; Chips falls through to a text
+    /// stub until its slice lands.
     fn render_card(&self, panel: Panel) -> Element<'_, Message> {
         let state = self.panels.get(&panel);
         let body: Element<'_, Message> = match (panel, state) {
@@ -266,6 +292,14 @@ impl Dashboard {
             (Panel::Map, Some(QueryState::Ok(results))) => match self.map_data.as_ref() {
                 Some(data) => map_panel::render(data, self.view.measure),
                 None => map_panel::fallback(results),
+            },
+            (Panel::Rail, Some(QueryState::Ok(results))) => match self.rail_data.as_ref() {
+                Some(data) => right_rail::render(data),
+                None => right_rail::fallback(results),
+            },
+            (Panel::Line, Some(QueryState::Ok(results))) => match self.line_data.as_ref() {
+                Some(data) => time_series::render(data),
+                None => time_series::fallback(results),
             },
             (_, None) => text("(no task)").size(14).into(),
             (_, Some(QueryState::Running)) => text("Running…").size(14).into(),

@@ -12,6 +12,8 @@ pub mod map_panel;
 pub mod panel;
 pub mod queries;
 pub mod query_state;
+pub mod right_rail;
+pub mod time_series;
 pub mod trail;
 pub mod view;
 
