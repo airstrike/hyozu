@@ -57,6 +57,57 @@ fn precision_for_step(step: f64) -> usize {
     p.max(0) as usize
 }
 
+/// Minimum pixel spacing between adjacent tick labels, in the axis's
+/// major direction. Drives the target tick count so short axes get
+/// fewer labels and long ones get more.
+///
+/// Per-label footprints are smaller on vertical axes (labels stack
+/// top-to-bottom, single-line height) than horizontal ones (labels sit
+/// left-to-right, full content width + breathing room), and time labels
+/// are wider than numeric ones.
+fn min_label_spacing(kind: Kind, orientation: Orientation) -> f32 {
+    let is_vertical = matches!(orientation, Orientation::Left | Orientation::Right);
+    match (kind, is_vertical) {
+        (Kind::Time, true) => 40.0,
+        (Kind::Time, false) => 90.0,
+        (_, true) => 36.0,
+        (_, false) => 70.0,
+    }
+}
+
+/// Derive a target tick count from the axis's pixel extent.
+///
+/// Returns `6` (the historical default) when the extent is unknown,
+/// zero, non-finite, or negative — this is hit during `state`/`diff`,
+/// before layout has a size to work with. Otherwise divides the extent
+/// by the per-label pixel footprint and clamps the result to `[2, 12]`
+/// so sparse ranges don't collapse to a single tick and wide axes don't
+/// explode into unreadable gridline forests.
+fn target_tick_count(axis_length: Option<f32>, kind: Kind, orientation: Orientation) -> usize {
+    const DEFAULT: usize = 6;
+    const MIN: usize = 2;
+    const MAX: usize = 12;
+
+    let Some(length) = axis_length else {
+        return DEFAULT;
+    };
+    if !length.is_finite() || length <= 0.0 {
+        return DEFAULT;
+    }
+
+    // Categorical axes don't route through nice_ticks in the main code
+    // path (positions come from the data itself), but if a caller ever
+    // does use target_tick_count with one, keep the historical default
+    // rather than derive a potentially surprising count.
+    if matches!(kind, Kind::Categorical) {
+        return DEFAULT;
+    }
+
+    let spacing = min_label_spacing(kind, orientation);
+    let raw = (length / spacing).floor() as i64;
+    raw.clamp(MIN as i64, MAX as i64) as usize
+}
+
 /// Compute a nice step size for a given range and target tick count
 fn compute_nice_step(range: f64, target_count: usize) -> f64 {
     let rough_step = range / (target_count as f64);
@@ -413,8 +464,13 @@ where
     }
 
     /// Derive tick positions, label positions, and label text from data
-    /// Returns (label_info, tick_positions) based on label placement
-    fn ticks_and_labels(&self, bounds: Bounds) -> (Vec<(f64, String)>, Vec<f64>) {
+    /// Returns (label_info, tick_positions) based on label placement.
+    ///
+    /// `axis_length` is the pixel extent available along the axis when
+    /// known (during `layout`). Used to derive a comfortable target tick
+    /// count from the axis footprint. `None` during `state`/`diff`, which
+    /// run before layout — we fall back to a fixed default in that case.
+    fn ticks_and_labels(&self, bounds: Bounds, axis_length: Option<f32>) -> (Vec<(f64, String)>, Vec<f64>) {
         use crate::axis::label;
         use crate::axis::tick::Frequency;
 
@@ -491,16 +547,17 @@ where
             // Continuous: generate nice ticks WITHIN the bounds
             // Use time-aligned ticks for time-based axes
             let alignment = self.axis.ticks.alignment;
+            let target = target_tick_count(axis_length, self.axis.kind(), self.axis.orientation());
             if self.axis.kind() == Kind::Time {
                 (
                     {
-                        let (ticks, _) = nice_time_ticks(axis_min, axis_max, 6, alignment);
+                        let (ticks, _) = nice_time_ticks(axis_min, axis_max, target, alignment);
                         ticks.into_iter().map(|t| t as f64).collect::<Vec<f64>>()
                     },
                     None,
                 )
             } else {
-                let (ticks, step) = self.nice_ticks(axis_min, axis_max, 6, alignment);
+                let (ticks, step) = self.nice_ticks(axis_min, axis_max, target, alignment);
                 (ticks, Some(step))
             }
         };
@@ -511,7 +568,8 @@ where
         // For time axes, get the interval for smart formatting
         let time_interval = if self.axis.kind() == Kind::Time {
             let alignment = self.axis.ticks.alignment;
-            let (_, interval) = nice_time_ticks(axis_min, axis_max, 6, alignment);
+            let target = target_tick_count(axis_length, self.axis.kind(), self.axis.orientation());
+            let (_, interval) = nice_time_ticks(axis_min, axis_max, target, alignment);
             Some(interval)
         } else {
             None
@@ -932,7 +990,7 @@ where
     pub(super) fn state(&self) -> Tree {
         // Compute bounds first, then ticks within bounds
         let bounds = self.compute_axis_bounds();
-        let (label_info, _tick_positions) = self.ticks_and_labels(bounds);
+        let (label_info, _tick_positions) = self.ticks_and_labels(bounds, None);
 
         // Create a tree for each label's paragraph
         let children = label_info.iter().map(|_| Tree::empty()).collect();
@@ -953,7 +1011,7 @@ where
     /// Reconcile the tree with current Guide state
     pub(super) fn diff(&self, tree: &mut Tree) {
         let bounds = self.compute_axis_bounds();
-        let (label_info, _) = self.ticks_and_labels(bounds);
+        let (label_info, _) = self.ticks_and_labels(bounds, None);
 
         tree.diff_children_custom(&label_info, |_tree, _tick| {}, |_tick| Tree::empty());
     }
@@ -975,9 +1033,15 @@ where
         overflow: (f32, f32),
         min_inset: (f32, f32),
     ) -> Node {
-        // Compute bounds first, then generate ticks within those bounds
+        // Compute bounds first, then generate ticks within those bounds.
+        // The target tick count scales with the axis's pixel extent along
+        // its major direction (height for left/right, width for top/bottom).
         let bounds = self.compute_axis_bounds();
-        let (label_info, tick_positions) = self.ticks_and_labels(bounds);
+        let axis_length = match self.axis.orientation() {
+            Orientation::Left | Orientation::Right => limits.max().height,
+            Orientation::Bottom | Orientation::Top => limits.max().width,
+        };
+        let (label_info, tick_positions) = self.ticks_and_labels(bounds, Some(axis_length));
 
         // Update state with computed values
         let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
@@ -1652,6 +1716,72 @@ mod tests {
             "Expected 6-7 ticks, got {}",
             ticks.len()
         );
+    }
+
+    #[test]
+    fn test_target_tick_count_short_extent() {
+        // 100 px vertical numeric axis: 100 / 36 = 2.77 -> floor 2
+        let n = target_tick_count(Some(100.0), Kind::Scalar, Orientation::Left);
+        assert!((2..=3).contains(&n), "short y-axis should produce 2-3 ticks, got {}", n);
+    }
+
+    #[test]
+    fn test_target_tick_count_tall_extent() {
+        // 500 px vertical numeric axis: 500 / 36 = 13.88 -> clamped to 12
+        let n = target_tick_count(Some(500.0), Kind::Scalar, Orientation::Left);
+        assert!(
+            (6..=12).contains(&n),
+            "tall y-axis should produce 6-12 ticks, got {}",
+            n
+        );
+    }
+
+    #[test]
+    fn test_target_tick_count_wide_x_axis() {
+        // 700 px horizontal numeric axis: 700 / 70 = 10
+        let n = target_tick_count(Some(700.0), Kind::Scalar, Orientation::Bottom);
+        assert_eq!(n, 10, "wide x-axis at 700px with 70px spacing should yield 10");
+    }
+
+    #[test]
+    fn test_target_tick_count_narrow_x_time_axis() {
+        // 180 px horizontal time axis: 180 / 90 = 2
+        let n = target_tick_count(Some(180.0), Kind::Time, Orientation::Bottom);
+        assert_eq!(n, 2, "narrow x-time axis at 180px should yield 2");
+    }
+
+    #[test]
+    fn test_target_tick_count_zero_extent_falls_back() {
+        assert_eq!(target_tick_count(Some(0.0), Kind::Scalar, Orientation::Left), 6);
+        assert_eq!(target_tick_count(Some(-50.0), Kind::Scalar, Orientation::Left), 6);
+        assert_eq!(target_tick_count(Some(f32::NAN), Kind::Scalar, Orientation::Left), 6);
+        assert_eq!(target_tick_count(None, Kind::Scalar, Orientation::Left), 6);
+    }
+
+    #[test]
+    fn test_target_tick_count_clamped_max() {
+        // Arbitrarily huge extent should still clamp to 12.
+        let n = target_tick_count(Some(100_000.0), Kind::Scalar, Orientation::Left);
+        assert_eq!(n, 12, "huge extent should clamp to 12");
+        let n = target_tick_count(Some(100_000.0), Kind::Time, Orientation::Bottom);
+        assert_eq!(n, 12, "huge x-time extent should clamp to 12");
+    }
+
+    #[test]
+    fn test_target_tick_count_clamped_min() {
+        // Tiny extent (below 2 * spacing) should still produce at least 2.
+        let n = target_tick_count(Some(20.0), Kind::Scalar, Orientation::Left);
+        assert_eq!(n, 2, "tiny y-axis should clamp up to 2");
+        let n = target_tick_count(Some(20.0), Kind::Time, Orientation::Bottom);
+        assert_eq!(n, 2, "tiny x-time axis should clamp up to 2");
+    }
+
+    #[test]
+    fn test_target_tick_count_categorical_fallback() {
+        // Categorical axes don't use this path in practice, but if they do,
+        // keep the historical default rather than derive a surprising count.
+        let n = target_tick_count(Some(400.0), Kind::Categorical, Orientation::Bottom);
+        assert_eq!(n, 6);
     }
 
     #[test]
