@@ -199,6 +199,17 @@ impl Mark {
             | Mark::Choropleth(_) => Vec::new(),
         }
     }
+
+    /// Returns this mark's color-scale legend config plus title, when it
+    /// owns one. Currently only [`Choropleth`] carries a scale legend; other
+    /// marks return `None`. The scene uses this to decide whether to
+    /// reserve edge space for an inset scale legend.
+    pub fn scale_legend_config(&self) -> Option<(&crate::data::legend::Legend, Option<&str>)> {
+        match self {
+            Mark::Choropleth(c) => c.legend_config().map(|l| (l, c.legend_title_value())),
+            _ => None,
+        }
+    }
 }
 
 impl From<Area> for Mark {

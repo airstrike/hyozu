@@ -262,7 +262,7 @@ impl Legend {
 
 /// The edge of the plot area the legend attaches to, derived from the
 /// combination of [`Anchor`] and [`Orientation`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Edge {
     Top,

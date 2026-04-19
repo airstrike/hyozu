@@ -40,6 +40,20 @@ where
     /// once from the legend config at scene construction. `None` when no
     /// legend is configured or the legend has no entries.
     legend_edge: Option<crate::data::legend::Edge>,
+    /// Per-edge pixel budget reserved for `Placement::Inset` scale-legends
+    /// across all marks. Computed from `Data` at scene construction and
+    /// consumed by `layout` to shrink the plot area. Horizontal edges
+    /// reserve height; vertical edges reserve width.
+    scale_legend_budgets: std::collections::HashMap<crate::data::legend::Edge, f32>,
+    /// Pairs of (series index in `plot_area.series`, reservation) for
+    /// every mark with a `Placement::Inset` scale legend. Iteration order
+    /// is the plot-area series order — stacking of multiple legends on
+    /// one edge follows this order innermost-first.
+    scale_legend_entries: Vec<(usize, crate::data::legend::Edge, f32)>,
+    /// Per-mark strip rectangle for `Placement::Inset` scale-legends,
+    /// keyed by the mark's index inside `plot_area.series`. Populated in
+    /// `layout` and consumed by `draw` to position each mark's legend.
+    scale_legend_strips: std::collections::HashMap<usize, crate::core::Rectangle>,
     /// Current selection (borrowed from Data).
     selection: &'a Option<crate::target::Target>,
     /// Optional tooltip configuration (borrowed from Data).
@@ -254,6 +268,31 @@ where
             plot_area_offset: crate::core::Point::ORIGIN,
             legend_bounds: None,
             legend_edge,
+            scale_legend_budgets: data.scale_legend_reservations(),
+            scale_legend_entries: {
+                // Walk primary then secondary marks in the same order as
+                // `plot_area.series`. Only inset scale legends produce
+                // entries; overlaid and absent legends are skipped so the
+                // draw loop doesn't pay a match per mark per frame.
+                let mut entries = Vec::new();
+                let primary_len = data.primary.marks().len();
+                for (i, mark) in data.primary.marks().iter().enumerate() {
+                    if let Some((cfg, title)) = mark.scale_legend_config()
+                        && let Some((edge, budget)) = crate::chart::scale_legend::reservation(cfg, title)
+                    {
+                        entries.push((i, edge, budget));
+                    }
+                }
+                for (j, mark) in data.secondary.marks().iter().enumerate() {
+                    if let Some((cfg, title)) = mark.scale_legend_config()
+                        && let Some((edge, budget)) = crate::chart::scale_legend::reservation(cfg, title)
+                    {
+                        entries.push((primary_len + j, edge, budget));
+                    }
+                }
+                entries
+            },
+            scale_legend_strips: std::collections::HashMap::new(),
             selection: &data.selection,
             tooltip: data.tooltip.as_ref(),
         }
@@ -321,6 +360,15 @@ where
         let legend_edge = self.legend_edge;
         let legend_is_side = matches!(legend_edge, Some(Edge::Left | Edge::Right));
         let legend_is_above = matches!(legend_edge, Some(Edge::Top));
+
+        // Inset scale-legend budgets: aggregated from the marks at scene
+        // construction. Horizontal edges reserve vertical space; vertical
+        // edges reserve horizontal space. Stacked outside the axes but
+        // inside the series-key legend (see edge-order docs on Scene).
+        let scale_top = self.scale_legend_budgets.get(&Edge::Top).copied().unwrap_or(0.0);
+        let scale_bottom = self.scale_legend_budgets.get(&Edge::Bottom).copied().unwrap_or(0.0);
+        let scale_left = self.scale_legend_budgets.get(&Edge::Left).copied().unwrap_or(0.0);
+        let scale_right = self.scale_legend_budgets.get(&Edge::Right).copied().unwrap_or(0.0);
 
         // --- Phase 1: Title (always at top, full width) ---
         let (title_height, title_node) = if let Some(title) = &self.title {
@@ -424,7 +472,7 @@ where
         };
 
         // --- Phase 4: Compute plot_width (horizontal space) ---
-        let plot_width = available.width - left_width - right_width - legend_side_width;
+        let plot_width = available.width - left_width - right_width - legend_side_width - scale_left - scale_right;
 
         // --- Phase 5: Above/Below legend measurement (needs plot_width for wrapping) ---
         let (legend_tb_height, legend_tb_node) = if !legend_is_side {
@@ -447,8 +495,8 @@ where
         };
 
         // --- Phase 6: Compute plot_height (vertical space) ---
-        let remaining_height = available.height - title_height - above_legend_h - top_height;
-        let vertical_space = remaining_height - bottom_height - below_legend_h;
+        let remaining_height = available.height - title_height - above_legend_h - top_height - scale_top;
+        let vertical_space = remaining_height - bottom_height - below_legend_h - scale_bottom;
         let plot_height = vertical_space;
 
         // --- Phase 6.5: Series-driven inset floor ---
@@ -607,28 +655,34 @@ where
         // --- Phase 8: Position all nodes ---
         let mut layout_children = Vec::new();
 
-        // Compute vertical offsets
+        // Compute vertical offsets. Layer order from the chart edge inward:
+        //   series-key legend → scale-legend strip → axis → plot area.
         let legend_left_x = if legend_edge == Some(Edge::Left) {
             legend_side_width
         } else {
             0.0
         };
-        let content_left = legend_left_x + left_width;
-        let plot_top = title_height + above_legend_h + top_height;
+        let scale_left_x = legend_left_x;
+        let axis_left_x = scale_left_x + scale_left;
+        let content_left = axis_left_x + left_width;
+        let plot_top = title_height + above_legend_h + top_height + scale_top;
 
         // Title at (0, 0)
         if let Some(node) = title_node {
             layout_children.push(node.move_to(Point::new(0.0, 0.0)));
         }
 
-        // Legend — position depends on config
+        // Legend — position depends on config. Layer order from edge
+        // inward is [series-key legend, scale-legend strip, axis, plot],
+        // so the series-key legend clears the full outer margin (axis +
+        // scale strip) on its edge.
         let legend_node = legend_tb_node.or(legend_side_node);
         if let Some(node) = legend_node {
             let pos = match legend_edge.unwrap_or(Edge::Top) {
                 Edge::Top => Point::new(content_left, title_height),
-                Edge::Bottom => Point::new(content_left, plot_top + plot_height + bottom_height),
+                Edge::Bottom => Point::new(content_left, plot_top + plot_height + bottom_height + scale_bottom),
                 Edge::Left => Point::new(0.0, plot_top),
-                Edge::Right => Point::new(content_left + plot_width, plot_top),
+                Edge::Right => Point::new(content_left + plot_width + right_width + scale_right, plot_top),
             };
             let size = node.size();
             self.legend_bounds = Some(crate::core::Rectangle {
@@ -652,7 +706,7 @@ where
         // frame contains only the labels and tick marks — no +1 width
         // hack needed to bridge the gap to the plot area.
         if let Some(node) = left_axis_node {
-            layout_children.push(node.move_to(Point::new(legend_left_x, plot_top)));
+            layout_children.push(node.move_to(Point::new(axis_left_x, plot_top)));
         }
 
         // Plot area
@@ -667,6 +721,64 @@ where
         // Right axis — to the right of plot area
         if let Some(node) = right_axis_node {
             layout_children.push(node.move_to(Point::new(content_left + plot_width, plot_top)));
+        }
+
+        // Scale-legend strip rects. Stack marks on the same edge along
+        // the edge's normal: on Bottom they pile downward innermost-first
+        // (first reservation sits flush with the axis), on Top they pile
+        // upward, and so on. Widths/heights along the edge span the plot
+        // area so the gradient bar centers over the plot.
+        self.scale_legend_strips.clear();
+        let mut top_cursor = 0.0;
+        let mut bottom_cursor = 0.0;
+        let mut left_cursor = 0.0;
+        let mut right_cursor = 0.0;
+        for &(series_idx, edge, budget) in &self.scale_legend_entries {
+            let rect = match edge {
+                Edge::Top => {
+                    // First entry flush with the axis (innermost), then stack upward.
+                    let y = plot_top - top_height - top_cursor - budget;
+                    top_cursor += budget;
+                    crate::core::Rectangle {
+                        x: content_left,
+                        y,
+                        width: plot_width,
+                        height: budget,
+                    }
+                }
+                Edge::Bottom => {
+                    let y = plot_top + plot_height + bottom_height + bottom_cursor;
+                    bottom_cursor += budget;
+                    crate::core::Rectangle {
+                        x: content_left,
+                        y,
+                        width: plot_width,
+                        height: budget,
+                    }
+                }
+                Edge::Left => {
+                    // First entry flush with the axis, then stack outward.
+                    let x = axis_left_x - left_cursor - budget;
+                    left_cursor += budget;
+                    crate::core::Rectangle {
+                        x,
+                        y: plot_top,
+                        width: budget,
+                        height: plot_height,
+                    }
+                }
+                Edge::Right => {
+                    let x = content_left + plot_width + right_width + right_cursor;
+                    right_cursor += budget;
+                    crate::core::Rectangle {
+                        x,
+                        y: plot_top,
+                        width: budget,
+                        height: plot_height,
+                    }
+                }
+            };
+            self.scale_legend_strips.insert(series_idx, rect);
         }
 
         Node::with_children(available, layout_children)
@@ -805,6 +917,19 @@ where
             self.user_palette.as_ref(),
             self.selection,
             hidden_series,
+        );
+
+        // Scale legends. Overlaid panels float inside the plot area;
+        // inset strips live outside the plot area in rectangles the scene
+        // reserved during layout. Drawing here (after the plot area, before
+        // axis borders) puts legends on top of the map but below axes
+        // framing.
+        self.plot_area.draw_scale_legends(
+            &tree.children[6],
+            renderer,
+            design,
+            plot_layout,
+            &self.scale_legend_strips,
         );
 
         // Bottom axis (labels and ticks)

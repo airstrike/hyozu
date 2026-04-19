@@ -5,9 +5,20 @@
 //! theme-free [`Plan`] that the mark's `layout` step caches on state. The
 //! draw step reads the plan, resolves theme-dependent bits (colors, font),
 //! and emits geometry onto an existing [`Frame`].
+//!
+//! # Placement
+//!
+//! Two placement modes are supported:
+//!
+//! - [`Placement::Overlaid`]: the panel floats inside the plot area at the
+//!   anchor's corner/edge. The plot area keeps its full size.
+//! - [`Placement::Inset`]: the scene reserves a strip along the anchored
+//!   edge and the legend draws inside that strip. The plot area shrinks by
+//!   the reservation budget. [`reservation`] returns the edge + pixel
+//!   budget a scene layout step should carve off.
 
-use crate::core::{Color, Point, Rectangle, alignment};
-use crate::data::legend::{Anchor, Legend, Orientation, Placement};
+use crate::core::{Color, Point, Rectangle, Size, Vector, alignment};
+use crate::data::legend::{Anchor, Edge, Legend, Orientation, Placement};
 use crate::palette;
 use crate::widget::canvas::{Frame, Path, Stroke, Text as CanvasText};
 use crate::widget::renderer::geometry;
@@ -41,47 +52,57 @@ const VERTICAL_BAR_LENGTH: f32 = 140.0;
 /// Minimum chart width (horizontal) or height (vertical) below which the
 /// scale legend is suppressed to avoid cramping the plot area.
 const MIN_CHART_EXTENT: f32 = 300.0;
+/// Estimated width per glyph at `FONT_SIZE` when we don't have a paragraph
+/// cache on hand. Keeps label-column math O(1).
+const GLYPH_WIDTH_ESTIMATE: f32 = 6.0;
 
-/// Render the scale legend for a mark onto `frame`.
+/// Pixel reservation a scene layout should carve off the plot area for a
+/// scale legend with [`Placement::Inset`].
 ///
-/// `plot_bounds` is the plot-area rectangle in the same coordinate space as
-/// the `Frame`. `color_stops` and `label_color` are theme-dependent inputs
-/// materialized in the caller's `draw`.
-#[allow(clippy::too_many_arguments)]
-pub fn draw<Theme, Renderer>(
-    frame: &mut Frame<Renderer>,
-    plan: &Plan,
-    legend: &Legend,
-    title: Option<&str>,
-    plot_bounds: Rectangle,
-    color_stops: &[Color],
-    background: Color,
-    border_color: Color,
-    label_color: Color,
-    theme: &Theme,
-) where
-    Theme: crate::design::Design + ?Sized,
-    Renderer: geometry::Renderer,
-{
-    // Inset placement degrades to Overlaid here: scene-level space
-    // reservation for mark-owned scale legends is not yet wired, so the
-    // legend always draws on top of the plot area. The placement value
-    // is retained on `Legend` so callers can still express intent.
-    let _ = legend.placement_value();
-
-    let orientation = legend.orientation_value();
-    let anchor = legend.anchor_value();
-
-    // ── Extents check ─────────────────────────────────────────────────
-    let major_extent = match orientation {
-        Orientation::Horizontal => plot_bounds.width,
-        Orientation::Vertical => plot_bounds.height,
-    };
-    if major_extent < MIN_CHART_EXTENT {
-        return;
+/// Returns `None` when the legend is [`Placement::Overlaid`] (no space
+/// reservation) — the caller should fall through to the standard overlay
+/// path instead. Horizontal legends reserve vertical space on the top/
+/// bottom edge; vertical legends reserve horizontal space on the left/
+/// right edge. The numeric budget includes both panel padding and label
+/// extents and is independent of the current plot size — the scene needs
+/// a value it can subtract before the plot dimensions are known.
+pub fn reservation(legend: &Legend, title: Option<&str>) -> Option<(Edge, f32)> {
+    if !matches!(legend.placement_value(), Placement::Inset) {
+        return None;
     }
+    let has_title = title.is_some();
+    let title_line_height = if has_title { FONT_SIZE + 4.0 } else { 0.0 };
+    let label_line_height = FONT_SIZE + 2.0;
+    let budget = match legend.orientation_value() {
+        Orientation::Horizontal => {
+            title_line_height + BAR_THICKNESS + TICK_LENGTH + label_line_height + PANEL_PADDING * 2.0
+        }
+        Orientation::Vertical => {
+            // Vertical: budget is bar thickness + tick + label column +
+            // padding. Labels are usually short (min/max formatted
+            // numbers) but the title can widen the strip when it beats
+            // the numeric labels.
+            BAR_THICKNESS + TICK_LENGTH + label_column_width(title) + PANEL_PADDING * 2.0
+        }
+    };
+    Some((legend.edge(), budget))
+}
 
-    // ── Geometry ──────────────────────────────────────────────────────
+/// Resolved panel geometry for a draw call.
+struct PanelLayout {
+    origin: Point,
+    size: Size,
+    /// Offset from panel origin to bar origin.
+    bar_offset: Vector,
+    bar_size: Size,
+}
+
+/// Size a draw panel based on the plot-area span on the flow axis.
+///
+/// Used for [`Placement::Overlaid`] where the panel floats inside the plot
+/// area: the bar length scales down gracefully on narrow charts.
+fn panel_for_overlay(legend: &Legend, title: Option<&str>, plot_bounds: Rectangle) -> PanelLayout {
+    let orientation = legend.orientation_value();
     let has_title = title.is_some();
     let title_line_height = if has_title { FONT_SIZE + 4.0 } else { 0.0 };
     let label_line_height = FONT_SIZE + 2.0;
@@ -99,9 +120,9 @@ pub fn draw<Theme, Renderer>(
             let panel_h = content_h + PANEL_PADDING * 2.0;
             let bar_offset_y = PANEL_PADDING + title_line_height;
             (
-                crate::core::Size::new(panel_w, panel_h),
-                crate::core::Vector::new(PANEL_PADDING, bar_offset_y),
-                crate::core::Size::new(bar_length, BAR_THICKNESS),
+                Size::new(panel_w, panel_h),
+                Vector::new(PANEL_PADDING, bar_offset_y),
+                Size::new(bar_length, BAR_THICKNESS),
             )
         }
         Orientation::Vertical => {
@@ -110,39 +131,157 @@ pub fn draw<Theme, Renderer>(
             } else {
                 VERTICAL_BAR_LENGTH
             };
-            // Label column: widest of min / max / title, rough char-width
-            // estimate (5px per glyph at 10pt) since we don't have a
-            // paragraph cache here — the legend stays on the plan-cached
-            // labels so this is still O(1) per draw.
-            let max_label_chars = plan
-                .min_label
-                .chars()
-                .count()
-                .max(plan.max_label.chars().count())
-                .max(title.map(|t| t.chars().count()).unwrap_or(0));
-            let label_col_w = (max_label_chars as f32) * 6.0 + 4.0;
-            let content_w = BAR_THICKNESS + TICK_LENGTH + label_col_w;
+            let content_w = BAR_THICKNESS + TICK_LENGTH + label_column_width(title);
             let content_h = title_line_height + bar_length;
             let panel_w = content_w + PANEL_PADDING * 2.0;
             let panel_h = content_h + PANEL_PADDING * 2.0;
             let bar_offset_y = PANEL_PADDING + title_line_height;
             (
-                crate::core::Size::new(panel_w, panel_h),
-                crate::core::Vector::new(PANEL_PADDING, bar_offset_y),
-                crate::core::Size::new(BAR_THICKNESS, bar_length),
+                Size::new(panel_w, panel_h),
+                Vector::new(PANEL_PADDING, bar_offset_y),
+                Size::new(BAR_THICKNESS, bar_length),
             )
         }
     };
 
-    let panel_origin = anchor_origin(anchor, plot_bounds, panel_size);
+    let origin = anchor_origin(legend.anchor_value(), plot_bounds, panel_size);
+    PanelLayout {
+        origin,
+        size: panel_size,
+        bar_offset,
+        bar_size,
+    }
+}
 
-    // 1. Background panel.
-    let panel_bg = Color { a: 0.85, ..background };
+/// Size a panel that fills a reserved strip rectangle.
+///
+/// Used for [`Placement::Inset`]: the strip has a fixed thickness decided
+/// by [`reservation`], and the bar stretches along the flow axis up to the
+/// configured maximum.
+fn panel_for_strip(legend: &Legend, title: Option<&str>, strip: Rectangle) -> PanelLayout {
+    let orientation = legend.orientation_value();
+    let has_title = title.is_some();
+    let title_line_height = if has_title { FONT_SIZE + 4.0 } else { 0.0 };
+
+    let (panel_size, bar_offset, bar_size) = match orientation {
+        Orientation::Horizontal => {
+            // Strip fills the edge; bar length capped at the configured
+            // maximum so a very wide map doesn't produce an unreadably
+            // long gradient.
+            let strip_bar_budget = (strip.width - PANEL_PADDING * 2.0).max(0.0);
+            let bar_length = strip_bar_budget.min(HORIZONTAL_BAR_LENGTH);
+            let panel_w = bar_length + PANEL_PADDING * 2.0;
+            let panel_h = strip.height;
+            let bar_offset_y = PANEL_PADDING + title_line_height;
+            (
+                Size::new(panel_w, panel_h),
+                Vector::new(PANEL_PADDING, bar_offset_y),
+                Size::new(bar_length, BAR_THICKNESS),
+            )
+        }
+        Orientation::Vertical => {
+            let strip_bar_budget = (strip.height - PANEL_PADDING * 2.0 - title_line_height).max(0.0);
+            let bar_length = strip_bar_budget.min(VERTICAL_BAR_LENGTH);
+            let panel_w = strip.width;
+            let panel_h = title_line_height + bar_length + PANEL_PADDING * 2.0;
+            let bar_offset_y = PANEL_PADDING + title_line_height;
+            (
+                Size::new(panel_w, panel_h),
+                Vector::new(PANEL_PADDING, bar_offset_y),
+                Size::new(BAR_THICKNESS, bar_length),
+            )
+        }
+    };
+
+    // Center the panel within the strip on the flow axis so the bar sits
+    // roughly under the middle of the plot area.
+    let origin = match orientation {
+        Orientation::Horizontal => Point::new(strip.x + (strip.width - panel_size.width) / 2.0, strip.y),
+        Orientation::Vertical => Point::new(strip.x, strip.y + (strip.height - panel_size.height) / 2.0),
+    };
+
+    PanelLayout {
+        origin,
+        size: panel_size,
+        bar_offset,
+        bar_size,
+    }
+}
+
+/// Estimates the label column width for a vertical legend.
+///
+/// The numeric min/max labels are short (6 glyphs is a safe upper bound
+/// for formatted values like `"999.9M"` or `"1.2e3"`); we widen the
+/// column when the legend title beats that.
+fn label_column_width(title: Option<&str>) -> f32 {
+    let title_chars = title.map(|t| t.chars().count()).unwrap_or(0);
+    let chars = title_chars.max(6);
+    (chars as f32) * GLYPH_WIDTH_ESTIMATE + 4.0
+}
+
+/// Render the scale legend for a mark onto `frame`.
+///
+/// `plot_bounds` is the plot-area rectangle in the same coordinate space as
+/// the `Frame`. When `strip_rect` is `Some`, the legend draws inside the
+/// reserved strip (honoring [`Placement::Inset`]); otherwise it overlays
+/// the plot area at the anchor's corner/edge.
+#[allow(clippy::too_many_arguments)]
+pub fn draw<Theme, Renderer>(
+    frame: &mut Frame<Renderer>,
+    plan: &Plan,
+    legend: &Legend,
+    title: Option<&str>,
+    plot_bounds: Rectangle,
+    strip_rect: Option<Rectangle>,
+    color_stops: &[Color],
+    background: Color,
+    border_color: Color,
+    label_color: Color,
+    theme: &Theme,
+) where
+    Theme: crate::design::Design + ?Sized,
+    Renderer: geometry::Renderer,
+{
+    let orientation = legend.orientation_value();
+
+    // ── Extents check ─────────────────────────────────────────────────
+    // For Inset we use the strip's own extent; for Overlaid we fall back
+    // to plot_bounds. This prevents the legend from drawing inside a
+    // cramped plot area without suppressing it when the strip itself is
+    // comfortably sized.
+    let gating_extent = match (strip_rect, orientation) {
+        (Some(strip), Orientation::Horizontal) => strip.width,
+        (Some(strip), Orientation::Vertical) => strip.height,
+        (None, Orientation::Horizontal) => plot_bounds.width,
+        (None, Orientation::Vertical) => plot_bounds.height,
+    };
+    if gating_extent < MIN_CHART_EXTENT {
+        return;
+    }
+
+    // ── Geometry ──────────────────────────────────────────────────────
+    let layout = match strip_rect {
+        Some(strip) => panel_for_strip(legend, title, strip),
+        None => panel_for_overlay(legend, title, plot_bounds),
+    };
+    let panel_origin = layout.origin;
+    let panel_size = layout.size;
+    let bar_offset = layout.bar_offset;
+    let bar_size = layout.bar_size;
+
+    // 1. Background panel. Inset strips blend into the chart background so
+    // they don't look like a floating overlay.
+    let panel_bg = match strip_rect {
+        Some(_) => Color { a: 0.0, ..background },
+        None => Color { a: 0.85, ..background },
+    };
     let panel_rect = Path::new(|builder| {
         builder.rectangle(panel_origin, panel_size);
     });
-    frame.fill(&panel_rect, panel_bg);
-    frame.stroke(&panel_rect, Stroke::default().with_color(border_color).with_width(0.5));
+    if panel_bg.a > 0.0 {
+        frame.fill(&panel_rect, panel_bg);
+        frame.stroke(&panel_rect, Stroke::default().with_color(border_color).with_width(0.5));
+    }
 
     let bar_origin = Point::new(panel_origin.x + bar_offset.x, panel_origin.y + bar_offset.y);
 
@@ -167,7 +306,6 @@ pub fn draw<Theme, Renderer>(
             ..CanvasText::default()
         });
     }
-
     // 3. Gradient segments.
     match orientation {
         Orientation::Horizontal => draw_horizontal_gradient(frame, bar_origin, bar_size, color_stops),
@@ -267,7 +405,7 @@ pub fn draw<Theme, Renderer>(
     }
 }
 
-fn anchor_origin(anchor: Anchor, plot: Rectangle, panel: crate::core::Size) -> Point {
+fn anchor_origin(anchor: Anchor, plot: Rectangle, panel: Size) -> Point {
     let (x, y) = match anchor {
         Anchor::TopLeft => (plot.x + EDGE_PADDING, plot.y + EDGE_PADDING),
         Anchor::Top => (plot.x + (plot.width - panel.width) / 2.0, plot.y + EDGE_PADDING),
@@ -296,7 +434,7 @@ fn anchor_origin(anchor: Anchor, plot: Rectangle, panel: crate::core::Size) -> P
 fn draw_horizontal_gradient<Renderer: geometry::Renderer>(
     frame: &mut Frame<Renderer>,
     origin: Point,
-    size: crate::core::Size,
+    size: Size,
     color_stops: &[Color],
 ) {
     let segment_width = size.width / GRADIENT_SEGMENTS as f32;
@@ -307,7 +445,7 @@ fn draw_horizontal_gradient<Renderer: geometry::Renderer>(
         // 0.5px overlap to hide hairlines between segments.
         let seg_w = segment_width + 0.5;
         let seg_path = Path::new(|builder| {
-            builder.rectangle(Point::new(seg_x, origin.y), crate::core::Size::new(seg_w, size.height));
+            builder.rectangle(Point::new(seg_x, origin.y), Size::new(seg_w, size.height));
         });
         frame.fill(&seg_path, seg_color);
     }
@@ -316,7 +454,7 @@ fn draw_horizontal_gradient<Renderer: geometry::Renderer>(
 fn draw_vertical_gradient<Renderer: geometry::Renderer>(
     frame: &mut Frame<Renderer>,
     origin: Point,
-    size: crate::core::Size,
+    size: Size,
     color_stops: &[Color],
 ) {
     let segment_height = size.height / GRADIENT_SEGMENTS as f32;
@@ -327,7 +465,7 @@ fn draw_vertical_gradient<Renderer: geometry::Renderer>(
         let seg_y = origin.y + i as f32 * segment_height;
         let seg_h = segment_height + 0.5;
         let seg_path = Path::new(|builder| {
-            builder.rectangle(Point::new(origin.x, seg_y), crate::core::Size::new(size.width, seg_h));
+            builder.rectangle(Point::new(origin.x, seg_y), Size::new(size.width, seg_h));
         });
         frame.fill(&seg_path, seg_color);
     }
@@ -335,7 +473,70 @@ fn draw_vertical_gradient<Renderer: geometry::Renderer>(
 
 /// Returns `true` when the legend's placement is `Overlaid`. Exposed so
 /// the caller can decide whether to short-circuit or defer to scene-level
-/// space reservation (not yet implemented at the scene layer).
+/// space reservation.
 pub fn is_overlaid(legend: &Legend) -> bool {
     matches!(legend.placement_value(), Placement::Overlaid)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::data::legend::{Anchor, Legend, Orientation, Placement};
+
+    #[test]
+    fn overlaid_legend_reports_no_reservation() {
+        let l = Legend::overlay(Anchor::BottomRight);
+        assert_eq!(l.placement_value(), Placement::Overlaid);
+        assert!(reservation(&l, None).is_none());
+    }
+
+    #[test]
+    fn inset_horizontal_bottom_reserves_vertical_strip_with_title() {
+        let l = Legend::below();
+        let (edge, size) = reservation(&l, Some("GDP")).expect("inset legend reserves");
+        assert_eq!(edge, Edge::Bottom);
+        // title(14) + bar(10) + tick(4) + label(12) + padding(16) = 56
+        assert!((size - 56.0).abs() < 0.1, "unexpected horizontal+title budget: {size}");
+    }
+
+    #[test]
+    fn inset_horizontal_bottom_reserves_vertical_strip_without_title() {
+        let l = Legend::below();
+        let (_, size) = reservation(&l, None).unwrap();
+        // bar(10) + tick(4) + label(12) + padding(16) = 42
+        assert!(
+            (size - 42.0).abs() < 0.1,
+            "unexpected horizontal no-title budget: {size}"
+        );
+    }
+
+    #[test]
+    fn inset_vertical_right_reserves_horizontal_strip() {
+        let l = Legend::right();
+        let (edge, size) = reservation(&l, None).expect("inset legend reserves");
+        assert_eq!(edge, Edge::Right);
+        // bar(10) + tick(4) + label_col(6*6+4=40) + padding(16) = 70; with
+        // 10% slack for cjk-ish glyphs in future this is acceptable — the
+        // test just guards against wild regressions.
+        assert!((60.0..=100.0).contains(&size), "unexpected vertical budget: {size}");
+    }
+
+    #[test]
+    fn inset_vertical_right_widens_for_long_title() {
+        let l = Legend::right();
+        let (_, narrow) = reservation(&l, None).unwrap();
+        let (_, wide) = reservation(&l, Some("Population density per km2")).unwrap();
+        assert!(wide > narrow, "long title should widen vertical strip");
+    }
+
+    #[test]
+    fn inset_anchor_tieskew_resolves_via_edge() {
+        // Orientation::Vertical + Anchor::TopRight must reserve on the
+        // right edge; this exercises `Legend::edge()` tie-breaking.
+        let l = Legend::overlay(Anchor::TopRight)
+            .placement(Placement::Inset)
+            .orientation(Orientation::Vertical);
+        let (edge, _) = reservation(&l, None).unwrap();
+        assert_eq!(edge, Edge::Right);
+    }
 }

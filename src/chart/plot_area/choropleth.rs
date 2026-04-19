@@ -365,36 +365,102 @@ where
             }
         }
 
-        // ── Color scale legend ────────────────────────────────────
-        if let Some(legend_config) = &self.data.legend {
-            let label_color = {
-                let resolved = text_pair.resolve(background, None);
-                crate::core::Color { a: 0.7, ..resolved }
-            };
-            // Plot bounds for the scale legend are in frame-local space,
-            // so the origin is (0, 0) and the extent matches `layout_bounds`.
-            let plot_bounds = crate::core::Rectangle {
-                x: 0.0,
-                y: 0.0,
-                width: layout_bounds.width,
-                height: layout_bounds.height,
-            };
-            scale_legend::draw(
-                &mut frame,
-                &state.legend_plan,
-                legend_config,
-                self.data.legend_title.as_deref(),
-                plot_bounds,
-                &color_stops,
-                background,
-                border_color,
-                label_color,
-                theme,
-            );
-        }
-
         // ── Composite ────────────────────────────────────────────
         let translation = crate::core::Vector::new(layout_bounds.x, layout_bounds.y);
+        renderer.with_translation(translation, |renderer| {
+            renderer.draw_geometry(frame.into_geometry());
+        });
+    }
+
+    /// Draws this choropleth's color-scale legend into its own frame.
+    ///
+    /// When `strip_rect` is `Some`, the legend renders inside that
+    /// scene-local rectangle — the reserved strip carved out by
+    /// [`crate::Data::scale_legend_reservations`]. When `None`, it falls
+    /// through to overlay placement inside the plot area's own bounds.
+    ///
+    /// Called from [`super::PlotArea::draw_scale_legends`] after the plot
+    /// area's own `draw` pass so the legend composites on top of the map
+    /// geometry.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_scale_legend<Theme>(
+        &self,
+        tree: &crate::core::widget::Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        plot_layout_bounds: crate::core::Rectangle,
+        strip_rect: Option<crate::core::Rectangle>,
+    ) where
+        Theme: crate::design::Design + ?Sized,
+    {
+        let Some(legend_config) = &self.data.legend else {
+            return;
+        };
+
+        let state = tree.state.downcast_ref::<State>();
+
+        let background = theme.background_color();
+        let text_pair = theme.text_pair();
+        let seed = theme.palette_seed();
+
+        let color_stops: Vec<crate::core::Color> = if let Some(stops) = &self.data.color_stops {
+            stops.clone()
+        } else {
+            vec![seed.success, seed.warning, seed.danger]
+        };
+        let border_color = theme.divider_color().resolve(background, text_pair, &seed, None);
+        let label_color = {
+            let resolved = text_pair.resolve(background, None);
+            crate::core::Color { a: 0.7, ..resolved }
+        };
+
+        // Frame coordinate system depends on whether we're drawing in the
+        // strip (scene-local) or inside the plot area (plot-local).
+        let (frame_size, translation, plot_bounds, strip_local) = match strip_rect {
+            Some(strip) => (
+                strip.size(),
+                crate::core::Vector::new(strip.x, strip.y),
+                crate::core::Rectangle {
+                    x: 0.0,
+                    y: 0.0,
+                    width: plot_layout_bounds.width,
+                    height: plot_layout_bounds.height,
+                },
+                Some(crate::core::Rectangle {
+                    x: 0.0,
+                    y: 0.0,
+                    width: strip.width,
+                    height: strip.height,
+                }),
+            ),
+            None => (
+                plot_layout_bounds.size(),
+                crate::core::Vector::new(plot_layout_bounds.x, plot_layout_bounds.y),
+                crate::core::Rectangle {
+                    x: 0.0,
+                    y: 0.0,
+                    width: plot_layout_bounds.width,
+                    height: plot_layout_bounds.height,
+                },
+                None,
+            ),
+        };
+
+        let mut frame = Frame::new(renderer, frame_size);
+        scale_legend::draw(
+            &mut frame,
+            &state.legend_plan,
+            legend_config,
+            self.data.legend_title.as_deref(),
+            plot_bounds,
+            strip_local,
+            &color_stops,
+            background,
+            border_color,
+            label_color,
+            theme,
+        );
+
         renderer.with_translation(translation, |renderer| {
             renderer.draw_geometry(frame.into_geometry());
         });

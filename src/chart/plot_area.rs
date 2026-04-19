@@ -1100,6 +1100,35 @@ where
         });
     }
 
+    /// Draws color-scale legends owned by member series (e.g. choropleth).
+    ///
+    /// `plot_layout` is the plot area's own layout (used when a legend's
+    /// placement is `Overlaid`: the legend draws inside the plot bounds).
+    /// `strip_rects` maps a series index within this plot area to the
+    /// scene-reserved strip rectangle for that series' `Placement::Inset`
+    /// legend — when present, the legend draws inside the strip instead.
+    /// Series without an entry (or with no scale legend at all) don't draw
+    /// anything.
+    pub fn draw_scale_legends<D>(
+        &self,
+        tree: &crate::core::widget::Tree,
+        renderer: &mut Renderer,
+        design: &D,
+        plot_layout: crate::core::Layout<'_>,
+        strip_rects: &std::collections::HashMap<usize, crate::core::Rectangle>,
+    ) where
+        D: crate::design::Design + ?Sized,
+    {
+        let plot_bounds = plot_layout.bounds();
+        for (i, series) in self.series.iter().enumerate() {
+            if let Series::Choropleth(c) = series {
+                let series_tree = &tree.children[i];
+                let strip = strip_rects.get(&i).copied();
+                c.draw_scale_legend(series_tree, renderer, design, plot_bounds, strip);
+            }
+        }
+    }
+
     /// Draws the plot area by delegating to each series
     #[allow(clippy::too_many_arguments)]
     #[allow(clippy::too_many_arguments)]

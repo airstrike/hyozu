@@ -413,6 +413,31 @@ impl Data {
         self.primary.marks()
     }
 
+    /// Aggregated pixel reservations for every scale-legend with
+    /// `Placement::Inset` on any mark in this [`Data`].
+    ///
+    /// Returns a map from [`legend::Edge`] → total pixel budget the scene
+    /// should carve off the plot area for that edge's inset scale legends.
+    /// Horizontal legends (Top/Bottom) reserve vertical space; vertical
+    /// legends (Left/Right) reserve horizontal space. Multiple marks
+    /// reserving on the same edge stack additively.
+    ///
+    /// Marks with `Placement::Overlaid` scale legends or no legend at all
+    /// contribute nothing — those still draw as floating panels inside the
+    /// plot area without shrinking it.
+    pub fn scale_legend_reservations(&self) -> std::collections::HashMap<legend::Edge, f32> {
+        let mut out: std::collections::HashMap<legend::Edge, f32> = std::collections::HashMap::new();
+        let all = self.primary.marks().iter().chain(self.secondary.marks().iter());
+        for mark in all {
+            if let Some((legend_cfg, title)) = mark.scale_legend_config()
+                && let Some((edge, budget)) = crate::chart::scale_legend::reservation(legend_cfg, title)
+            {
+                *out.entry(edge).or_insert(0.0) += budget;
+            }
+        }
+        out
+    }
+
     /// Computes the bounds of the primary area.
     pub fn primary_bounds(&self) -> area::Bounds {
         self.primary.bounds()
@@ -697,6 +722,48 @@ mod tests {
 
         assert_eq!(data.primary.marks.len(), 2);
         assert_eq!(data.title, Some("Multi-Series Chart".to_string()));
+    }
+
+    #[test]
+    fn inset_choropleth_on_right_reserves_right_edge_strip() {
+        use crate::choropleth;
+        use crate::data::legend::{Anchor, Edge, Legend, Orientation, Placement};
+
+        let cfg = Legend::overlay(Anchor::Right)
+            .placement(Placement::Inset)
+            .orientation(Orientation::Vertical);
+        let data: Data = choropleth([("USA", 1.0), ("CAN", 2.0)]).legend(cfg).into_data();
+        let reservations = data.scale_legend_reservations();
+        let right = *reservations.get(&Edge::Right).expect("right edge reserved");
+        // ~82–90px depending on label width; must register on the right edge.
+        assert!(
+            (60.0..=100.0).contains(&right),
+            "right-edge reservation out of expected range: {right}"
+        );
+        assert_eq!(reservations.len(), 1, "only the right edge should be reserved");
+    }
+
+    #[test]
+    fn overlaid_choropleth_does_not_reserve() {
+        use crate::choropleth;
+        use crate::data::legend::{Anchor, Legend};
+
+        let data: Data = choropleth([("USA", 1.0)])
+            .legend(Legend::overlay(Anchor::BottomRight))
+            .into_data();
+        assert!(data.scale_legend_reservations().is_empty());
+    }
+
+    #[test]
+    fn inset_choropleth_on_bottom_reserves_bottom_edge() {
+        use crate::choropleth;
+        use crate::data::legend::{Edge, Legend};
+
+        let data: Data = choropleth([("USA", 1.0)]).legend(Legend::below()).into_data();
+        let reservations = data.scale_legend_reservations();
+        let bottom = *reservations.get(&Edge::Bottom).expect("bottom edge reserved");
+        // No title: 42px (bar 10 + tick 4 + label 12 + padding 16).
+        assert!((bottom - 42.0).abs() < 0.5, "bottom budget unexpected: {bottom}");
     }
 
     #[test]
