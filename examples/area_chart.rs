@@ -34,8 +34,7 @@ impl App {
                         .with_name("Expenses")
                         .data_labels(Label::new().show(Show::Any) + Position::Below),
                 ])
-                .stacked()
-                .gradient(true),
+                .stacked(),
             )
             .title("Revenue vs Expenses")
             .palette(palette::categorical()),

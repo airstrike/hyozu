@@ -236,7 +236,7 @@ impl IntoAreas for Series {
         Area {
             series: vec![self],
             layout: Layout::default(),
-            gradient: false,
+            gradient: true,
         }
     }
 }
@@ -246,7 +246,7 @@ impl<const N: usize> IntoAreas for [Series; N] {
         Area {
             series: self.into(),
             layout: Layout::default(),
-            gradient: false,
+            gradient: true,
         }
     }
 }
@@ -256,7 +256,7 @@ impl IntoAreas for Vec<Series> {
         Area {
             series: self,
             layout: Layout::default(),
-            gradient: false,
+            gradient: true,
         }
     }
 }
@@ -266,7 +266,7 @@ impl Area {
         Self {
             series,
             layout: Layout::default(),
-            gradient: false,
+            gradient: true,
         }
     }
 
