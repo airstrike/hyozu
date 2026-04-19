@@ -427,7 +427,9 @@ impl Dashboard {
     fn panel_body(&self, panel: Panel) -> Element<'_, Message> {
         let state = self.panels.get(&panel);
         match (panel, state) {
-            (Panel::Kpi, Some(QueryState::Ok(results))) => kpi::render(results, &self.schema, &self.kpi),
+            (Panel::Kpi, Some(QueryState::Ok(results))) => {
+                kpi::render(results, &self.schema, &self.kpi, metric::choices(&self.schema))
+            }
             (Panel::Map, Some(QueryState::Ok(_))) => match self.map_data.as_ref() {
                 Some(data) => hyozu::chart(data)
                     .height(Length::Fill)

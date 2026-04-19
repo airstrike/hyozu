@@ -178,7 +178,14 @@ fn build_spec(schema: &Schema) -> Result<DashboardSpec, String> {
         MemberRef::scenario(parse_name("Actual")?),
     ];
 
-    let kpi = kpi::State { metric: Some(revenue) };
+    let kpi = kpi::State::new(vec![
+        Some(revenue),
+        Some(metric::Pick::Metric(metric_index(schema, "RevenueYoY")?)),
+        Some(metric::Pick::Metric(metric_index(schema, "RevenueMoM")?)),
+        Some(metric::Pick::Metric(metric_index(schema, "ADR")?)),
+        Some(metric::Pick::Metric(metric_index(schema, "Occupancy")?)),
+        Some(metric::Pick::Metric(metric_index(schema, "RevPAR")?)),
+    ]);
     let map = map::State {
         rows: axis::Pick::Pick {
             dim: geo_dim,
