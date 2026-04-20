@@ -194,7 +194,12 @@ impl Dashboard {
         let slicer = self.trail.current().slicer.clone();
         let query = match panel {
             Panel::Kpi => self.kpi.query(&self.schema, slicer),
-            Panel::Map => self.map.query(&self.schema, slicer),
+            // The map IS the Geography view — pinning the Geography dim
+            // would filter the map down to the pinned member's siblings,
+            // which is the opposite of useful. Strip the Geography pin
+            // (if any) so the map keeps showing every available state
+            // and the click-driven highlight has somewhere to land.
+            Panel::Map => self.map.query(&self.schema, strip_dim(slicer, "Geography")),
             Panel::Rail => self.rail.query(&self.schema, slicer),
             Panel::Line => self.line.query(&self.schema, slicer),
         };
@@ -273,7 +278,8 @@ impl Dashboard {
             Message::PanelDone(panel, Ok(results)) => {
                 match panel {
                     Panel::Map => {
-                        self.map_data = map::build_data(&results, &self.geo, &self.centroids, self.map.scope);
+                        let selected = geography_pin_leaves(&self.trail.current().slicer);
+                        self.map_data = map::build_data(&results, &self.geo, &self.centroids, self.map.scope, selected);
                     }
                     Panel::Rail => self.rail_data = rail::build_data(&results),
                     Panel::Line => self.line_data = line::build_data(&results),
@@ -462,6 +468,29 @@ impl Dashboard {
 /// resolver (no member at the sliced coordinate) is presented as a neutral
 /// "no data" note; other classes pass through as raw text so the shape of
 /// the underlying failure stays visible.
+/// Collect leaf names of every Geography pin in `slicer`. Returns an
+/// empty `Vec` when no Geography pins are active — the caller treats
+/// that as "no selection mode" and renders every value-bearing feature
+/// at full saturation.
+fn geography_pin_leaves(slicer: &Tuple) -> Vec<String> {
+    slicer
+        .members()
+        .iter()
+        .filter(|m| m.dim.as_str() == "Geography")
+        .filter_map(|m| m.path.segments().last().map(|seg| seg.as_str().to_owned()))
+        .collect()
+}
+
+/// Drop any pin in the slicer that targets the given dim name.
+///
+/// Used to scope a panel to "all Geography members" while still applying
+/// the rest of the dashboard's pins (Time, Channel, Scenario, …). Falls
+/// back to the original tuple if the rebuild fails — we never want
+/// dispatch to die because of an empty post-filter tuple.
+fn strip_dim(slicer: Tuple, dim: &str) -> Tuple {
+    Tuple::of(slicer.members().iter().filter(|m| m.dim.as_str() != dim).cloned()).unwrap_or(slicer)
+}
+
 fn render_error(message: &str) -> Element<'_, Message> {
     let is_no_data = message.starts_with("resolve: dimension ") && message.contains("unknown member at path ");
     if is_no_data {

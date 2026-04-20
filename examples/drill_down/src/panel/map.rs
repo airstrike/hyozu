@@ -9,7 +9,7 @@ use std::sync::Arc;
 use iced::widget::{Renderer, pick_list, row, text};
 use iced::{Alignment, Element, Length, Theme};
 
-use hyozu::{GeoData, MapScope};
+use hyozu::{GeoData, LegendConfig, MapScope};
 use tatami::query::{MemberRef, Options, Tuple};
 use tatami::schema::Schema;
 use tatami::series;
@@ -77,6 +77,7 @@ pub fn build_data(
     geo: &Arc<GeoData>,
     centroids: &Arc<data::Centroids>,
     scope: MapScope,
+    selected: Vec<String>,
 ) -> Option<hyozu::Data> {
     let tatami::Results::Series(series) = results else {
         return None;
@@ -86,9 +87,27 @@ pub fn build_data(
     let size_row = series.rows().get(1);
 
     let mut entries: Vec<hyozu::ChoroplethEntry> = Vec::with_capacity(series.x().len());
-    for (member, cell) in series.x().iter().zip(fill_row.values.iter()) {
+    for (i, (member, fill_cell)) in series.x().iter().zip(fill_row.values.iter()).enumerate() {
         let id = leaf(&member.path).as_str().to_owned();
-        entries.push(hyozu::choropleth_entry(id, hyozu::tatami::cell_f64(cell)));
+        let fill = hyozu::tatami::cell_f64(fill_cell);
+        if fill.is_finite() {
+            entries.push(hyozu::choropleth_entry(id, fill));
+            continue;
+        }
+        // No fill value, but mark the feature as "available" if the size
+        // metric has a positive value here — a sibling layer will draw
+        // the bubble, so the choropleth should render the feature with a
+        // muted neutral fill instead of fading it into the land background.
+        let has_size = size_row
+            .and_then(|row| row.values.get(i))
+            .map(|cell| {
+                let v = hyozu::tatami::cell_f64(cell);
+                v.is_finite() && v > 0.0
+            })
+            .unwrap_or(false);
+        if has_size {
+            entries.push(hyozu::choropleth_entry_available(id));
+        }
     }
 
     let mut points: Vec<hyozu::MapPoint> = Vec::with_capacity(series.x().len());
@@ -109,7 +128,14 @@ pub fn build_data(
         }
     }
 
-    let choropleth = hyozu::Mark::Choropleth(hyozu::choropleth(entries).geo(geo.clone()).scope(scope));
+    let mut choropleth_mark = hyozu::choropleth(entries)
+        .geo(geo.clone())
+        .scope(scope)
+        .legend(LegendConfig::right());
+    if !selected.is_empty() {
+        choropleth_mark = choropleth_mark.selected(selected);
+    }
+    let choropleth = hyozu::Mark::Choropleth(choropleth_mark);
     let bubbles = hyozu::Mark::BubbleMap(hyozu::bubble_map(points).geo(geo.clone()).scope(scope).no_basemap());
     Some(hyozu::data(vec![choropleth, bubbles]))
 }
@@ -290,12 +316,18 @@ mod tests {
         }
     }
 
+    fn missing() -> Cell {
+        Cell::Missing {
+            reason: tatami::missing::Reason::NoFacts,
+        }
+    }
+
     #[test]
     fn non_series_results_yield_none() {
         let scalar = tatami::Results::Scalar(tatami::scalar::Result::new(Tuple::empty(), vec![valid(1.0)]));
         let geo = Arc::new(GeoData::new(Vec::new()));
         let centroids = Arc::new(data::Centroids::from_geo(&geo));
-        assert!(build_data(&scalar, &geo, &centroids, MapScope::UnitedStates).is_none());
+        assert!(build_data(&scalar, &geo, &centroids, MapScope::UnitedStates, Vec::new()).is_none());
     }
 
     #[test]
@@ -313,7 +345,7 @@ mod tests {
         let results = tatami::Results::Series(result);
         let geo = Arc::new(GeoData::new(Vec::new()));
         let centroids = Arc::new(data::Centroids::from_geo(&geo));
-        let data = build_data(&results, &geo, &centroids, MapScope::UnitedStates).expect("built");
+        let data = build_data(&results, &geo, &centroids, MapScope::UnitedStates, Vec::new()).expect("built");
         assert_eq!(data.marks().len(), 2);
         match &data.marks()[0] {
             hyozu::Mark::Choropleth(c) => assert_eq!(c.entries().len(), 2),
@@ -323,6 +355,39 @@ mod tests {
             hyozu::Mark::BubbleMap(bm) => assert_eq!(bm.points().len(), 0),
             _ => panic!("expected BubbleMap as second mark"),
         }
+    }
+
+    #[test]
+    fn missing_fill_with_positive_size_yields_available_entry() {
+        // CA has both fill and size → Value entry.
+        // TX has missing fill but a positive size → Available entry.
+        // NM has missing fill and zero size → no entry at all.
+        let result = series::Result::new(vec![state_mr("CA"), state_mr("TX"), state_mr("NM")], vec![
+            series::Row {
+                label: "Revenue".into(),
+                values: vec![valid(4_500_000.0), missing(), missing()],
+            },
+            series::Row {
+                label: "room_nights_sold".into(),
+                values: vec![valid(723.0), valid(150.0), valid(0.0)],
+            },
+        ]);
+        let results = tatami::Results::Series(result);
+        let geo = Arc::new(GeoData::new(Vec::new()));
+        let centroids = Arc::new(data::Centroids::from_geo(&geo));
+        let data = build_data(&results, &geo, &centroids, MapScope::UnitedStates, Vec::new()).expect("built");
+
+        let hyozu::Mark::Choropleth(c) = &data.marks()[0] else {
+            panic!("expected Choropleth as first mark");
+        };
+        let entries = c.entries();
+        assert_eq!(entries.len(), 2, "NM with no fill and zero size should be skipped");
+
+        let ca = entries.iter().find(|e| e.id().as_str() == "CA").expect("CA entry");
+        assert!(matches!(ca.value(), Some(v) if v == 4_500_000.0), "CA value");
+
+        let tx = entries.iter().find(|e| e.id().as_str() == "TX").expect("TX entry");
+        assert!(tx.value().is_none(), "TX should be value-less Available entry");
     }
 
     #[test]

@@ -12,11 +12,25 @@ use crate::widget::renderer::geometry;
 
 use super::Plane;
 
+/// Per-feature display state, derived from the entries map and the
+/// feature's value (or absence thereof). Drives the 3-way color decision
+/// in `draw`: gradient sample / muted neutral / decorative land fill.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FeatureState {
+    /// Has a finite value — render at the gradient sample for `t`.
+    Value(f32),
+    /// Has an entry but no value (the caller signalled "available, no
+    /// measurement") — render at the neutral `available_fill`.
+    Available,
+    /// No entry at all — render at `land_fill` (decorative background).
+    Missing,
+}
+
 /// State for Choropleth -- stores projected polygon geometry, feature IDs,
 /// bounding boxes, and pre-computed value normalization for each feature.
 ///
-/// The per-feature `feature_t` values, the scale legend plan, and the data
-/// value range are all theme-independent and computed in `layout` so
+/// The per-feature `feature_state` values, the scale legend plan, and the
+/// data value range are all theme-independent and computed in `layout` so
 /// `draw` doesn't re-walk `self.data.entries` or rebuild the value lookup
 /// HashMap on every repaint. See the `iced layout-vs-draw discipline` note
 /// for the broader principle.
@@ -24,10 +38,8 @@ pub struct State {
     pub projected_polygons: Vec<Vec<Vec<(f32, f32)>>>,
     pub filtered_ids: Vec<crate::feature::Id>,
     pub feature_bboxes: Vec<crate::core::Rectangle>,
-    /// Normalized [0,1] value for each filtered feature, in `filtered_ids`
-    /// order. `None` for features without an entry in `self.data.entries`
-    /// (those render as land-fill).
-    pub feature_t: Vec<Option<f32>>,
+    /// Per-filtered-feature display state, in `filtered_ids` order.
+    pub feature_state: Vec<FeatureState>,
     /// Min/max of the entry values. Cached so the scale legend doesn't
     /// need to re-walk entries each draw.
     pub value_range: (f64, f64),
@@ -96,6 +108,51 @@ fn normalize(value: f64, v_min: f64, v_max: f64, norm: crate::mark::choropleth::
     t.clamp(0.0, 1.0) as f32
 }
 
+/// Linear-RGB blend of `a` toward `b` by `t` in `[0.0, 1.0]`. `t = 0`
+/// returns `a`, `t = 1` returns `b`. Used to fade non-selected
+/// value-bearing features toward the muted `land_fill` so the selection
+/// reads as the focus without actually hiding the data.
+fn blend_colors(a: crate::core::Color, b: crate::core::Color, t: f32) -> crate::core::Color {
+    let t = t.clamp(0.0, 1.0);
+    crate::core::Color {
+        r: a.r * (1.0 - t) + b.r * t,
+        g: a.g * (1.0 - t) + b.g * t,
+        b: a.b * (1.0 - t) + b.b * t,
+        a: a.a * (1.0 - t) + b.a * t,
+    }
+}
+
+/// Pure helper that maps each filtered feature to its display state
+/// given the entries map and the value range. Pulled out so it can be
+/// unit-tested without spinning up the full layout pipeline.
+pub(super) fn compute_feature_states(
+    entries: &[crate::mark::choropleth::ChoroplethEntry],
+    filtered_ids: &[crate::feature::Id],
+    lo: f64,
+    hi: f64,
+    norm: crate::mark::choropleth::Normalization,
+) -> Vec<FeatureState> {
+    // Entry lookup: id → value (or None to mean "available, no value").
+    // NaN/Inf-valued entries get downgraded to Available so the gradient
+    // path never sees a non-finite t.
+    let entry_map: HashMap<&str, Option<f64>> = entries
+        .iter()
+        .map(|e| {
+            let v = e.value.filter(|v| v.is_finite());
+            (e.id.as_str(), v)
+        })
+        .collect();
+
+    filtered_ids
+        .iter()
+        .map(|id| match entry_map.get(id.as_str()) {
+            Some(Some(v)) => FeatureState::Value(normalize(*v, lo, hi, norm)),
+            Some(None) => FeatureState::Available,
+            None => FeatureState::Missing,
+        })
+        .collect()
+}
+
 impl<'a, Message, Renderer> Choropleth<'a, Message, Renderer>
 where
     Message: 'a,
@@ -115,7 +172,7 @@ where
                 projected_polygons: Vec::new(),
                 filtered_ids: Vec::new(),
                 feature_bboxes: Vec::new(),
-                feature_t: Vec::new(),
+                feature_state: Vec::new(),
                 value_range: (0.0, 1.0),
                 legend_plan: scale_legend::Plan::default(),
                 prev_size: (0.0, 0.0),
@@ -215,7 +272,7 @@ where
 
         // ── Entry-derived state (always recomputed) ──────────────────
         //
-        // value_range, feature_t, and legend strings depend on
+        // value_range, feature_state, and legend strings depend on
         // `self.data.entries` and `self.data.normalization`, neither of
         // which is covered by the projection dirty check. The work is O(n)
         // on entries (typically dozens, not millions), so unconditional
@@ -223,11 +280,15 @@ where
         let mut lo = f64::INFINITY;
         let mut hi = f64::NEG_INFINITY;
         for entry in &self.data.entries {
-            if entry.value < lo {
-                lo = entry.value;
-            }
-            if entry.value > hi {
-                hi = entry.value;
+            if let Some(v) = entry.value
+                && v.is_finite()
+            {
+                if v < lo {
+                    lo = v;
+                }
+                if v > hi {
+                    hi = v;
+                }
             }
         }
         if lo.is_infinite() {
@@ -238,20 +299,16 @@ where
         }
         state.value_range = (lo, hi);
 
-        // Build the value lookup once. The HashMap lives only for the rest
-        // of this layout call; feature_t materializes the result so draw
-        // doesn't need it.
-        let value_map: HashMap<&str, f64> = self.data.entries.iter().map(|e| (e.id.as_str(), e.value)).collect();
-
-        state.feature_t = state
-            .filtered_ids
-            .iter()
-            .map(|id| {
-                value_map
-                    .get(id.as_str())
-                    .map(|&v| normalize(v, lo, hi, self.data.normalization))
-            })
-            .collect();
+        // 3-way state per filtered feature:
+        //   Value(t) — entry with a finite value, gradient-encoded.
+        //   Available — entry with `value = None` (caller signalled the
+        //     feature is in the active context but carries no measurement;
+        //     renders muted).
+        //   Missing — no entry; renders as decorative land fill.
+        // NaN/Inf-valued entries are downgraded to Available so non-finite
+        // values can never reach `sample_gradient → from_oklch`.
+        state.feature_state =
+            compute_feature_states(&self.data.entries, &state.filtered_ids, lo, hi, self.data.normalization);
 
         state.legend_plan = scale_legend::Plan {
             min_label: format_legend_value(lo),
@@ -303,6 +360,13 @@ where
             b: background.b * 0.92 + 0.08 * 0.74,
             a: 1.0,
         };
+        // "In scope, clickable, but no value to encode" tint — same neutral
+        // hue family as `land_fill`, nudged one OKLch lightness pass toward
+        // the foreground so the eye reads it as a distinct interactive
+        // affordance rather than as decorative background. Stays clear of
+        // the gradient's red/yellow/green channel which carries value
+        // semantics.
+        let available_fill = crate::palette::shift_lightness(land_fill, background, 2);
         let border_color = theme.divider_color().resolve(background, text_pair, &seed, None);
 
         // ── Draw ocean background ────────────────────────────────
@@ -339,11 +403,30 @@ where
         // ── Draw features ────────────────────────────────────────
 
         for (feat_idx, feature_rings) in state.projected_polygons.iter().enumerate() {
-            // Per-feature normalized value was computed in layout. Sampling
-            // the gradient is the only theme-touching step left here.
-            let fill = match state.feature_t.get(feat_idx).copied().flatten() {
-                Some(t) => crate::palette::sample_gradient(&color_stops, t),
-                None => land_fill,
+            // Per-feature display state was computed in layout; sampling the
+            // gradient (or picking a neutral fill) is the only theme-touching
+            // step left here. When a selection set is active, value-bearing
+            // features outside the set blend halfway toward `land_fill` so
+            // the selected feature(s) read as the focus.
+            let fill = match state.feature_state.get(feat_idx).copied() {
+                Some(FeatureState::Value(t)) => {
+                    let gradient = crate::palette::sample_gradient(&color_stops, t);
+                    let id = state.filtered_ids.get(feat_idx);
+                    let is_selected = self
+                        .data
+                        .selected
+                        .as_ref()
+                        .zip(id)
+                        .map(|(set, id)| set.contains(id))
+                        .unwrap_or(true);
+                    if is_selected {
+                        gradient
+                    } else {
+                        blend_colors(gradient, land_fill, 0.5)
+                    }
+                }
+                Some(FeatureState::Available) => available_fill,
+                Some(FeatureState::Missing) | None => land_fill,
             };
 
             for ring in feature_rings {
@@ -464,5 +547,103 @@ where
         renderer.with_translation(translation, |renderer| {
             renderer.draw_geometry(frame.into_geometry());
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::feature::Id;
+    use crate::mark::choropleth::{Normalization, choropleth_entry, choropleth_entry_available};
+
+    fn id(s: &str) -> Id {
+        Id::new(s.to_owned())
+    }
+
+    #[test]
+    fn feature_state_distinguishes_value_available_and_missing() {
+        // Mirrors the drill_down map case: CA has a fill value, TX has
+        // no fill value but is in the active context (e.g., size-metric
+        // sibling layer carries data), NM has no entry at all.
+        let entries = vec![choropleth_entry("CA", 4_500_000.0), choropleth_entry_available("TX")];
+        let filtered_ids = vec![id("CA"), id("TX"), id("NM")];
+
+        let states = compute_feature_states(&entries, &filtered_ids, 0.0, 4_500_000.0, Normalization::Linear);
+
+        assert_eq!(states.len(), 3);
+        assert!(matches!(states[0], FeatureState::Value(_)), "CA should be Value");
+        assert_eq!(states[1], FeatureState::Available, "TX should be Available");
+        assert_eq!(states[2], FeatureState::Missing, "NM should be Missing");
+    }
+
+    #[test]
+    fn nonfinite_entry_value_downgrades_to_available() {
+        // Defence-in-depth: an entry whose value sneaks through as NaN
+        // (e.g. through a missing tatami cell that wasn't filtered
+        // upstream) must NOT reach the gradient sampler — that would
+        // panic in iced's Color::new debug_assert. Downgrade to
+        // Available so the renderer paints the muted neutral fill.
+        let entries = vec![choropleth_entry("CA", f64::NAN), choropleth_entry("TX", f64::INFINITY)];
+        let filtered_ids = vec![id("CA"), id("TX")];
+
+        let states = compute_feature_states(&entries, &filtered_ids, 0.0, 1.0, Normalization::Linear);
+
+        assert_eq!(states[0], FeatureState::Available);
+        assert_eq!(states[1], FeatureState::Available);
+    }
+
+    #[test]
+    fn value_state_carries_normalized_t_in_unit_range() {
+        let entries = vec![
+            choropleth_entry("LO", 0.0),
+            choropleth_entry("MID", 50.0),
+            choropleth_entry("HI", 100.0),
+        ];
+        let filtered_ids = vec![id("LO"), id("MID"), id("HI")];
+
+        let states = compute_feature_states(&entries, &filtered_ids, 0.0, 100.0, Normalization::Linear);
+
+        let unwrap_t = |s: FeatureState| match s {
+            FeatureState::Value(t) => t,
+            _ => panic!("expected Value, got {s:?}"),
+        };
+        assert!((unwrap_t(states[0]) - 0.0).abs() < 1e-6);
+        assert!((unwrap_t(states[1]) - 0.5).abs() < 1e-6);
+        assert!((unwrap_t(states[2]) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn blend_colors_at_50_percent_is_arithmetic_mean() {
+        // The selection-fade blend uses linear-RGB interpolation. For a
+        // black → white blend at t=0.5 the expected channels are 0.5;
+        // for an orange (1, 0.5, 0) → grey (0.4, 0.4, 0.4) blend the
+        // expected channels are (0.7, 0.45, 0.2). Both directions plus
+        // the alpha channel are checked so a regression in any axis
+        // surfaces immediately.
+        let black = crate::core::Color::from_rgba(0.0, 0.0, 0.0, 1.0);
+        let white = crate::core::Color::from_rgba(1.0, 1.0, 1.0, 1.0);
+        let mid = blend_colors(black, white, 0.5);
+        assert!((mid.r - 0.5).abs() < 1e-6);
+        assert!((mid.g - 0.5).abs() < 1e-6);
+        assert!((mid.b - 0.5).abs() < 1e-6);
+        assert!((mid.a - 1.0).abs() < 1e-6);
+
+        let orange = crate::core::Color::from_rgba(1.0, 0.5, 0.0, 1.0);
+        let grey = crate::core::Color::from_rgba(0.4, 0.4, 0.4, 0.6);
+        let blended = blend_colors(orange, grey, 0.5);
+        assert!((blended.r - 0.7).abs() < 1e-6);
+        assert!((blended.g - 0.45).abs() < 1e-6);
+        assert!((blended.b - 0.2).abs() < 1e-6);
+        assert!((blended.a - 0.8).abs() < 1e-6);
+    }
+
+    #[test]
+    fn blend_colors_at_endpoints_returns_inputs() {
+        let a = crate::core::Color::from_rgba(0.1, 0.2, 0.3, 0.4);
+        let b = crate::core::Color::from_rgba(0.9, 0.8, 0.7, 0.6);
+        let at_zero = blend_colors(a, b, 0.0);
+        let at_one = blend_colors(a, b, 1.0);
+        assert!((at_zero.r - a.r).abs() < 1e-6 && (at_zero.a - a.a).abs() < 1e-6);
+        assert!((at_one.r - b.r).abs() < 1e-6 && (at_one.a - b.a).abs() < 1e-6);
     }
 }

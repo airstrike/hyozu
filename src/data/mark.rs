@@ -21,7 +21,10 @@ pub use band::{Band, BandOrientation, band};
 pub use bar::{Bars, IntoBars, bar, bars};
 pub use boxplot::{BoxPlot, boxplot, entry, entry_from_data};
 pub use bubble_map::{BubbleMap, MapPoint, bubble_map, map_point};
-pub use choropleth::{Choropleth, ChoroplethEntry, IntoChoropleth, Normalization, choropleth, choropleth_entry};
+pub use choropleth::{
+    Choropleth, ChoroplethEntry, IntoChoropleth, Normalization, choropleth, choropleth_entry,
+    choropleth_entry_available,
+};
 pub use gauge::{Gauge, gauge};
 pub use heatmap::{Heatmap, heatmap};
 pub use line::{IntoLines, Line, LineStyle, line};

@@ -924,13 +924,26 @@ where
         // reserved during layout. Drawing here (after the plot area, before
         // axis borders) puts legends on top of the map but below axes
         // framing.
-        self.plot_area.draw_scale_legends(
-            &tree.children[6],
-            renderer,
-            design,
-            plot_layout,
-            &self.scale_legend_strips,
-        );
+        //
+        // Strip rects were computed in scene-local coordinates; promote them
+        // to absolute coordinates here using the scene's own absolute
+        // position so the choropleth's `with_translation` lands the bar in
+        // the right place when the chart widget isn't at the screen origin.
+        let scene_origin = layout.bounds();
+        let absolute_strips: std::collections::HashMap<usize, crate::core::Rectangle> = self
+            .scale_legend_strips
+            .iter()
+            .map(|(&idx, rect)| {
+                (idx, crate::core::Rectangle {
+                    x: rect.x + scene_origin.x,
+                    y: rect.y + scene_origin.y,
+                    width: rect.width,
+                    height: rect.height,
+                })
+            })
+            .collect();
+        self.plot_area
+            .draw_scale_legends(&tree.children[6], renderer, design, plot_layout, &absolute_strips);
 
         // Bottom axis (labels and ticks)
         if let Some(guide) = &self.bottom_axis {

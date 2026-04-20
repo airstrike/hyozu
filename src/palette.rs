@@ -290,7 +290,15 @@ pub(crate) fn from_oklch(oklch: Oklch) -> crate::core::Color {
     let g = -1.268438 * l + 2.6097574 * m - 0.34131938 * s;
     let b = -0.0041960863 * l - 0.7034186 * m + 1.7076147 * s;
 
-    crate::core::Color::from_linear_rgba(r.clamp(0.0, 1.0), g.clamp(0.0, 1.0), b.clamp(0.0, 1.0), alpha)
+    // f32::clamp leaves NaN as NaN, which then fails the [0, 1] debug_assert
+    // in iced's `Color::new`. Coerce non-finite components to 0 so a stray
+    // NaN upstream produces a visible (but harmless) black instead of a panic.
+    crate::core::Color::from_linear_rgba(finite_unit(r), finite_unit(g), finite_unit(b), finite_unit(alpha))
+}
+
+/// Clamp a float to `[0.0, 1.0]`, mapping non-finite values to `0.0`.
+fn finite_unit(v: f32) -> f32 {
+    if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.0 }
 }
 
 /// Determine if a background is dark (OKLch lightness < 0.5).

@@ -21,7 +21,7 @@
 use tatami::rollup;
 
 use crate::tatami::cell::cell_f64;
-use crate::{ChoroplethEntry, Data, MapPoint, Mark, choropleth_entry, map_point};
+use crate::{ChoroplethEntry, Data, MapPoint, Mark, choropleth_entry, choropleth_entry_available, map_point};
 
 /// Build [`Data`] with a single [`Mark::Choropleth`] from a rollup tree.
 ///
@@ -69,7 +69,16 @@ where
     F: Fn(&tatami::MemberRef) -> Option<String>,
 {
     if let Some(id) = feature_id(&tree.root) {
-        out.push(choropleth_entry(id, cell_f64(&tree.value)));
+        let v = cell_f64(&tree.value);
+        let entry = if v.is_finite() {
+            choropleth_entry(id, v)
+        } else {
+            // Missing/Error cells become "available, no value" — the
+            // feature is part of the active context but carries no
+            // measurement to encode on the gradient.
+            choropleth_entry_available(id)
+        };
+        out.push(entry);
     }
     for child in &tree.children {
         push_choropleth_nodes(child, feature_id, out);
@@ -209,7 +218,10 @@ mod tests {
             let entries = c.entries();
             assert_eq!(entries.len(), 1);
             // Missing cell lifts to NaN through the adapter's cell_f64 hop.
-            assert!(entries[0].value.is_nan());
+            // Missing cells are now lifted to "available" entries
+            // (value = None) so the choropleth renderer treats them as
+            // muted neutral fill, not gradient-encoded NaN.
+            assert!(entries[0].value.is_none());
         } else {
             panic!("expected Mark::Choropleth");
         }
