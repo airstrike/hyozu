@@ -13,8 +13,8 @@ path = "src/lib.rs"
 
 [dependencies]
 hyozu = { path = "../..", features = ["tatami", "geojson"] }
-tatami = { path = "../../../tatami" }
-tatami-inmem = { path = "../../../tatami/inmem" }
+tatami = { git = "https://github.com/airstrike/tatami", branch = "master" }
+tatami-inmem = { git = "https://github.com/airstrike/tatami", branch = "master" }
 iced = { version = "0.15.0-dev", features = ["canvas", "tokio"] }
 polars-core = { version = "0.51", default-features = false, features = ["serde"] }
 polars-io = { version = "0.51", default-features = false, features = ["csv"] }

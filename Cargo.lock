@@ -4659,6 +4659,7 @@ dependencies = [
 [[package]]
 name = "tatami"
 version = "0.1.0"
+source = "git+https://github.com/airstrike/tatami?branch=master#75d76e6e0e4cbd834a1049ac44d287029aa2a261"
 dependencies = [
  "jiff",
  "serde",
@@ -4668,6 +4669,7 @@ dependencies = [
 [[package]]
 name = "tatami-inmem"
 version = "0.1.0"
+source = "git+https://github.com/airstrike/tatami?branch=master#75d76e6e0e4cbd834a1049ac44d287029aa2a261"
 dependencies = [
  "polars-core",
  "tatami",
