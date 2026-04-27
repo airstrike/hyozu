@@ -417,19 +417,17 @@ where
                     }
                 }
             },
-            Event::Mouse(mouse::Event::CursorLeft) if has_tooltip => {
-                if state.hover.is_some() {
-                    state.hover = None;
-                    shell.request_redraw();
-                }
+            Event::Mouse(mouse::Event::CursorLeft) if has_tooltip && state.hover.is_some() => {
+                state.hover = None;
+                shell.request_redraw();
             }
 
             // === CLICK HANDLING ===
-            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) if has_action => {
-                if cursor.is_over(plot_bounds) {
-                    state.is_pressed = true;
-                    shell.capture_event();
-                }
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+                if has_action && cursor.is_over(plot_bounds) =>
+            {
+                state.is_pressed = true;
+                shell.capture_event();
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) if has_action => {
                 let on_action = self.on_action.as_ref().unwrap();
