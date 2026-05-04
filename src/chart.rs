@@ -659,7 +659,7 @@ where
 
         match event {
             // === HOVER HANDLING ===
-            Event::Mouse(mouse::Event::CursorMoved { .. }) if has_tooltip => match cursor.position_in(plot_bounds) {
+            Event::Mouse(mouse::Event::CursorMoved { .. }) => match cursor.position_in(plot_bounds) {
                 Some(local) => {
                     let plot_area_tree = &scene_tree.children[6];
                     let new_hover = find_nearest_hover(Point::new(local.x, local.y), plot_area_tree, plane);
@@ -689,7 +689,7 @@ where
                     }
                 }
             },
-            Event::Mouse(mouse::Event::CursorLeft) if has_tooltip && state.hover.is_some() => {
+            Event::Mouse(mouse::Event::CursorLeft) if state.hover.is_some() => {
                 state.hover = None;
                 shell.request_redraw();
             }

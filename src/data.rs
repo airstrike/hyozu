@@ -32,7 +32,7 @@ pub fn data(t: impl IntoData) -> Data {
 ///
 /// This is the main type you store in your application state.
 /// Data owns all the source data: series, axes, title, legend.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Data {
     /// Primary plotting area (bottom-left axes)
     pub(crate) primary: Area,
@@ -56,13 +56,30 @@ pub struct Data {
     /// Optional legend configuration
     pub(crate) legend: Option<legend::Legend>,
 
-    /// Optional tooltip configuration
+    /// Tooltip configuration. Defaults to [`tooltip::Tooltip::default`] so
+    /// hover is on out of the box; users replace it via [`Data::tooltip`].
     pub(crate) tooltip: Option<tooltip::Tooltip>,
 
     /// Monotonic version counter. Bumped by [`Data::invalidate`] to signal
     /// that external state (e.g. newly loaded fonts) changed and the chart
     /// widget should re-measure all text.
     pub(crate) generation: u64,
+}
+
+impl Default for Data {
+    fn default() -> Self {
+        Self {
+            primary: Area::default(),
+            secondary: Area::default(),
+            title: None,
+            title_text: crate::text::Style::new(),
+            palette: None,
+            selection: None,
+            legend: None,
+            tooltip: Some(tooltip::Tooltip::default()),
+            generation: 0,
+        }
+    }
 }
 
 /// Returns the default axis pair for a given mark type.
@@ -130,7 +147,7 @@ impl IntoData for Mark {
             palette: None,
             selection: None,
             legend: None,
-            tooltip: None,
+            tooltip: Some(tooltip::Tooltip::default()),
             generation: 0,
         }
     }
@@ -224,7 +241,7 @@ impl IntoData for Vec<Mark> {
             palette: None,
             selection: None,
             legend: None,
-            tooltip: None,
+            tooltip: Some(tooltip::Tooltip::default()),
             generation: 0,
         }
     }
