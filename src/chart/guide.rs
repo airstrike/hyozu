@@ -1235,8 +1235,8 @@ where
             let bottom_tick = label_data[0].0;
             let top_tick = label_data[n - 1].0;
             (
-                ((max_value - top_tick) / value_range) as f32,
-                ((bottom_tick - min_value) / value_range) as f32,
+                (1.0 - self.transform.map_to_unit(top_tick, min_value, max_value)) as f32,
+                self.transform.map_to_unit(bottom_tick, min_value, max_value) as f32,
             )
         } else {
             (0.0, 0.0)
@@ -1260,7 +1260,7 @@ where
 
             let tick_value = *pos;
             let y = if value_range > 0.0 {
-                let normalized = ((tick_value - min_value) / value_range) as f32;
+                let normalized = self.transform.map_to_unit(tick_value, min_value, max_value) as f32;
                 top_inset + usable_height - normalized * usable_height
             } else {
                 max_size.height / 2.0
@@ -1400,8 +1400,8 @@ where
             let first_tick = label_data[0].0;
             let last_tick = label_data[n - 1].0;
             (
-                ((first_tick - min_value) / value_range) as f32,
-                ((max_value - last_tick) / value_range) as f32,
+                self.transform.map_to_unit(first_tick, min_value, max_value) as f32,
+                (1.0 - self.transform.map_to_unit(last_tick, min_value, max_value)) as f32,
             )
         } else {
             (0.0, 0.0)
@@ -1427,7 +1427,7 @@ where
 
             let tick_value = *pos;
             let x = if value_range > 0.0 {
-                left_inset + (((tick_value - min_value) / value_range) * usable_width as f64) as f32
+                left_inset + (self.transform.map_to_unit(tick_value, min_value, max_value) * usable_width as f64) as f32
             } else {
                 max_size.width / 2.0
             };
@@ -1507,7 +1507,7 @@ where
             let path = Path::new(|builder| {
                 for &tick_pos in tick_positions {
                     let normalized = if value_range > 0.0 {
-                        ((tick_pos - min_value) / value_range) as f32
+                        self.transform.map_to_unit(tick_pos, min_value, max_value) as f32
                     } else {
                         0.5
                     };
