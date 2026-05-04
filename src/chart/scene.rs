@@ -696,13 +696,16 @@ where
         // scale strip) on its edge.
         let legend_node = legend_tb_node.or(legend_side_node);
         if let Some(node) = legend_node {
+            let size = node.size();
+            // Side legends center vertically against the plot area so a
+            // short legend doesn't pin to the top of a tall chart.
+            let side_y = plot_top + ((plot_height - size.height) / 2.0).max(0.0);
             let pos = match legend_edge.unwrap_or(Edge::Top) {
                 Edge::Top => Point::new(content_left, title_height),
                 Edge::Bottom => Point::new(content_left, plot_top + plot_height + bottom_height + scale_bottom),
-                Edge::Left => Point::new(0.0, plot_top),
-                Edge::Right => Point::new(content_left + plot_width + right_width + scale_right, plot_top),
+                Edge::Left => Point::new(0.0, side_y),
+                Edge::Right => Point::new(content_left + plot_width + right_width + scale_right, side_y),
             };
-            let size = node.size();
             self.legend_bounds = Some(crate::core::Rectangle {
                 x: pos.x,
                 y: pos.y,
