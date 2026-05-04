@@ -71,9 +71,11 @@ impl App {
 }
 
 fn build_data(log_y: bool) -> Data {
-    // Five points along an exponential. On a linear y-axis the first
-    // four crush against the baseline; on a log axis they spread evenly.
-    let mark = line([1.0, 10.0, 100.0, 1000.0, 10000.0]).with_name("Growth");
+    // 41 samples along y = 10^(x/10). On a linear y-axis the curve hugs
+    // the baseline for ~30 steps then explodes upward; on a log y-axis
+    // the same curve becomes a straight diagonal across four decades.
+    let exponential: Vec<f64> = (0..=40).map(|i| 10_f64.powf(i as f64 / 10.0)).collect();
+    let mark = line(exponential).with_name("Growth");
     let d = data(mark).title("Exponential growth");
     if log_y { d.y_log() } else { d }
 }
