@@ -59,10 +59,12 @@ pub struct LegendEntry {
     pub color: Option<crate::color::Color>,
     /// Visual style of the swatch preceding the label.
     pub swatch: LegendSwatch,
-    /// Optional value string shown in a second column to the right of the
-    /// name. When any entry in a legend has a value, the legend lays out as
-    /// a two-column table; otherwise it stays in single-column mode.
-    pub value: Option<String>,
+    /// Optional raw numeric value shown in a second column to the right
+    /// of the name. The legend renderer formats it via the precedence
+    /// chain (legend override > mark override > data scale > default).
+    /// When any entry has a value, the legend lays out as a two-column
+    /// table; otherwise it stays in single-column mode.
+    pub value: Option<f64>,
 }
 
 /// Represents a visual mark in a chart (bars, lines, scatter, etc.)
@@ -143,7 +145,7 @@ impl Mark {
                         name: name.clone(),
                         color: s.color,
                         swatch: LegendSwatch::Square,
-                        value: Some(format_legend_value(s.value())),
+                        value: Some(s.value()),
                     })
                 })
                 .collect(),
@@ -321,17 +323,5 @@ impl From<BubbleMap> for Mark {
 impl From<Choropleth> for Mark {
     fn from(c: Choropleth) -> Self {
         Mark::Choropleth(c)
-    }
-}
-
-/// Default value-column formatter for legend entries that carry a numeric
-/// value (currently pie slices). Mirrors the shape of
-/// [`crate::data::tooltip`]'s default formatter: integer-valued numbers
-/// render without a fractional part, otherwise one decimal.
-fn format_legend_value(value: f64) -> String {
-    if value.fract().abs() < 0.001 {
-        format!("{}", value as i64)
-    } else {
-        format!("{value:.1}")
     }
 }

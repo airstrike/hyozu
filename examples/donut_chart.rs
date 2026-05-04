@@ -41,7 +41,8 @@ impl App {
         Self {
             data: data(chart)
                 .palette(palette::sequential(Color::Primary))
-                .legend(legend::Config::right()),
+                .legend(legend::Config::right())
+                .value_format(|v: &f64| format!("${v:.1}M")),
             theme: hyozu::theme::paper(),
             all_themes: hyozu::theme::all_themes().collect(),
         }
@@ -122,6 +123,13 @@ impl App {
         .align_y(Center)
         .spacing(10);
 
+        let total: f64 = self
+            .data
+            .pie(0)
+            .map(|pie| pie.slices().iter().map(|s| s.value()).sum())
+            .unwrap_or(0.0);
+        let total_text = self.data.format_value(total);
+
         let header = row![
             column![
                 text("Product Mix").size(18),
@@ -129,7 +137,9 @@ impl App {
             ]
             .spacing(2),
             space::horizontal(),
-            container(text("$201.4M").size(14)).padding([4, 10]).style(badge_style),
+            container(text(total_text.clone()).size(14))
+                .padding([4, 10])
+                .style(badge_style),
         ]
         .align_y(Center);
 
@@ -138,7 +148,7 @@ impl App {
             .design(&self.theme)
             .padding(8)
             .center(center(
-                column![text("$201M").size(48), text("FY 2026").size(13)]
+                column![text(total_text).size(48), text("FY 2026").size(13)]
                     .spacing(2)
                     .align_x(Center),
             ));

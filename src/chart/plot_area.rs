@@ -182,6 +182,20 @@ where
         self
     }
 
+    /// Threads the resolved per-mark value-format closures into every
+    /// `Pie` series. `value_formats[i]` is consumed by `series[i]` when
+    /// the matching mark is a pie; non-pie marks ignore their slot.
+    /// Caller passes `value_formats.len() == self.series.len()`.
+    pub fn with_value_formats(mut self, value_formats: Vec<Option<crate::scale::Format<f64>>>) -> Self {
+        debug_assert_eq!(self.series.len(), value_formats.len());
+        for (series, fmt) in self.series.iter_mut().zip(value_formats) {
+            if let Series::Pie(pie) = series {
+                pie.set_value_format(fmt);
+            }
+        }
+        self
+    }
+
     fn to_series(mark: &'a crate::Mark) -> Series<'a, Message, Renderer> {
         match mark {
             crate::Mark::Area(a) => Series::Area(area::Area::new(a)),

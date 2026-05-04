@@ -8,6 +8,7 @@ use crate::data::legend::{Anchor, Orientation};
 use crate::data::mark::{LegendEntry, LegendSwatch};
 use crate::line::LineStyle;
 use crate::line::marker::Shape;
+use crate::scale;
 use crate::widget::canvas::{Frame, LineCap, LineDash, Path, Stroke};
 use crate::widget::renderer::geometry;
 
@@ -57,6 +58,10 @@ where
     /// Absolute-pixel bounding rect for each entry (indexed by entry index),
     /// cached on the last `draw()` call. Used for legend click hit-testing.
     pub entry_rects: Vec<Option<Rectangle>>,
+    /// Per-entry formatted value strings. Computed in `layout` by walking
+    /// the precedence chain (legend override → entry's mark/data scale →
+    /// default); read in `draw` to keep that pass O(1) per entry.
+    pub formatted_values: Vec<Option<String>>,
 }
 
 /// A Legend displays a key for the chart's data series.
@@ -70,6 +75,13 @@ where
     text: crate::text::Style,
     wrap: bool,
     interactive: bool,
+    /// Highest-precedence override for the legend's value column,
+    /// borrowed from the active `legend::Config`.
+    legend_value_format: Option<scale::Format<f64>>,
+    /// Per-entry resolved fallback chain (mark override → data scale).
+    /// Same length as `entries`. `None` means walk to the built-in
+    /// default.
+    entry_value_format: Vec<Option<scale::Format<f64>>>,
     _marker: std::marker::PhantomData<(Message, &'a Renderer)>,
 }
 
@@ -78,6 +90,13 @@ where
     Renderer: text::Renderer<Font = crate::core::Font> + geometry::Renderer,
 {
     /// Create a new Legend from entries and configuration.
+    ///
+    /// `entry_value_format` carries each entry's resolved
+    /// mark-override-or-data-scale format closure (matching
+    /// `entries.len()`). The legend layout walks
+    /// `legend_value_format` (highest precedence) → entry slot →
+    /// [`scale::default_f64_format`] when formatting the value column.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         entries: Vec<LegendEntry>,
         anchor: Anchor,
@@ -85,7 +104,10 @@ where
         text: crate::text::Style,
         wrap: bool,
         interactive: bool,
+        legend_value_format: Option<scale::Format<f64>>,
+        entry_value_format: Vec<Option<scale::Format<f64>>>,
     ) -> Self {
+        debug_assert_eq!(entries.len(), entry_value_format.len());
         Self {
             entries,
             anchor,
@@ -93,6 +115,8 @@ where
             text,
             wrap,
             interactive,
+            legend_value_format,
+            entry_value_format,
             _marker: std::marker::PhantomData,
         }
     }
@@ -152,6 +176,7 @@ where
                 value_column_width: 0.0,
                 table_mode: false,
                 entry_rects: Vec::new(),
+                formatted_values: Vec::new(),
             }),
             children: Vec::new(),
         }
@@ -167,6 +192,7 @@ where
                 let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
                 state.entry_rects.clear();
                 state.value_widths.clear();
+                state.formatted_values.clear();
                 state.name_column_width = 0.0;
                 state.value_column_width = 0.0;
                 state.table_mode = false;
@@ -178,6 +204,25 @@ where
         let font_size = self.text.resolved_size(DEFAULT_FONT_SIZE);
         let table_mode = self.entries.iter().any(|e| e.value.is_some());
         state.table_mode = table_mode;
+
+        // Resolve the value column's text via the precedence chain.
+        // legend.value_format → entry's resolved (mark-or-data) format →
+        // built-in default. Cached on `state.formatted_values` so the
+        // measurement pass below and `draw` both read pre-formatted
+        // strings without touching the closures again.
+        state.formatted_values.clear();
+        for (i, entry) in self.entries.iter().enumerate() {
+            let formatted = entry.value.map(|raw| {
+                if let Some(legend_fmt) = &self.legend_value_format {
+                    legend_fmt(&raw)
+                } else if let Some(entry_fmt) = self.entry_value_format.get(i).and_then(|f| f.as_ref()) {
+                    entry_fmt(&raw)
+                } else {
+                    scale::default_f64_format(raw)
+                }
+            });
+            state.formatted_values.push(formatted);
+        }
 
         // Measure each entry's name width.
         state.widths.clear();
@@ -208,10 +253,12 @@ where
         // downstream layout/draw paths remain byte-equivalent.
         state.value_widths.clear();
         if table_mode {
-            for entry in &self.entries {
-                let width = if let Some(v) = entry.value.as_ref() {
+            for i in 0..state.formatted_values.len() {
+                // Re-fetch each iteration — the iterator binding would
+                // hold an immutable borrow across the &mut update below.
+                let width = if let Some(content) = state.formatted_values[i].clone() {
                     let _ = state.paragraph.update(text::Text {
-                        content: v.as_str(),
+                        content: content.as_str(),
                         bounds: Size::INFINITE,
                         size: font_size.into(),
                         line_height: text::LineHeight::default(),
@@ -485,7 +532,7 @@ where
                 // computed in `layout`; alignment is the renderer's job
                 // (no per-entry width walk in `draw`).
                 if state.table_mode
-                    && let Some(value) = entry.value.as_ref()
+                    && let Some(value) = state.formatted_values.get(entry_idx).and_then(|f| f.as_ref())
                 {
                     let value_right_x =
                         x + sw + SWATCH_TEXT_GAP + state.name_column_width + COLUMN_GAP + state.value_column_width;

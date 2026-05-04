@@ -2,7 +2,7 @@ use super::Plane;
 use crate::core::Size;
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
-use crate::mark::pie::label::{Position, Show};
+use crate::mark::pie::label::{FormatKind, Position, Show};
 use crate::widget::canvas::{Frame, Path, Stroke, Text as CanvasText};
 
 use crate::core::text;
@@ -56,6 +56,12 @@ where
     /// renders a full pie; the donut variant of the chart widget
     /// writes a positive value here before layout runs.
     pub(crate) hole: f32,
+    /// Resolved value-format closure for this mark (mark override → data
+    /// scale). The renderer substitutes this closure for `label.format`
+    /// when the slice's [`crate::mark::pie::label::FormatKind`] is
+    /// `Value`. `None` means walk to
+    /// [`crate::scale::default_f64_format`].
+    pub(crate) value_format: Option<crate::scale::Format<f64>>,
     _marker: std::marker::PhantomData<(Message, Renderer)>,
 }
 
@@ -69,7 +75,29 @@ where
         Self {
             data,
             hole: 0.0,
+            value_format: None,
             _marker: std::marker::PhantomData,
+        }
+    }
+
+    /// Sets the resolved value-format closure for the value channel.
+    /// Called by `PlotArea` after construction to thread the
+    /// scene-level chain into the renderer; by default Pie leaves the
+    /// slot empty (label closures use their own format).
+    pub(crate) fn set_value_format(&mut self, value_format: Option<crate::scale::Format<f64>>) {
+        self.value_format = value_format;
+    }
+
+    /// Formats a slice label, walking the value-format chain when the
+    /// label was built via [`crate::mark::pie::label::Label::value`] —
+    /// for every other [`FormatKind`] the label's own closure wins.
+    fn format_label(&self, label: &crate::mark::pie::label::Label, value: f64, pct: f64) -> String {
+        match label.format_kind() {
+            FormatKind::Value => match &self.value_format {
+                Some(f) => f(&value),
+                None => crate::scale::default_f64_format(value),
+            },
+            FormatKind::DefaultPercent | FormatKind::Percent | FormatKind::Custom => (label.format)(value, pct),
         }
     }
 
@@ -148,7 +176,7 @@ where
 
                 let mid = (start + end) / 2.0;
                 let pct = slice.value.max(0.0) / total;
-                let text = (label.format)(slice.value, pct);
+                let text = self.format_label(label, slice.value, pct);
                 if text.is_empty() {
                     return None;
                 }
@@ -296,7 +324,7 @@ where
                 let mid = (start + end) / 2.0;
 
                 let pct = slice.value.max(0.0) / total;
-                let label_text = (label.format)(slice.value, pct);
+                let label_text = self.format_label(label, slice.value, pct);
                 if label_text.is_empty() {
                     continue;
                 }

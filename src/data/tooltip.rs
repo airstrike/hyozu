@@ -46,6 +46,12 @@ pub struct TooltipEntry {
 pub struct Tooltip {
     /// Format function that produces the tooltip text for an entry.
     pub(crate) format: Arc<dyn Fn(&TooltipEntry) -> String + Send + Sync>,
+    /// True when `format` is the built-in default closure. The pie
+    /// tooltip overlay consults this to decide whether to substitute
+    /// the value-format precedence chain (mark/data scale) for the
+    /// default; an explicit user override (`Tooltip::format`) clears
+    /// this flag and the user's closure wins.
+    pub(crate) format_is_default: bool,
     /// Whether to show a colored swatch circle before each entry.
     pub(crate) swatch: bool,
     /// Whether to render each entry's text in the series color.
@@ -87,6 +93,7 @@ impl Default for Tooltip {
     fn default() -> Self {
         Self {
             format: Arc::new(default_format),
+            format_is_default: true,
             swatch: true,
             colored_text: false,
             tracking_line: true,
@@ -99,7 +106,15 @@ impl Tooltip {
     /// Set a custom format function for tooltip text.
     pub fn format(mut self, f: impl Fn(&TooltipEntry) -> String + Send + Sync + 'static) -> Self {
         self.format = Arc::new(f);
+        self.format_is_default = false;
         self
+    }
+
+    /// Returns whether `format` is the built-in default. The pie tooltip
+    /// overlay calls this to decide whether to apply the value-format
+    /// precedence chain or honor the user's explicit override.
+    pub fn format_is_default(&self) -> bool {
+        self.format_is_default
     }
 
     /// Set whether to show a colored swatch circle before each entry.

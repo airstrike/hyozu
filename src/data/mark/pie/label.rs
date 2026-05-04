@@ -39,6 +39,24 @@ pub enum Show {
 
 impl Eq for Show {}
 
+/// Distinguishes the built-in value/percent constructors from user
+/// closures so the renderer can substitute the value-format precedence
+/// chain for [`Label::value`] (mark override → data scale → default).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum FormatKind {
+    /// `Label::default` — percent text via the default closure.
+    #[default]
+    DefaultPercent,
+    /// `Label::percent` — explicit percent label.
+    Percent,
+    /// `Label::value` — raw value; renderer overrides the closure with
+    /// the value-format chain.
+    Value,
+    /// `Label::custom` or `Label::custom_format` — user closure wins.
+    Custom,
+}
+
 /// Label configuration for pie slices.
 #[derive(Clone)]
 pub struct Label {
@@ -49,6 +67,8 @@ pub struct Label {
     /// Format function for the label text. Receives `(value, percentage)`
     /// where percentage is `0.0..=1.0`.
     pub(crate) format: Arc<dyn Fn(f64, f64) -> String + Send + Sync>,
+    /// Provenance of the `format` closure — see [`FormatKind`].
+    pub(crate) format_kind: FormatKind,
     pub(crate) color: Option<Color>,
     pub(crate) text: text::Style,
     pub(crate) fill: Option<Color>,
@@ -58,6 +78,7 @@ impl PartialEq for Label {
     fn eq(&self, other: &Self) -> bool {
         self.position == other.position
             && self.show == other.show
+            && self.format_kind == other.format_kind
             && (self.format)(1.0, 0.5) == (other.format)(1.0, 0.5)
             && self.color == other.color
             && self.text == other.text
@@ -71,6 +92,7 @@ impl std::fmt::Debug for Label {
             .field("position", &self.position)
             .field("show", &self.show)
             .field("format", &"<function>")
+            .field("format_kind", &self.format_kind)
             .field("color", &self.color)
             .field("text", &self.text)
             .field("fill", &self.fill)
@@ -89,6 +111,7 @@ impl Default for Label {
             position: Position::default(),
             show: Show::default(),
             format: Arc::new(default),
+            format_kind: FormatKind::DefaultPercent,
             color: None,
             text: text::Style::new(),
             fill: None,
@@ -101,14 +124,19 @@ impl Label {
     pub fn percent() -> Self {
         Self {
             format: Arc::new(|_value, pct| format!("{:.0}%", pct * 100.0)),
+            format_kind: FormatKind::Percent,
             ..Self::default()
         }
     }
 
-    /// Creates a label that shows the raw value.
+    /// Creates a label that shows the raw value, formatted via the
+    /// value-format chain (mark override → `Data::value_scale` → built-in
+    /// default). The renderer substitutes the chain at draw time so the
+    /// in-mark text matches the legend column and tooltip body.
     pub fn value() -> Self {
         Self {
-            format: Arc::new(|value, _pct| format!("{}", value)),
+            format: Arc::new(|value, _pct| crate::scale::default_f64_format(value)),
+            format_kind: FormatKind::Value,
             ..Self::default()
         }
     }
@@ -119,6 +147,7 @@ impl Label {
     pub fn custom(f: impl Fn(f64, f64) -> String + Send + Sync + 'static) -> Self {
         Self {
             format: Arc::new(f),
+            format_kind: FormatKind::Custom,
             ..Self::default()
         }
     }
@@ -374,6 +403,14 @@ impl Label {
     /// the public surface of `bar::label::Label::with_format`.
     fn custom_format(mut self, f: impl Fn(f64, f64) -> String + Send + Sync + 'static) -> Self {
         self.format = Arc::new(f);
+        self.format_kind = FormatKind::Custom;
         self
+    }
+
+    /// Returns the provenance of the format closure — the renderer
+    /// reads this to decide whether to substitute the value-format
+    /// chain.
+    pub fn format_kind(&self) -> FormatKind {
+        self.format_kind
     }
 }

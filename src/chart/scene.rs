@@ -3,11 +3,38 @@ use crate::chart::legend::{self, Legend};
 use crate::chart::plot_area::PlotArea;
 use crate::chart::title::{self, Title};
 use crate::core::widget::{Tree, tree};
+use crate::data::mark::Mark;
 use crate::design;
 use crate::palette::{self, Palette};
 
 use crate::core::text;
 use crate::widget::renderer::geometry;
+
+/// Returns the mark's per-mark value-format closure when set.
+///
+/// Currently only `Mark::Pie` carries a value scale override; other
+/// marks return `None` and fall through to the data-level scale. As
+/// more marks gain per-mark scale overrides this match grows.
+fn mark_value_format(mark: &Mark) -> Option<crate::scale::Format<f64>> {
+    match mark {
+        Mark::Pie(pie) => pie.value_scale().and_then(|s| s.format.clone()),
+        Mark::Area(_)
+        | Mark::Band(_)
+        | Mark::Bars(_)
+        | Mark::BoxPlot(_)
+        | Mark::BubbleMap(_)
+        | Mark::Choropleth(_)
+        | Mark::Line(_)
+        | Mark::Gauge(_)
+        | Mark::Treemap(_)
+        | Mark::Waterfall(_)
+        | Mark::Xy(_)
+        | Mark::Rule(_)
+        | Mark::Tick(_)
+        | Mark::Heatmap(_)
+        | Mark::Violin(_) => None,
+    }
+}
 
 /// Scene organizes the 7 pieces of a chart.
 /// Borrows everything from Data for lifetime 'a.
@@ -60,6 +87,12 @@ where
     selection: &'a Option<crate::target::Target>,
     /// Optional tooltip configuration (borrowed from Data).
     tooltip: Option<&'a crate::data::tooltip::Tooltip>,
+    /// Per-mark value-format closure: mark override → data scale; `None`
+    /// at index `i` means walk to [`crate::scale::default_f64_format`].
+    /// Indexed by primary-area mark index. The pie tooltip overlay
+    /// reads this when [`Tooltip::format_is_default`] is true so the
+    /// hover string stays consistent with the legend column.
+    primary_mark_value_format: Vec<Option<crate::scale::Format<f64>>>,
 }
 
 impl<'a, Message, Renderer> Scene<'a, Message, Renderer>
@@ -194,9 +227,19 @@ where
 
     /// Create a new scene from Data, borrowing everything for lifetime 'a.
     pub fn new(data: &'a crate::Data) -> Self {
-        // Extract legend entries from all marks in the primary area
-        let entries: Vec<crate::data::mark::LegendEntry> =
-            data.primary.marks().iter().flat_map(|m| m.legend_entries()).collect();
+        // Extract legend entries from primary-area marks, paired with each
+        // entry's resolved value-format closure (mark override falls
+        // through to the chart-level data scale). The legend layout walks
+        // the legend-config override on top of these per-entry slots.
+        let mut entries: Vec<crate::data::mark::LegendEntry> = Vec::new();
+        let mut entry_value_format: Vec<Option<crate::scale::Format<f64>>> = Vec::new();
+        for mark in data.primary.marks() {
+            let mark_format = mark_value_format(mark).or_else(|| data.value_scale().format.clone());
+            for entry in mark.legend_entries() {
+                entries.push(entry);
+                entry_value_format.push(mark_format.clone());
+            }
+        }
 
         let legend = match data.legend.as_ref() {
             Some(config) if !entries.is_empty() => Some(Legend::new(
@@ -206,6 +249,8 @@ where
                 config.text,
                 config.wrap,
                 config.interactive,
+                config.value_format_ref().cloned(),
+                entry_value_format,
             )),
             _ => None,
         };
@@ -259,10 +304,28 @@ where
                 .y_axis
                 .as_ref()
                 .map(|axis| Guide::new(axis, data.primary.marks())),
-            plot_area: if data.secondary.is_empty() {
-                PlotArea::new(primary_marks)
-            } else {
-                PlotArea::new(primary_marks).with_secondary(secondary_marks)
+            plot_area: {
+                // Per-series value-format vector mirrors the order
+                // PlotArea::new + with_secondary appends series, so a
+                // single `with_value_formats` call covers both axis
+                // sides.
+                let primary_chain: Vec<_> = primary_marks
+                    .iter()
+                    .map(|m| mark_value_format(m).or_else(|| data.value_scale().format.clone()))
+                    .collect();
+                let secondary_chain: Vec<_> = secondary_marks
+                    .iter()
+                    .map(|m| mark_value_format(m).or_else(|| data.value_scale().format.clone()))
+                    .collect();
+                let mut chain = primary_chain;
+                chain.extend(secondary_chain);
+
+                let area = if data.secondary.is_empty() {
+                    PlotArea::new(primary_marks)
+                } else {
+                    PlotArea::new(primary_marks).with_secondary(secondary_marks)
+                };
+                area.with_value_formats(chain)
             },
             palette: palette_strategy,
             user_palette: data.palette.clone(),
@@ -298,7 +361,21 @@ where
             scale_legend_strips: std::collections::HashMap::new(),
             selection: &data.selection,
             tooltip: data.tooltip.as_ref(),
+            primary_mark_value_format: data
+                .primary
+                .marks()
+                .iter()
+                .map(|mark| mark_value_format(mark).or_else(|| data.value_scale().format.clone()))
+                .collect(),
         }
+    }
+
+    /// Returns the resolved value-format closure for the given primary
+    /// mark index — `mark.value_scale.format` if set, else
+    /// `Data::value_scale.format`. Returns `None` when neither is set
+    /// (callers fall back to [`crate::scale::default_f64_format`]).
+    pub(crate) fn primary_mark_value_format(&self, mark_idx: usize) -> Option<&crate::scale::Format<f64>> {
+        self.primary_mark_value_format.get(mark_idx).and_then(|f| f.as_ref())
     }
 
     /// Returns the plot area offset within the scene (stored during layout).

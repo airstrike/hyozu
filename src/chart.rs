@@ -1426,11 +1426,33 @@ fn draw_pie_tooltip_overlay<Message>(
     };
     let entries = [entry];
 
+    // When the user hasn't supplied an explicit `Tooltip::format`, swap
+    // in a chain-aware closure so the hover string matches the legend
+    // column. The user's override (when set) keeps its row-level
+    // freedom and stays untouched.
+    let chain_tooltip;
+    let effective_tooltip: &crate::data::tooltip::Tooltip = if tooltip_config.format_is_default() {
+        let mark_format = scene.primary_mark_value_format(mark_idx).cloned();
+        chain_tooltip = tooltip_config.clone().format(move |entry: &TooltipEntry| {
+            let formatted = match &mark_format {
+                Some(f) => f(&entry.y),
+                None => crate::scale::default_f64_format(entry.y),
+            };
+            match &entry.series_name {
+                Some(name) => format!("{name}: {formatted}"),
+                None => formatted,
+            }
+        });
+        &chain_tooltip
+    } else {
+        tooltip_config
+    };
+
     renderer.with_layer(*viewport, |renderer| {
         draw_tooltip_box(
             renderer,
             design,
-            tooltip_config,
+            effective_tooltip,
             &entries,
             cursor_pos,
             flip_axis_x,
