@@ -23,6 +23,10 @@ pub struct State {
     pub series_label_positions: Vec<Vec<Position>>,
     /// Pixel rectangles for each label per series
     pub series_label_rects: Vec<Vec<Rectangle>>,
+    /// Pixel y of the y-axis lower bound (plot area bottom). Used as the
+    /// transparent end of vertical fill gradients so they respect the
+    /// axis scale even when 0 is outside it.
+    pub axis_floor_y: f32,
 }
 
 pub struct Area<'a, Message, Renderer>
@@ -55,6 +59,7 @@ where
                 series_label_texts: Vec::new(),
                 series_label_positions: Vec::new(),
                 series_label_rects: Vec::new(),
+                axis_floor_y: 0.0,
             }),
             children: Vec::new(),
         }
@@ -66,6 +71,7 @@ where
         let state = tree.state.downcast_mut::<State>();
 
         let zero_y = plane.to_pixel(Datum::ORIGIN).y;
+        state.axis_floor_y = plane.bounds.y + plane.bounds.height;
 
         match self.data.layout {
             crate::mark::area::Layout::Overlaid => {
@@ -320,10 +326,12 @@ where
 
             if self.data.gradient {
                 // Vertical linear gradient: series color at the top of the
-                // upper envelope, fully transparent at the baseline. Uses
-                // absolute start/end points in frame-local pixel coordinates.
+                // upper envelope, fully transparent at the y-axis floor.
+                // Anchoring to the axis floor (not the polygon baseline)
+                // keeps the gradient aligned with the visible scale when
+                // 0 is outside the y-axis range.
                 let top_y = upper.iter().map(|p| p.y).fold(f32::INFINITY, f32::min);
-                let bottom_y = baseline.iter().map(|p| p.y).fold(f32::NEG_INFINITY, f32::max);
+                let bottom_y = state.axis_floor_y;
 
                 let gradient = Linear::new(Point::new(0.0, top_y), Point::new(0.0, bottom_y))
                     .add_stop(0.0, fill_color)

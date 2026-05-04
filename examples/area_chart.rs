@@ -41,7 +41,8 @@ impl App {
                 .stacked(),
             )
             .title("Revenue vs Expenses")
-            .palette(palette::categorical()),
+            .palette(palette::categorical())
+            .y_axis(|axis| axis.with_bounds(100.0, 500.0)),
         }
     }
 
