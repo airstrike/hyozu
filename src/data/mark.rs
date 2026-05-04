@@ -59,6 +59,10 @@ pub struct LegendEntry {
     pub color: Option<crate::color::Color>,
     /// Visual style of the swatch preceding the label.
     pub swatch: LegendSwatch,
+    /// Optional value string shown in a second column to the right of the
+    /// name. When any entry in a legend has a value, the legend lays out as
+    /// a two-column table; otherwise it stays in single-column mode.
+    pub value: Option<String>,
 }
 
 /// Represents a visual mark in a chart (bars, lines, scatter, etc.)
@@ -100,6 +104,7 @@ impl Mark {
                             style: s.style.clone(),
                             marker: s.marker.clone(),
                         },
+                        value: None,
                     })
                 })
                 .collect(),
@@ -111,6 +116,7 @@ impl Mark {
                         name: name.clone(),
                         color: s.color,
                         swatch: LegendSwatch::Square,
+                        value: None,
                     })
                 })
                 .collect(),
@@ -125,6 +131,7 @@ impl Mark {
                             style: line.style.clone(),
                             marker: line.marker.clone(),
                         },
+                        value: None,
                     }]
                 })
                 .unwrap_or_default(),
@@ -136,6 +143,7 @@ impl Mark {
                         name: name.clone(),
                         color: s.color,
                         swatch: LegendSwatch::Square,
+                        value: Some(format_legend_value(s.value())),
                     })
                 })
                 .collect(),
@@ -147,6 +155,7 @@ impl Mark {
                         name: name.clone(),
                         color: xy.color,
                         swatch: LegendSwatch::Square,
+                        value: None,
                     }]
                 })
                 .unwrap_or_default(),
@@ -158,6 +167,7 @@ impl Mark {
                         name: name.clone(),
                         color: e.color,
                         swatch: LegendSwatch::Square,
+                        value: None,
                     })
                 })
                 .collect(),
@@ -169,6 +179,7 @@ impl Mark {
                         name: name.clone(),
                         color: e.color,
                         swatch: LegendSwatch::Square,
+                        value: None,
                     })
                 })
                 .collect(),
@@ -179,6 +190,7 @@ impl Mark {
                     name: item.label.clone(),
                     color: item.color,
                     swatch: LegendSwatch::Square,
+                    value: None,
                 })
                 .collect(),
             Mark::BubbleMap(bm) => bm
@@ -189,6 +201,7 @@ impl Mark {
                         name: name.clone(),
                         color: p.color,
                         swatch: LegendSwatch::Square,
+                        value: None,
                     })
                 })
                 .collect(),
@@ -308,5 +321,17 @@ impl From<BubbleMap> for Mark {
 impl From<Choropleth> for Mark {
     fn from(c: Choropleth) -> Self {
         Mark::Choropleth(c)
+    }
+}
+
+/// Default value-column formatter for legend entries that carry a numeric
+/// value (currently pie slices). Mirrors the shape of
+/// [`crate::data::tooltip`]'s default formatter: integer-valued numbers
+/// render without a fractional part, otherwise one decimal.
+fn format_legend_value(value: f64) -> String {
+    if value.fract().abs() < 0.001 {
+        format!("{}", value as i64)
+    } else {
+        format!("{value:.1}")
     }
 }

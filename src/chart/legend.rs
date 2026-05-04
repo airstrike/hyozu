@@ -15,6 +15,8 @@ use crate::widget::renderer::geometry;
 const SWATCH_TEXT_GAP: f32 = 4.0;
 /// Gap between entries.
 const ENTRY_GAP: f32 = 16.0;
+/// Gap between the name column and the value column when in table mode.
+const COLUMN_GAP: f32 = 12.0;
 /// Vertical padding above/below the legend.
 const PADDING_V: f32 = 4.0;
 /// Square swatch size as a proportion of font size.
@@ -30,14 +32,28 @@ pub struct State<P>
 where
     P: text::Paragraph,
 {
-    /// Measured text widths for each entry.
+    /// Measured name widths for each entry.
     pub widths: Vec<f32>,
+    /// Measured value-column widths for each entry. Same length as `widths`;
+    /// entries with `value: None` get `0.0`. Only populated meaningfully when
+    /// `table_mode` is true.
+    pub value_widths: Vec<f32>,
     /// Scratch paragraph for measurement.
     paragraph: paragraph::Plain<P>,
     /// Row assignments: each row contains (entry_index, x_offset_within_row) pairs.
     pub rows: Vec<Vec<(usize, f32)>>,
     /// Row widths (total content width per row, used by draw to align rows).
     pub row_widths: Vec<f32>,
+    /// Maximum name-column width across entries when `table_mode` is true.
+    /// `0.0` in single-column mode.
+    pub name_column_width: f32,
+    /// Maximum value-column width across entries when `table_mode` is true.
+    /// `0.0` in single-column mode.
+    pub value_column_width: f32,
+    /// Whether the legend is in two-column table mode. Set in `layout` from
+    /// `entries.iter().any(|e| e.value.is_some())`; `draw` reads it without
+    /// rescanning entries.
+    pub table_mode: bool,
     /// Absolute-pixel bounding rect for each entry (indexed by entry index),
     /// cached on the last `draw()` call. Used for legend click hit-testing.
     pub entry_rects: Vec<Option<Rectangle>>,
@@ -128,9 +144,13 @@ where
             tag: tree::Tag::of::<State<Renderer::Paragraph>>(),
             state: tree::State::new(State::<Renderer::Paragraph> {
                 widths: Vec::new(),
+                value_widths: Vec::new(),
                 paragraph: paragraph::Plain::default(),
                 rows: Vec::new(),
                 row_widths: Vec::new(),
+                name_column_width: 0.0,
+                value_column_width: 0.0,
+                table_mode: false,
                 entry_rects: Vec::new(),
             }),
             children: Vec::new(),
@@ -146,14 +166,20 @@ where
             {
                 let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
                 state.entry_rects.clear();
+                state.value_widths.clear();
+                state.name_column_width = 0.0;
+                state.value_column_width = 0.0;
+                state.table_mode = false;
             }
             return Node::new(Size::ZERO);
         }
 
         let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
         let font_size = self.text.resolved_size(DEFAULT_FONT_SIZE);
+        let table_mode = self.entries.iter().any(|e| e.value.is_some());
+        state.table_mode = table_mode;
 
-        // Measure each entry's text width
+        // Measure each entry's name width.
         state.widths.clear();
         for entry in &self.entries {
             let _ = state.paragraph.update(text::Text {
@@ -176,13 +202,63 @@ where
             state.widths.push(state.paragraph.min_width());
         }
 
-        // Compute entry widths (swatch + gap + text) — swatch width varies by kind.
-        let entry_widths: Vec<f32> = self
-            .entries
-            .iter()
-            .zip(state.widths.iter())
-            .map(|(entry, tw)| swatch_width(&entry.swatch, font_size) + SWATCH_TEXT_GAP + tw)
-            .collect();
+        // Measure each entry's value width when in table mode; entries
+        // without a value contribute `0.0`. In single-column mode, the
+        // vector is cleared and the column-width fields stay at `0.0` so
+        // downstream layout/draw paths remain byte-equivalent.
+        state.value_widths.clear();
+        if table_mode {
+            for entry in &self.entries {
+                let width = if let Some(v) = entry.value.as_ref() {
+                    let _ = state.paragraph.update(text::Text {
+                        content: v.as_str(),
+                        bounds: Size::INFINITE,
+                        size: font_size.into(),
+                        line_height: text::LineHeight::default(),
+                        font: self.text.resolved_font(renderer.default_font()),
+                        align_x: text::Alignment::Left,
+                        align_y: crate::core::alignment::Vertical::Top,
+                        shaping: text::Shaping::Basic,
+                        wrapping: text::Wrapping::None,
+                        ellipsis: text::Ellipsis::default(),
+                        hint_factor: renderer.scale_factor(),
+                        font_features: Vec::new(),
+                        font_variations: Vec::new(),
+                        letter_spacing: Default::default(),
+                        weight: None,
+                    });
+                    state.paragraph.min_width()
+                } else {
+                    0.0
+                };
+                state.value_widths.push(width);
+            }
+            state.name_column_width = state.widths.iter().copied().fold(0.0, f32::max);
+            state.value_column_width = state.value_widths.iter().copied().fold(0.0, f32::max);
+        } else {
+            state.name_column_width = 0.0;
+            state.value_column_width = 0.0;
+        }
+
+        // Compute entry widths (swatch + gap + text). In table mode, every
+        // row reserves the same name and value columns so values right-align
+        // cleanly; in single-column mode each entry hugs its own name width.
+        let entry_widths: Vec<f32> = if table_mode {
+            let name_col = state.name_column_width;
+            let value_col = state.value_column_width;
+            self.entries
+                .iter()
+                .map(|entry| {
+                    swatch_width(&entry.swatch, font_size) + SWATCH_TEXT_GAP + name_col + COLUMN_GAP + value_col
+                })
+                .collect()
+        } else {
+            self.entries
+                .iter()
+                .zip(state.widths.iter())
+                .map(|(entry, tw)| swatch_width(&entry.swatch, font_size) + SWATCH_TEXT_GAP + tw)
+                .collect()
+        };
 
         let row_height = font_size + PADDING_V * 2.0;
 
@@ -240,7 +316,11 @@ where
 
         // Compute entry bounds relative to the legend's own origin (0, 0).
         // The widget adds the legend's final layout position at hit-test time.
+        // In table mode, the rect spans the full row (swatch through end of
+        // value column) so a click anywhere on the row hits the entry.
         let alignment = self.alignment();
+        let name_col = state.name_column_width;
+        let value_col = state.value_column_width;
         let mut entry_rects: Vec<Option<Rectangle>> = vec![None; self.entries.len()];
         for (row_idx, row) in state.rows.iter().enumerate() {
             let row_width = state.row_widths.get(row_idx).copied().unwrap_or(0.0);
@@ -251,12 +331,17 @@ where
                 0.0
             };
             for &(entry_idx, x_offset) in row {
-                let text_width = state.widths.get(entry_idx).copied().unwrap_or(0.0);
                 let sw = swatch_width(&self.entries[entry_idx].swatch, font_size);
+                let width = if table_mode {
+                    sw + SWATCH_TEXT_GAP + name_col + COLUMN_GAP + value_col
+                } else {
+                    let text_width = state.widths.get(entry_idx).copied().unwrap_or(0.0);
+                    sw + SWATCH_TEXT_GAP + text_width
+                };
                 entry_rects[entry_idx] = Some(Rectangle {
                     x: row_start_x + x_offset,
                     y: row_y,
-                    width: sw + SWATCH_TEXT_GAP + text_width,
+                    width,
                     height: font_size,
                 });
             }
@@ -393,6 +478,40 @@ where
                     dim(text_color),
                     *viewport,
                 );
+
+                // In table mode, draw the value column right-aligned to its
+                // column edge. The column geometry is fixed by the
+                // pre-measured `name_column_width` / `value_column_width`
+                // computed in `layout`; alignment is the renderer's job
+                // (no per-entry width walk in `draw`).
+                if state.table_mode
+                    && let Some(value) = entry.value.as_ref()
+                {
+                    let value_right_x =
+                        x + sw + SWATCH_TEXT_GAP + state.name_column_width + COLUMN_GAP + state.value_column_width;
+                    renderer.fill_text(
+                        crate::core::text::Text {
+                            content: value.clone(),
+                            bounds: Size::new(state.value_column_width, font_size * 2.0),
+                            size: font_size.into(),
+                            font,
+                            align_x: crate::core::alignment::Horizontal::Right.into(),
+                            align_y: crate::core::alignment::Vertical::Top,
+                            line_height: crate::core::text::LineHeight::default(),
+                            shaping: crate::core::text::Shaping::Basic,
+                            wrapping: crate::core::text::Wrapping::None,
+                            ellipsis: crate::core::text::Ellipsis::default(),
+                            hint_factor: renderer.scale_factor(),
+                            font_features: Vec::new(),
+                            font_variations: Vec::new(),
+                            letter_spacing: Default::default(),
+                            weight: None,
+                        },
+                        crate::core::Point::new(value_right_x, row_y),
+                        dim(text_color),
+                        *viewport,
+                    );
+                }
 
                 let _ = (entry_idx, x);
             }
