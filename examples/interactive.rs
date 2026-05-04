@@ -114,7 +114,6 @@ impl App {
             pie::slice(12.0).name("Product D"),
             pie::slice(8.0).name("Product E"),
         ])
-        .hole(0.4)
         .labels(pie::Label::percent());
 
         let pie_data = Data::from(pie_mark).title("Market Share by Product");
@@ -403,25 +402,8 @@ impl App {
             .spacing(12)
             .into()
         } else {
-            // Pie-specific controls
-            let hole = self.pie_data.pie(0).map(|p| p.hole_value()).unwrap_or(0.0);
-
-            let on_hole = |v| props::pie::Hole(v).map(item::Pie.with(0)).map(Message::Set);
-
-            column![
-                column![
-                    text("Hole Size").size(14),
-                    row![
-                        slider(0.0..=0.9, hole, on_hole).step(0.05f32).width(Fill),
-                        text(format!("{hole:.2}")),
-                    ]
-                    .spacing(10)
-                    .align_y(Center),
-                ]
-                .spacing(4),
-            ]
-            .spacing(12)
-            .into()
+            // hole moved off Pie data spec to Donut widget; expose via donut() builder
+            column![].spacing(12).into()
         };
 
         // Palette and theme

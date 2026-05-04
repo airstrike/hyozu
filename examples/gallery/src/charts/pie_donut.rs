@@ -9,7 +9,6 @@ pub fn data() -> hyozu::Data {
             pie::slice(10).name("Utilities"),
             pie::slice(8).name("Other"),
         ])
-        .hole(0.55)
         .gap(2.0)
         .labels(pie::label::Label::percent()),
     )

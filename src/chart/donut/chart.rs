@@ -1,20 +1,28 @@
 use crate::core::Element;
 use crate::widget::Renderer;
 
+/// Default hole radius as a proportion of the outer radius for a donut.
+const DEFAULT_HOLE: f32 = 0.5;
+
 /// Donut-variant configuration carried inside the chart widget's `Kind`.
 ///
-/// Holds the optional center overlay element. Future donut-only knobs
-/// (e.g. hole radius) will live here so they don't leak into the
-/// generic `chart()` builder.
+/// Holds the donut-only knobs (hole radius, optional center overlay)
+/// so they don't leak into the generic `chart()` builder or the
+/// data-layer `pie::Pie` spec.
 pub struct Chart<'a, Message, Theme> {
+    /// Inner hole radius as a proportion of the outer radius.
+    pub(crate) hole: f32,
     /// Optional center overlay rendered inside the donut hole.
     pub(crate) center: Option<Center<'a, Message, Theme>>,
 }
 
 impl<'a, Message, Theme> Chart<'a, Message, Theme> {
-    /// Creates a donut variant with no center overlay.
+    /// Creates a donut variant with the default hole and no center overlay.
     pub(crate) fn new() -> Self {
-        Self { center: None }
+        Self {
+            hole: DEFAULT_HOLE,
+            center: None,
+        }
     }
 }
 

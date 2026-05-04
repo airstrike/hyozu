@@ -52,6 +52,10 @@ where
     Renderer: text::Renderer + geometry::Renderer,
 {
     pub(crate) data: &'a crate::mark::pie::Pie,
+    /// Inner hole radius as a proportion of the outer radius. `0.0`
+    /// renders a full pie; the donut variant of the chart widget
+    /// writes a positive value here before layout runs.
+    pub(crate) hole: f32,
     _marker: std::marker::PhantomData<(Message, Renderer)>,
 }
 
@@ -64,6 +68,7 @@ where
     pub fn new(data: &'a crate::mark::pie::Pie) -> Self {
         Self {
             data,
+            hole: 0.0,
             _marker: std::marker::PhantomData,
         }
     }
@@ -109,7 +114,7 @@ where
         let cy = size.height / 2.0;
         let pad = if needs_outside_pad { OUTSIDE_LABEL_PAD } else { 0.0 };
         let radius = ((size.width.min(size.height) / 2.0 - pad).max(0.0)) * 0.95;
-        let inner_radius = radius * self.data.hole;
+        let inner_radius = radius * self.hole;
 
         state.center = (cx, cy);
         state.outer_radius = radius;
@@ -217,7 +222,7 @@ where
         let cy = layout_bounds.height / 2.0;
         let pad = if needs_outside_pad { OUTSIDE_LABEL_PAD } else { 0.0 };
         let radius = ((layout_bounds.width.min(layout_bounds.height) / 2.0 - pad).max(0.0)) * 0.95;
-        let inner_radius = radius * self.data.hole;
+        let inner_radius = radius * self.hole;
 
         let has_gap = self.data.gap > 0.0 && self.data.slices.len() > 1;
         let gap_offset = self.data.gap / 2.0;

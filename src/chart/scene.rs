@@ -332,6 +332,15 @@ where
         &self.plot_area
     }
 
+    /// Returns a mutable reference to the plot area.
+    ///
+    /// Used by the chart widget to mutate variant-specific renderer
+    /// state (e.g. the donut hole on the first `Series::Pie`) before
+    /// `Scene::layout` runs.
+    pub(crate) fn plot_area_mut(&mut self) -> &mut PlotArea<'a, Message, Renderer> {
+        &mut self.plot_area
+    }
+
     /// Returns a reference to the legend, if one is configured.
     pub(crate) fn legend(&self) -> Option<&Legend<'a, Message, Renderer>> {
         self.legend.as_ref()

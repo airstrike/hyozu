@@ -79,9 +79,9 @@ where
 /// Creates a donut-variant chart from data.
 ///
 /// Equivalent to [`chart`] with the donut variant pre-selected so
-/// donut-only knobs (`.center`, `.center_inset`) take effect. A donut's
-/// hole comes from the `pie::Pie` data spec; the variant just adds
-/// presentation overlays at the chart layer.
+/// donut-only knobs (`.hole`, `.center`, `.center_inset`) take effect.
+/// The default hole radius is `0.5`; pass `.hole(0.0)` for a full pie
+/// or any other proportion in roughly `0.0..1.0`.
 pub fn donut<'a, Message, Theme>(data: &'a Data) -> Chart<'a, Message, Theme, Theme>
 where
     Theme: design::Design + Clone,
@@ -164,6 +164,19 @@ where
     /// Sets the style of the [`Chart`].
     pub fn style(mut self, style: impl Fn(&dyn design::Design) -> Style + 'a) -> Self {
         self.style = Box::new(style);
+        self
+    }
+
+    /// Sets the inner hole radius for a donut chart, as a proportion
+    /// of the outer radius.
+    ///
+    /// No-op on a generic chart created via [`chart()`]. The default
+    /// for `donut(...)` is `0.5`. Out-of-range values pass through to
+    /// the renderer as-is — clamping is the renderer's call.
+    pub fn hole(mut self, hole: f32) -> Self {
+        if let Kind::Donut(d) = &mut self.kind {
+            d.hole = hole;
+        }
         self
     }
 
@@ -517,6 +530,10 @@ where
 
     fn layout(&mut self, tree: &mut Tree, renderer: &Renderer, limits: &layout::Limits) -> layout::Node {
         use crate::core::Point;
+
+        // Push donut-only state (e.g. hole radius) onto the renderer-side
+        // pie before scene layout reads it.
+        self.apply_kind_to_renderer();
 
         let size = limits.resolve(self.width, self.height, Size::ZERO);
 
@@ -994,6 +1011,41 @@ where
         legend_state.entry_rects.iter().enumerate().find_map(|(i, maybe_rect)| {
             maybe_rect.and_then(|r| r.expand(LEGEND_HIT_PADDING).contains(probe).then_some(i))
         })
+    }
+
+    /// Pushes variant-specific renderer state down onto the scene's
+    /// series before layout runs.
+    ///
+    /// For `Kind::Donut(d)`, the **first** `Series::Pie` adopts `d.hole`
+    /// and any other pie series stay at `0.0`. For `Kind::Generic`,
+    /// every pie is reset to `0.0` so a chart built via `chart(&data)`
+    /// always renders as a full pie regardless of how `kind` was set
+    /// previously. Called at the top of `layout` so `pie::Pie::layout`
+    /// reads the right value.
+    fn apply_kind_to_renderer(&mut self) {
+        // Split-borrow `kind` and `scene` so we can read `kind` while
+        // mutating series through `scene.plot_area_mut()`.
+        let Self { kind, scene, .. } = self;
+        let series = &mut scene.plot_area_mut().series;
+
+        // Reset every pie to a full-pie default first so the `Donut`
+        // arm only has to write the chosen hole onto the first match.
+        for s in series.iter_mut() {
+            if let plot_area::Series::Pie(pie) = s {
+                pie.hole = 0.0;
+            }
+        }
+
+        match kind {
+            Kind::Donut(d) => {
+                if let Some(plot_area::Series::Pie(pie)) =
+                    series.iter_mut().find(|s| matches!(s, plot_area::Series::Pie(_)))
+                {
+                    pie.hole = d.hole;
+                }
+            }
+            Kind::Generic => {}
+        }
     }
 }
 

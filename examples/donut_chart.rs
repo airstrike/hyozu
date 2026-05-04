@@ -1,5 +1,5 @@
 use hyozu::mark::pie;
-use hyozu::{Color, data, palette, pie as pie_fn};
+use hyozu::{Color, data, donut, palette, pie as pie_fn};
 use iced::widget::{center, column, pick_list, row};
 use iced::{Center, Fill, Subscription, Task, Theme, keyboard};
 
@@ -37,7 +37,6 @@ impl App {
             pie::slice(8).name("Other"),
         ])
         .labels(pie::label::Label::percent())
-        .hole(0.55)
         .gap(2.0);
 
         Self {
@@ -121,9 +120,12 @@ impl App {
         .spacing(10);
 
         center(
-            column![theme_picker, hyozu::chart(&self.data).design(&self.theme).padding(20)]
-                .align_x(Center)
-                .spacing(20),
+            column![
+                theme_picker,
+                donut(&self.data).hole(0.55).design(&self.theme).padding(20)
+            ]
+            .align_x(Center)
+            .spacing(20),
         )
         .padding(20)
         .into()

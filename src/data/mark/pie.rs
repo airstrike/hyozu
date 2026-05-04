@@ -113,15 +113,14 @@ pub fn slice(value: impl Into<f64>) -> Slice {
     }
 }
 
-/// Pie/donut chart specification.
+/// Pie chart specification.
 ///
-/// A donut is a pie with a hole. Set `hole` to 0.0 for a full pie,
-/// or to a value in `0.0..1.0` to create a donut (proportion of radius).
+/// `pie([...])` is the data layer — just the slices and presentation
+/// concerns shared with donuts (gaps, labels). For a donut, pass the
+/// `Data` to `donut(&data)` and configure the hole radius there.
 #[derive(Debug, Clone)]
 pub struct Pie {
     pub(crate) slices: Vec<Slice>,
-    /// Inner hole radius as proportion of outer radius (0.0 = pie, 0.0..1.0 = donut)
-    pub(crate) hole: f32,
     /// Gap between slices in pixels.
     pub(crate) gap: f32,
 }
@@ -135,9 +134,6 @@ pub struct Pie {
 ///
 /// // Simple pie from values
 /// let chart = pie([30, 50, 20]);
-///
-/// // Donut chart
-/// let chart = pie([30, 50, 20]).hole(0.6);
 /// ```
 pub fn pie(data: impl IntoPie) -> Pie {
     data.into_pie()
@@ -164,7 +160,6 @@ where
                     name: None,
                 })
                 .collect(),
-            hole: 0.0,
             gap: 0.0,
         }
     }
@@ -186,7 +181,6 @@ where
                     name: None,
                 })
                 .collect(),
-            hole: 0.0,
             gap: 0.0,
         }
     }
@@ -197,7 +191,6 @@ impl<const N: usize> IntoPie for [Slice; N] {
     fn into_pie(self) -> Pie {
         Pie {
             slices: self.into(),
-            hole: 0.0,
             gap: 0.0,
         }
     }
@@ -206,25 +199,11 @@ impl<const N: usize> IntoPie for [Slice; N] {
 // From a Vec of Slices
 impl IntoPie for Vec<Slice> {
     fn into_pie(self) -> Pie {
-        Pie {
-            slices: self,
-            hole: 0.0,
-            gap: 0.0,
-        }
+        Pie { slices: self, gap: 0.0 }
     }
 }
 
 impl Pie {
-    /// Sets the inner hole radius as a proportion of the outer radius.
-    ///
-    /// - `0.0` = full pie (no hole)
-    /// - `0.6` = donut with 60% hole
-    /// - Values are clamped to `0.0..1.0`
-    pub fn hole(mut self, hole: f32) -> Self {
-        self.hole = hole.clamp(0.0, 0.99);
-        self
-    }
-
     /// Returns the slices.
     pub fn slices(&self) -> &[Slice] {
         &self.slices
@@ -233,11 +212,6 @@ impl Pie {
     /// Returns a mutable reference to the slices.
     pub fn slices_mut(&mut self) -> &mut Vec<Slice> {
         &mut self.slices
-    }
-
-    /// Returns the hole proportion.
-    pub fn hole_value(&self) -> f32 {
-        self.hole
     }
 
     /// Sets the gap between slices in pixels.
