@@ -118,11 +118,20 @@ pub fn slice(value: impl Into<f64>) -> Slice {
 /// `pie([...])` is the data layer — just the slices and presentation
 /// concerns shared with donuts (gaps, labels). For a donut, pass the
 /// `Data` to `donut(&data)` and configure the hole radius there.
+///
+/// Per-mark `value_scale` lets one pie format its slice values
+/// differently from the rest of the chart. The format chain reads:
+/// guide override (e.g. `legend::Config::value_format`) → this field →
+/// `Data::value_scale` → built-in default. See [`crate::scale`] for the
+/// full chain.
 #[derive(Debug, Clone)]
 pub struct Pie {
     pub(crate) slices: Vec<Slice>,
     /// Gap between slices in pixels.
     pub(crate) gap: f32,
+    /// Optional per-mark value-format override. `None` falls through to
+    /// the data-level [`Data::value_scale`].
+    pub(crate) value_scale: Option<crate::scale::Scale<f64>>,
 }
 
 /// Creates a pie chart from slice values.
@@ -161,6 +170,7 @@ where
                 })
                 .collect(),
             gap: 0.0,
+            value_scale: None,
         }
     }
 }
@@ -182,6 +192,7 @@ where
                 })
                 .collect(),
             gap: 0.0,
+            value_scale: None,
         }
     }
 }
@@ -192,6 +203,7 @@ impl<const N: usize> IntoPie for [Slice; N] {
         Pie {
             slices: self.into(),
             gap: 0.0,
+            value_scale: None,
         }
     }
 }
@@ -199,7 +211,11 @@ impl<const N: usize> IntoPie for [Slice; N] {
 // From a Vec of Slices
 impl IntoPie for Vec<Slice> {
     fn into_pie(self) -> Pie {
-        Pie { slices: self, gap: 0.0 }
+        Pie {
+            slices: self,
+            gap: 0.0,
+            value_scale: None,
+        }
     }
 }
 
@@ -218,6 +234,28 @@ impl Pie {
     pub fn gap(mut self, pixels: f32) -> Self {
         self.gap = pixels.max(0.0);
         self
+    }
+
+    /// Sets a per-mark format closure for slice values.
+    ///
+    /// Overrides [`crate::Data::value_scale`] for this pie only. Lower
+    /// priority than [`crate::data::legend::Config::value_format`]
+    /// (legend-only override) and per-row [`crate::Tooltip::format`]
+    /// (tooltip-only override).
+    ///
+    /// ```ignore
+    /// use hyozu::pie;
+    /// pie([86.2, 40.5, 12.8])
+    ///     .value_format(|v: &f64| format!("${v:.1}M"));
+    /// ```
+    pub fn value_format(mut self, f: impl Fn(&f64) -> String + Send + Sync + 'static) -> Self {
+        self.value_scale = Some(crate::scale::Scale::new().format(f));
+        self
+    }
+
+    /// Returns the per-mark value-scale override, if any.
+    pub fn value_scale(&self) -> Option<&crate::scale::Scale<f64>> {
+        self.value_scale.as_ref()
     }
 
     /// Applies a label configuration to all slices that don't already have one.

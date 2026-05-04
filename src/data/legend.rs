@@ -1,6 +1,8 @@
+use std::sync::Arc;
+
 use crate::color::Color;
 use crate::core::{Font, Pixels};
-use crate::text;
+use crate::{scale, text};
 
 /// Where on the plot area the legend attaches.
 ///
@@ -65,7 +67,7 @@ pub enum Orientation {
 /// let config = legend::Config::overlay(legend::Anchor::TopRight)
 ///     .orientation(legend::Orientation::Vertical);
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Config {
     pub(crate) anchor: Anchor,
     pub(crate) placement: Placement,
@@ -81,6 +83,25 @@ pub struct Config {
     /// Whether clicking a legend entry toggles its series visibility.
     /// Defaults to `false` so existing charts are unaffected.
     pub(crate) interactive: bool,
+    /// Highest-precedence override for the legend's value column.
+    /// `None` falls through to the mark's `value_scale`, then the data
+    /// scale, then the built-in default.
+    pub(crate) value_format: Option<scale::Format<f64>>,
+}
+
+impl std::fmt::Debug for Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Config")
+            .field("anchor", &self.anchor)
+            .field("placement", &self.placement)
+            .field("orientation", &self.orientation)
+            .field("text", &self.text)
+            .field("text_color", &self.text_color)
+            .field("wrap", &self.wrap)
+            .field("interactive", &self.interactive)
+            .field("value_format", &self.value_format.as_ref().map(|_| "<function>"))
+            .finish()
+    }
 }
 
 impl Default for Config {
@@ -93,6 +114,7 @@ impl Default for Config {
             text_color: None,
             wrap: true,
             interactive: false,
+            value_format: None,
         }
     }
 }
@@ -225,6 +247,21 @@ impl Config {
     pub fn interactive(mut self, enabled: bool) -> Self {
         self.interactive = enabled;
         self
+    }
+
+    /// Sets a legend-only format closure for the value column.
+    ///
+    /// Highest precedence in the value-format chain — overrides any
+    /// mark- or data-level scale for this legend's column. Other text
+    /// sites (in-mark labels, hover tooltip) keep their own resolution.
+    pub fn value_format(mut self, f: impl Fn(&f64) -> String + Send + Sync + 'static) -> Self {
+        self.value_format = Some(Arc::new(f));
+        self
+    }
+
+    /// Returns the legend-level value-format override, if any.
+    pub fn value_format_ref(&self) -> Option<&scale::Format<f64>> {
+        self.value_format.as_ref()
     }
 
     /// Returns the current anchor.

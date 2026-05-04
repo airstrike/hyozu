@@ -60,6 +60,29 @@ pub struct Data {
     /// hover is on out of the box; users replace it via [`Data::tooltip`].
     pub(crate) tooltip: Option<tooltip::Tooltip>,
 
+    /// Format + transform for the value channel (pie slice values, bar
+    /// heights, etc.). The `format` closure feeds legend value columns,
+    /// hover tooltips, and in-mark value labels via the precedence chain
+    /// documented on [`crate::scale`].
+    pub(crate) value_scale: crate::scale::Scale<f64>,
+
+    /// Format + transform for the y channel.
+    pub(crate) y_scale: crate::scale::Scale<f64>,
+
+    /// Format + transform for the size channel (bubble radius, etc.).
+    pub(crate) size_scale: crate::scale::Scale<f64>,
+
+    /// Format for the color channel — rarely set, present for symmetry
+    /// with the other channels. Color scales encoded as palettes live on
+    /// individual marks (see `Choropleth::scheme`).
+    pub(crate) color_scale: crate::scale::Scale<crate::core::Color>,
+
+    /// Domain kind + format for the x channel. Defaults to a numeric
+    /// linear scale; bar/category charts upgrade to
+    /// [`crate::XScale::Category`], time series to
+    /// [`crate::XScale::Time`].
+    pub(crate) x_scale: crate::scale::XScale,
+
     /// Monotonic version counter. Bumped by [`Data::invalidate`] to signal
     /// that external state (e.g. newly loaded fonts) changed and the chart
     /// widget should re-measure all text.
@@ -77,6 +100,11 @@ impl Default for Data {
             selection: None,
             legend: None,
             tooltip: Some(tooltip::Tooltip::default()),
+            value_scale: crate::scale::Scale::default(),
+            y_scale: crate::scale::Scale::default(),
+            size_scale: crate::scale::Scale::default(),
+            color_scale: crate::scale::Scale::default(),
+            x_scale: crate::scale::XScale::default(),
             generation: 0,
         }
     }
@@ -141,14 +169,7 @@ impl IntoData for Mark {
     fn into_data(self) -> Data {
         Data {
             primary: Area::from(self),
-            secondary: Area::empty(),
-            title: None,
-            title_text: crate::text::Style::new(),
-            palette: None,
-            selection: None,
-            legend: None,
-            tooltip: Some(tooltip::Tooltip::default()),
-            generation: 0,
+            ..Data::default()
         }
     }
 }
@@ -235,14 +256,7 @@ impl IntoData for Vec<Mark> {
     fn into_data(self) -> Data {
         Data {
             primary: Area::from(self),
-            secondary: Area::empty(),
-            title: None,
-            title_text: crate::text::Style::new(),
-            palette: None,
-            selection: None,
-            legend: None,
-            tooltip: Some(tooltip::Tooltip::default()),
-            generation: 0,
+            ..Data::default()
         }
     }
 }
@@ -418,6 +432,81 @@ impl Data {
     pub fn tooltip(mut self, tooltip: impl Into<tooltip::Tooltip>) -> Self {
         self.tooltip = Some(tooltip.into());
         self
+    }
+
+    /// Sets the format closure for the value channel.
+    ///
+    /// Picks up at every site that reads a numeric value: legend value
+    /// column, hover tooltip body, in-mark value labels, and the chart
+    /// badge via [`Data::format_value`]. Mark-level overrides (e.g.
+    /// [`crate::Pie::value_format`]) and guide-level overrides (e.g.
+    /// [`legend::Config::value_format`]) take precedence.
+    pub fn value_format(mut self, f: impl Fn(&f64) -> String + Send + Sync + 'static) -> Self {
+        self.value_scale = self.value_scale.format(f);
+        self
+    }
+
+    /// Sets the format closure for the y channel.
+    pub fn y_format(mut self, f: impl Fn(&f64) -> String + Send + Sync + 'static) -> Self {
+        self.y_scale = self.y_scale.format(f);
+        self
+    }
+
+    /// Sets the format closure for the size channel (bubble radius, etc.).
+    pub fn size_format(mut self, f: impl Fn(&f64) -> String + Send + Sync + 'static) -> Self {
+        self.size_scale = self.size_scale.format(f);
+        self
+    }
+
+    /// Sets the format closure for the color channel. Rarely set;
+    /// present for symmetry with the numeric channels.
+    pub fn color_format(mut self, f: impl Fn(&crate::core::Color) -> String + Send + Sync + 'static) -> Self {
+        self.color_scale = self.color_scale.format(f);
+        self
+    }
+
+    /// Sets the x-axis scale wholesale. There's no convenience format
+    /// setter for x because the closure type varies per variant
+    /// (`String`, `f64`, or `jiff::Zoned`); construct the matching
+    /// [`crate::Scale`] explicitly.
+    pub fn x_scale(mut self, scale: crate::scale::XScale) -> Self {
+        self.x_scale = scale;
+        self
+    }
+
+    /// Returns the value channel's scale.
+    pub fn value_scale(&self) -> &crate::scale::Scale<f64> {
+        &self.value_scale
+    }
+
+    /// Returns the y channel's scale.
+    pub fn y_scale(&self) -> &crate::scale::Scale<f64> {
+        &self.y_scale
+    }
+
+    /// Returns the size channel's scale.
+    pub fn size_scale(&self) -> &crate::scale::Scale<f64> {
+        &self.size_scale
+    }
+
+    /// Returns the color channel's scale.
+    pub fn color_scale(&self) -> &crate::scale::Scale<crate::core::Color> {
+        &self.color_scale
+    }
+
+    /// Returns the x channel's scale.
+    pub fn x_scale_ref(&self) -> &crate::scale::XScale {
+        &self.x_scale
+    }
+
+    /// Formats a numeric value via the data-level value scale, falling
+    /// back to [`crate::scale::default_f64_format`].
+    ///
+    /// This is the sugar a chart's "headline number" widget uses (e.g.
+    /// the donut center badge): it doesn't have a mark or guide context
+    /// to consult, so it walks the data-level chain only.
+    pub fn format_value(&self, value: f64) -> String {
+        self.value_scale.format_or_default(value)
     }
 
     /// Returns the current palette override, if any.
