@@ -48,7 +48,7 @@ impl App {
         .title_style(font("Playfair Display") + 26.0 + Semibold)
         .x_axis_labels(BetweenTicks + MONTHS + font("Inter") + 14.0 + Semibold)
         .y_axis(|a| a.show_grid(true).labels(font("Inter") + 11.0 + Light + Italic))
-        .legend(legend::Config::below().font("JetBrains Mono").font_size(11.0));
+        .legend(legend::Config::below().font("JetBrains Mono").size(11.0));
 
         let init = Task::batch([
             load_family("Playfair Display"),

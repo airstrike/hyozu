@@ -180,12 +180,6 @@ impl Config {
         self
     }
 
-    /// Sets the font size for legend text.
-    pub fn font_size(mut self, size: f32) -> Self {
-        self.text.size = Some(size.into());
-        self
-    }
-
     /// Sets the font size for legend text. Accepts anything convertible to
     /// [`Pixels`] (`14.0`, `Pixels(14.0)`).
     ///
