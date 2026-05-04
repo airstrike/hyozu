@@ -1,6 +1,10 @@
 use crate::color::Color;
 use crate::data::mark::Mark;
 
+pub mod scheme;
+
+pub use scheme::Scheme;
+
 /// Strategy for selecting data visualization colors.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Palette {

@@ -945,7 +945,7 @@ struct App {
     theme: Theme,
     scope: MapScope,
     indicator: Indicator,
-    color_scale: hyozu::Scale,
+    color_scale: hyozu::palette::Scheme,
     chart_data: hyozu::Data,
     loading: bool,
 }
@@ -963,7 +963,7 @@ enum Message {
     SetScope(MapScope),
     Back,
     SetIndicator(Indicator),
-    SetColorScale(hyozu::Scale),
+    SetColorScale(hyozu::palette::Scheme),
     ChartAction(hyozu::Action),
 }
 
@@ -986,7 +986,7 @@ impl App {
                 theme: Theme::Light,
                 scope: MapScope::World,
                 indicator: Indicator::Gdp,
-                color_scale: hyozu::Scale::RedGreen,
+                color_scale: hyozu::palette::Scheme::RedGreen,
                 chart_data: hyozu::Data::default(),
                 loading: true,
             },
@@ -1102,8 +1102,8 @@ impl App {
 
         let scale_picker = pick_list(
             Some(self.color_scale.clone()),
-            hyozu::Scale::ALL,
-            hyozu::Scale::to_string,
+            hyozu::palette::Scheme::ALL,
+            hyozu::palette::Scheme::to_string,
         )
         .on_select(Message::SetColorScale)
         .text_size(11)
@@ -1191,7 +1191,7 @@ impl App {
             .scope(self.scope)
             .normalization(hyozu::Normalization::Log)
             .projection(ProjectionKind::NaturalEarth)
-            .scale(self.color_scale.clone())
+            .scheme(self.color_scale.clone())
             .legend_title(self.indicator.label());
 
         hyozu::data(choropleth).title(self.indicator.label())

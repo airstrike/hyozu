@@ -11,7 +11,6 @@ pub mod item;
 pub mod map;
 pub mod palette;
 pub mod props;
-pub mod scale;
 pub mod sparkline;
 pub mod target;
 #[cfg(feature = "tatami")]
@@ -32,7 +31,6 @@ pub use color::{Color, Pair};
 pub use data::{Action, Data, Datum};
 pub use design::Design;
 pub use palette::{Palette, Resolved};
-pub use scale::Scale;
 pub use target::Target;
 
 pub use data::data;

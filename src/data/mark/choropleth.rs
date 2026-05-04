@@ -214,11 +214,11 @@ impl Choropleth {
         self
     }
 
-    /// Sets a named or custom color scale.
+    /// Sets a named or custom color scheme.
     ///
-    /// Use `-scale` to reverse: `.scale(-Scale::GreenRed)`.
-    pub fn scale(mut self, scale: crate::scale::Scale) -> Self {
-        self.color_stops = Some(scale.stops());
+    /// Use `-scheme` to reverse: `.scheme(-palette::Scheme::GreenRed)`.
+    pub fn scheme(mut self, scheme: crate::palette::Scheme) -> Self {
+        self.color_stops = Some(scheme.stops());
         self
     }
 
