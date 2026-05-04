@@ -36,7 +36,6 @@ impl App {
             pie::slice(42.1).name("Professional Services"),
             pie::slice(19.8).name("Support & Training"),
         ])
-        .labels(pie::Label::percent())
         .gap(2.0);
 
         Self {
