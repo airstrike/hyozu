@@ -901,7 +901,30 @@ where
             &state.hidden_series,
         );
 
-        // Draw tooltip overlay
+        // Draw the donut center overlay above the scene so the badge
+        // text sits over the donut hole, clipped to the chart's bounds.
+        // Tooltips draw after this so hover annotations stack on top.
+        if let Kind::Donut(d) = &self.kind
+            && let Some(center) = &d.center
+            && let Some(center_layout) = layout.children().nth(1)
+            && let Some(center_tree) = tree.children.get(1)
+        {
+            use crate::core::renderer::Renderer as _;
+            renderer.with_layer(layout.bounds(), |renderer| {
+                center.element.as_widget().draw(
+                    center_tree,
+                    renderer,
+                    theme,
+                    defaults,
+                    center_layout,
+                    cursor,
+                    viewport,
+                );
+            });
+        }
+
+        // Tooltip overlay draws last so hover annotations composite above
+        // every other element, including the donut center overlay.
         if let Some(hover) = &state.hover
             && let Some(tooltip_config) = self.scene.tooltip()
         {
@@ -923,27 +946,6 @@ where
                     cursor,
                 );
             }
-        }
-
-        // Draw the donut center overlay last so it composites above the
-        // scene + tooltip, clipped to the chart's bounds.
-        if let Kind::Donut(d) = &self.kind
-            && let Some(center) = &d.center
-            && let Some(center_layout) = layout.children().nth(1)
-            && let Some(center_tree) = tree.children.get(1)
-        {
-            use crate::core::renderer::Renderer as _;
-            renderer.with_layer(layout.bounds(), |renderer| {
-                center.element.as_widget().draw(
-                    center_tree,
-                    renderer,
-                    theme,
-                    defaults,
-                    center_layout,
-                    cursor,
-                    viewport,
-                );
-            });
         }
     }
 
