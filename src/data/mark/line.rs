@@ -222,23 +222,14 @@ impl Line {
     }
 }
 
-impl<Message, Theme, Renderer> From<Line> for crate::Data<Message, Theme, Renderer>
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
+impl From<Line> for crate::Data {
     fn from(line: Line) -> Self {
-        <Line as crate::data::IntoData<Message, Theme, Renderer>>::into_data(line)
+        use crate::data::IntoData;
+        line.into_data()
     }
 }
 
-impl<const N: usize, Message, Theme, Renderer> From<[Line; N]> for crate::Data<Message, Theme, Renderer>
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
+impl<const N: usize> From<[Line; N]> for crate::Data {
     fn from(lines: [Line; N]) -> Self {
         crate::Data::from(lines.into_iter().map(crate::Mark::Line).collect::<Vec<_>>())
     }

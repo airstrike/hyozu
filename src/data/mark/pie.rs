@@ -1,7 +1,4 @@
-use std::sync::Arc;
-
 use crate::color::Color;
-use crate::core::Element;
 
 pub mod label;
 
@@ -120,94 +117,13 @@ pub fn slice(value: impl Into<f64>) -> Slice {
 ///
 /// A donut is a pie with a hole. Set `hole` to 0.0 for a full pie,
 /// or to a value in `0.0..1.0` to create a donut (proportion of radius).
-///
-/// `Pie` is parameterized over `Message`, `Theme`, and `Renderer` so it
-/// can carry a `Center` overlay closure that produces an
-/// `Element<'static, Message, Theme, Renderer>`. All three default so most
-/// call sites infer `Pie<(), iced_core::Theme, iced_widget::Renderer>`
-/// without changes.
-pub struct Pie<Message = (), Theme = crate::core::Theme, Renderer = crate::widget::Renderer>
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
+#[derive(Debug, Clone)]
+pub struct Pie {
     pub(crate) slices: Vec<Slice>,
     /// Inner hole radius as proportion of outer radius (0.0 = pie, 0.0..1.0 = donut)
     pub(crate) hole: f32,
     /// Gap between slices in pixels.
     pub(crate) gap: f32,
-    /// Optional overlay element rendered in the donut hole. The closure
-    /// runs each layout pass; keep it cheap or move heavy state behind
-    /// `Arc`. The builder method that populates this field lands in a
-    /// later phase — for now the field is always `None`.
-    pub(crate) center: Option<Center<Message, Theme, Renderer>>,
-}
-
-/// Donut-hole overlay specification: how to place a user-supplied
-/// `Element` inside the inner circle of a donut chart.
-pub struct Center<Message, Theme, Renderer> {
-    pub(crate) placement: Placement,
-    pub(crate) builder: Arc<dyn Fn() -> Element<'static, Message, Theme, Renderer>>,
-}
-
-impl<Message, Theme, Renderer> Clone for Center<Message, Theme, Renderer> {
-    fn clone(&self) -> Self {
-        Self {
-            placement: self.placement,
-            builder: Arc::clone(&self.builder),
-        }
-    }
-}
-
-/// How a donut-hole overlay element is laid out relative to the chart.
-#[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Placement {
-    /// Overlay the full plot area; the user controls sizing via the
-    /// element they supply (e.g. wrapping in `container` / `center`).
-    Stack,
-    /// Confine the overlay to the inscribed square of the inner circle.
-    Inset,
-}
-
-impl<Message, Theme, Renderer> std::fmt::Debug for Pie<Message, Theme, Renderer> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Pie")
-            .field("slices", &self.slices)
-            .field("hole", &self.hole)
-            .field("gap", &self.gap)
-            .field("center", &self.center.as_ref().map(|c| (c.placement, "<function>")))
-            .finish()
-    }
-}
-
-// Manual Clone — the derive would add `M: Clone, T: Clone, R: Clone`
-// bounds, and `iced_widget::Renderer` (the default `Renderer` parameter)
-// is not `Clone`. We only need to clone the `Arc` handle for `center`.
-impl<Message, Theme, Renderer> Clone for Pie<Message, Theme, Renderer>
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
-    fn clone(&self) -> Self {
-        Self {
-            slices: self.slices.clone(),
-            hole: self.hole,
-            gap: self.gap,
-            center: self.center.clone(),
-        }
-    }
-}
-
-impl<Message, Theme, Renderer> std::fmt::Debug for Center<Message, Theme, Renderer> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Center")
-            .field("placement", &self.placement)
-            .field("builder", &"<function>")
-            .finish()
-    }
 }
 
 /// Creates a pie chart from slice values.
@@ -228,10 +144,6 @@ pub fn pie(data: impl IntoPie) -> Pie {
 }
 
 /// Trait for converting various inputs into a Pie.
-///
-/// Always produces a `Pie<()>` (the no-message default). Builder methods
-/// that introduce a closure with a non-`()` message type transition the
-/// `Pie` to a different message parameter at the call site.
 pub trait IntoPie {
     fn into_pie(self) -> Pie;
 }
@@ -254,7 +166,6 @@ where
                 .collect(),
             hole: 0.0,
             gap: 0.0,
-            center: None,
         }
     }
 }
@@ -277,7 +188,6 @@ where
                 .collect(),
             hole: 0.0,
             gap: 0.0,
-            center: None,
         }
     }
 }
@@ -289,7 +199,6 @@ impl<const N: usize> IntoPie for [Slice; N] {
             slices: self.into(),
             hole: 0.0,
             gap: 0.0,
-            center: None,
         }
     }
 }
@@ -301,17 +210,11 @@ impl IntoPie for Vec<Slice> {
             slices: self,
             hole: 0.0,
             gap: 0.0,
-            center: None,
         }
     }
 }
 
-impl<Message, Theme, Renderer> Pie<Message, Theme, Renderer>
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
+impl Pie {
     /// Sets the inner hole radius as a proportion of the outer radius.
     ///
     /// - `0.0` = full pie (no hole)
@@ -409,13 +312,9 @@ where
     }
 }
 
-impl<Message, Theme, Renderer> From<Pie<Message, Theme, Renderer>> for crate::Data<Message, Theme, Renderer>
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
-    fn from(pie: Pie<Message, Theme, Renderer>) -> Self {
-        <Pie<Message, Theme, Renderer> as crate::data::IntoData<Message, Theme, Renderer>>::into_data(pie)
+impl From<Pie> for crate::Data {
+    fn from(pie: Pie) -> Self {
+        use crate::data::IntoData;
+        pie.into_data()
     }
 }

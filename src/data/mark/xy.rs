@@ -190,13 +190,9 @@ impl Xy {
     }
 }
 
-impl<Message, Theme, Renderer> From<Xy> for crate::Data<Message, Theme, Renderer>
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
+impl From<Xy> for crate::Data {
     fn from(xy: Xy) -> Self {
-        <Xy as crate::data::IntoData<Message, Theme, Renderer>>::into_data(xy)
+        use crate::data::IntoData;
+        xy.into_data()
     }
 }

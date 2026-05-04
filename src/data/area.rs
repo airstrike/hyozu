@@ -10,70 +10,14 @@ pub struct Bounds {
 }
 
 /// A plotting area containing marks and their associated axes.
-///
-/// Parameterized over `Message`, `Theme`, `Renderer` so it can hold
-/// `Mark::Pie` variants with donut-hole overlay closures.
-pub struct Area<Message = (), Theme = crate::core::Theme, Renderer = crate::widget::Renderer>
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
-    pub(crate) marks: Vec<Mark<Message, Theme, Renderer>>,
+#[derive(Debug, Clone, Default)]
+pub struct Area {
+    pub(crate) marks: Vec<Mark>,
     pub(crate) x_axis: Option<Axis>,
     pub(crate) y_axis: Option<Axis>,
 }
 
-// Manual Debug / Clone / Default — derives would require the type
-// parameters to themselves implement these traits, which the default
-// `iced_widget::Renderer` does not.
-impl<Message, Theme, Renderer> std::fmt::Debug for Area<Message, Theme, Renderer>
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Area")
-            .field("marks", &self.marks)
-            .field("x_axis", &self.x_axis)
-            .field("y_axis", &self.y_axis)
-            .finish()
-    }
-}
-
-impl<Message, Theme, Renderer> Clone for Area<Message, Theme, Renderer>
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
-    fn clone(&self) -> Self {
-        Self {
-            marks: self.marks.clone(),
-            x_axis: self.x_axis.clone(),
-            y_axis: self.y_axis.clone(),
-        }
-    }
-}
-
-impl<Message, Theme, Renderer> Default for Area<Message, Theme, Renderer>
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
-    fn default() -> Self {
-        Self::empty()
-    }
-}
-
-impl<Message, Theme, Renderer> Area<Message, Theme, Renderer>
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
+impl Area {
     /// Create an empty area with no marks or axes.
     pub fn empty() -> Self {
         Self {
@@ -89,7 +33,7 @@ where
     }
 
     /// Get the marks in this area.
-    pub fn marks(&self) -> &[Mark<Message, Theme, Renderer>] {
+    pub fn marks(&self) -> &[Mark] {
         &self.marks
     }
 
@@ -133,7 +77,7 @@ where
     /// Returns a reference to a pie mark by index.
     ///
     /// Index refers to the nth Pie mark in this area.
-    pub fn pie(&self, index: usize) -> Option<&crate::Pie<Message, Theme, Renderer>> {
+    pub fn pie(&self, index: usize) -> Option<&crate::Pie> {
         self.marks
             .iter()
             .filter_map(|m| match m {

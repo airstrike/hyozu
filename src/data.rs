@@ -19,22 +19,12 @@ pub use mark::{
 ///
 /// This is used instead of `Into<Data>` to avoid coherence issues
 /// with blanket implementations.
-pub trait IntoData<Message = (), Theme = crate::core::Theme, Renderer = crate::widget::Renderer>
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
-    fn into_data(self) -> Data<Message, Theme, Renderer>;
+pub trait IntoData {
+    fn into_data(self) -> Data;
 }
 
 /// Build chart data for hyozu
-pub fn data<Message, Theme, Renderer>(t: impl IntoData<Message, Theme, Renderer>) -> Data<Message, Theme, Renderer>
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
+pub fn data(t: impl IntoData) -> Data {
     t.into_data()
 }
 
@@ -42,21 +32,13 @@ where
 ///
 /// This is the main type you store in your application state.
 /// Data owns all the source data: series, axes, title, legend.
-///
-/// Parameterized over `Message`, `Theme`, `Renderer` so it can carry a
-/// `Pie` mark with a donut-hole overlay closure. Defaults match the
-/// common iced setup.
-pub struct Data<Message = (), Theme = crate::core::Theme, Renderer = crate::widget::Renderer>
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
+#[derive(Debug, Clone, Default)]
+pub struct Data {
     /// Primary plotting area (bottom-left axes)
-    pub(crate) primary: Area<Message, Theme, Renderer>,
+    pub(crate) primary: Area,
 
     /// Secondary plotting area (top-right axes)
-    pub(crate) secondary: Area<Message, Theme, Renderer>,
+    pub(crate) secondary: Area,
 
     /// Optional title
     pub(crate) title: Option<String>,
@@ -83,79 +65,8 @@ where
     pub(crate) generation: u64,
 }
 
-// Manual Debug / Clone / Default — derives would require the type
-// parameters to themselves implement these traits, which the default
-// `iced_widget::Renderer` does not.
-impl<Message, Theme, Renderer> std::fmt::Debug for Data<Message, Theme, Renderer>
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Data")
-            .field("primary", &self.primary)
-            .field("secondary", &self.secondary)
-            .field("title", &self.title)
-            .field("title_text", &self.title_text)
-            .field("palette", &self.palette)
-            .field("selection", &self.selection)
-            .field("legend", &self.legend)
-            .field("tooltip", &self.tooltip)
-            .field("generation", &self.generation)
-            .finish()
-    }
-}
-
-impl<Message, Theme, Renderer> Clone for Data<Message, Theme, Renderer>
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
-    fn clone(&self) -> Self {
-        Self {
-            primary: self.primary.clone(),
-            secondary: self.secondary.clone(),
-            title: self.title.clone(),
-            title_text: self.title_text,
-            palette: self.palette.clone(),
-            selection: self.selection.clone(),
-            legend: self.legend.clone(),
-            tooltip: self.tooltip.clone(),
-            generation: self.generation,
-        }
-    }
-}
-
-impl<Message, Theme, Renderer> Default for Data<Message, Theme, Renderer>
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
-    fn default() -> Self {
-        Self {
-            primary: Area::empty(),
-            secondary: Area::empty(),
-            title: None,
-            title_text: crate::text::Style::new(),
-            palette: None,
-            selection: None,
-            legend: None,
-            tooltip: None,
-            generation: 0,
-        }
-    }
-}
-
 /// Returns the default axis pair for a given mark type.
-fn axes_for_mark<Message, Theme, Renderer>(mark: &Mark<Message, Theme, Renderer>) -> (Option<Axis>, Option<Axis>)
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
+fn axes_for_mark(mark: &Mark) -> (Option<Axis>, Option<Axis>) {
     match mark {
         Mark::Area(_) => (Some(mark::Area::x_axis()), Some(mark::Area::y_axis())),
         Mark::Bars(bars) => {
@@ -166,7 +77,7 @@ where
         Mark::Line(_) => (Some(Line::x_axis()), Some(Line::y_axis())),
         Mark::BubbleMap(_) => (BubbleMap::x_axis(), BubbleMap::y_axis()),
         Mark::Choropleth(_) => (Choropleth::x_axis(), Choropleth::y_axis()),
-        Mark::Pie(_) => (Pie::<()>::x_axis(), Pie::<()>::y_axis()),
+        Mark::Pie(_) => (Pie::x_axis(), Pie::y_axis()),
         Mark::Gauge(_) => (Gauge::x_axis(), Gauge::y_axis()),
         Mark::Treemap(_) => (Treemap::x_axis(), Treemap::y_axis()),
         Mark::Waterfall(_) => (Some(Waterfall::x_axis()), Some(Waterfall::y_axis())),
@@ -179,13 +90,8 @@ where
     }
 }
 
-impl<Message, Theme, Renderer> From<Mark<Message, Theme, Renderer>> for Area<Message, Theme, Renderer>
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
-    fn from(mark: Mark<Message, Theme, Renderer>) -> Self {
+impl From<Mark> for Area {
+    fn from(mark: Mark) -> Self {
         let (x_axis, y_axis) = axes_for_mark(&mark);
 
         Self {
@@ -196,13 +102,8 @@ where
     }
 }
 
-impl<Message, Theme, Renderer> From<Vec<Mark<Message, Theme, Renderer>>> for Area<Message, Theme, Renderer>
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
-    fn from(marks: Vec<Mark<Message, Theme, Renderer>>) -> Self {
+impl From<Vec<Mark>> for Area {
+    fn from(marks: Vec<Mark>) -> Self {
         if marks.is_empty() {
             return Self::empty();
         }
@@ -219,13 +120,8 @@ where
     }
 }
 
-impl<Message, Theme, Renderer> IntoData<Message, Theme, Renderer> for Mark<Message, Theme, Renderer>
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
-    fn into_data(self) -> Data<Message, Theme, Renderer> {
+impl IntoData for Mark {
+    fn into_data(self) -> Data {
         Data {
             primary: Area::from(self),
             secondary: Area::empty(),
@@ -240,156 +136,86 @@ where
     }
 }
 
-impl<Message, Theme, Renderer> IntoData<Message, Theme, Renderer> for mark::Area
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
-    fn into_data(self) -> Data<Message, Theme, Renderer> {
+impl IntoData for mark::Area {
+    fn into_data(self) -> Data {
         Mark::from(self).into_data()
     }
 }
 
-impl<Message, Theme, Renderer> IntoData<Message, Theme, Renderer> for Bars
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
-    fn into_data(self) -> Data<Message, Theme, Renderer> {
+impl IntoData for Bars {
+    fn into_data(self) -> Data {
         Mark::from(self).into_data()
     }
 }
 
-impl<Message, Theme, Renderer> IntoData<Message, Theme, Renderer> for BoxPlot
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
-    fn into_data(self) -> Data<Message, Theme, Renderer> {
+impl IntoData for BoxPlot {
+    fn into_data(self) -> Data {
         Mark::from(self).into_data()
     }
 }
 
-impl<Message, Theme, Renderer> IntoData<Message, Theme, Renderer> for Line
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
-    fn into_data(self) -> Data<Message, Theme, Renderer> {
+impl IntoData for Line {
+    fn into_data(self) -> Data {
         Mark::from(self).into_data()
     }
 }
 
-impl<Message, Theme, Renderer> IntoData<Message, Theme, Renderer> for Pie<Message, Theme, Renderer>
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
-    fn into_data(self) -> Data<Message, Theme, Renderer> {
+impl IntoData for Pie {
+    fn into_data(self) -> Data {
         Mark::from(self).into_data()
     }
 }
 
-impl<Message, Theme, Renderer> IntoData<Message, Theme, Renderer> for Gauge
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
-    fn into_data(self) -> Data<Message, Theme, Renderer> {
+impl IntoData for Gauge {
+    fn into_data(self) -> Data {
         Mark::from(self).into_data()
     }
 }
 
-impl<Message, Theme, Renderer> IntoData<Message, Theme, Renderer> for Waterfall
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
-    fn into_data(self) -> Data<Message, Theme, Renderer> {
+impl IntoData for Waterfall {
+    fn into_data(self) -> Data {
         Mark::from(self).into_data()
     }
 }
 
-impl<Message, Theme, Renderer> IntoData<Message, Theme, Renderer> for Xy
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
-    fn into_data(self) -> Data<Message, Theme, Renderer> {
+impl IntoData for Xy {
+    fn into_data(self) -> Data {
         Mark::from(self).into_data()
     }
 }
 
-impl<Message, Theme, Renderer> IntoData<Message, Theme, Renderer> for Heatmap
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
-    fn into_data(self) -> Data<Message, Theme, Renderer> {
+impl IntoData for Heatmap {
+    fn into_data(self) -> Data {
         Mark::from(self).into_data()
     }
 }
 
-impl<Message, Theme, Renderer> IntoData<Message, Theme, Renderer> for Treemap
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
-    fn into_data(self) -> Data<Message, Theme, Renderer> {
+impl IntoData for Treemap {
+    fn into_data(self) -> Data {
         Mark::from(self).into_data()
     }
 }
 
-impl<Message, Theme, Renderer> IntoData<Message, Theme, Renderer> for Violin
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
-    fn into_data(self) -> Data<Message, Theme, Renderer> {
+impl IntoData for Violin {
+    fn into_data(self) -> Data {
         Mark::from(self).into_data()
     }
 }
 
-impl<Message, Theme, Renderer> IntoData<Message, Theme, Renderer> for BubbleMap
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
-    fn into_data(self) -> Data<Message, Theme, Renderer> {
+impl IntoData for BubbleMap {
+    fn into_data(self) -> Data {
         Mark::from(self).into_data()
     }
 }
 
-impl<Message, Theme, Renderer> IntoData<Message, Theme, Renderer> for Choropleth
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
-    fn into_data(self) -> Data<Message, Theme, Renderer> {
+impl IntoData for Choropleth {
+    fn into_data(self) -> Data {
         Mark::from(self).into_data()
     }
 }
 
-impl<Message, Theme, Renderer> IntoData<Message, Theme, Renderer> for Vec<Mark<Message, Theme, Renderer>>
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
-    fn into_data(self) -> Data<Message, Theme, Renderer> {
+impl IntoData for Vec<Mark> {
+    fn into_data(self) -> Data {
         Data {
             primary: Area::from(self),
             secondary: Area::empty(),
@@ -405,34 +231,19 @@ where
 }
 
 // From impls for .into() ergonomics
-impl<Message, Theme, Renderer> From<Mark<Message, Theme, Renderer>> for Data<Message, Theme, Renderer>
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
-    fn from(mark: Mark<Message, Theme, Renderer>) -> Self {
+impl From<Mark> for Data {
+    fn from(mark: Mark) -> Self {
         mark.into_data()
     }
 }
 
-impl<Message, Theme, Renderer> From<Vec<Mark<Message, Theme, Renderer>>> for Data<Message, Theme, Renderer>
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
-    fn from(marks: Vec<Mark<Message, Theme, Renderer>>) -> Self {
+impl From<Vec<Mark>> for Data {
+    fn from(marks: Vec<Mark>) -> Self {
         marks.into_data()
     }
 }
 
-impl<Message, Theme, Renderer> Data<Message, Theme, Renderer>
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
+impl Data {
     /// Sets the title for the chart.
     pub fn title(mut self, title: impl Into<String>) -> Self {
         self.title = Some(title.into());
@@ -598,7 +409,7 @@ where
     }
 
     /// Returns a reference to the marks in the primary area.
-    pub fn marks(&self) -> &[Mark<Message, Theme, Renderer>] {
+    pub fn marks(&self) -> &[Mark] {
         self.primary.marks()
     }
 
@@ -635,12 +446,12 @@ where
     // === Property accessors ===
 
     /// Returns a reference to the primary plotting area.
-    pub fn primary(&self) -> &Area<Message, Theme, Renderer> {
+    pub fn primary(&self) -> &Area {
         &self.primary
     }
 
     /// Returns a reference to the secondary plotting area.
-    pub fn secondary_area(&self) -> &Area<Message, Theme, Renderer> {
+    pub fn secondary_area(&self) -> &Area {
         &self.secondary
     }
 
@@ -650,7 +461,7 @@ where
     /// or [`Data::top_axis`] to configure them. Any marks whose default axis
     /// pair is numeric (e.g. lines, areas, bars) will work out of the box
     /// with a default right axis.
-    pub fn secondary(mut self, marks: impl Into<Vec<Mark<Message, Theme, Renderer>>>) -> Self {
+    pub fn secondary(mut self, marks: impl Into<Vec<Mark>>) -> Self {
         let mut new_marks = marks.into();
         // Auto-configure only the right (secondary Y) axis. We do *not*
         // auto-create a top X axis: in the Excel-style dual-axis case
@@ -721,7 +532,7 @@ where
     }
 
     /// Returns a reference to a pie mark by index.
-    pub fn pie(&self, index: usize) -> Option<&Pie<Message, Theme, Renderer>> {
+    pub fn pie(&self, index: usize) -> Option<&Pie> {
         self.primary.pie(index)
     }
 
@@ -784,12 +595,7 @@ pub enum Action {
     Clicked(crate::target::Target),
 }
 
-impl<Message, Theme, Renderer> Data<Message, Theme, Renderer>
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
+impl Data {
     /// Performs an action on the data.
     ///
     /// Updates the data based on user interactions.
@@ -889,29 +695,28 @@ mod tests {
     #[test]
     fn test_data_from_mark() {
         let mark = bars([100, 200, 300]);
-        let data: Data = mark.into_data();
+        let data = mark.into_data();
         assert_eq!(data.primary.marks.len(), 1);
         assert!(data.title.is_none());
     }
 
     #[test]
     fn test_data_from_vec() {
-        let mark1: Mark = Mark::Bars(bars([100, 200]));
-        let mark2: Mark = Mark::Bars(bars([300, 400]));
-        let data: Data = vec![mark1, mark2].into_data();
+        let mark1 = Mark::Bars(bars([100, 200]));
+        let mark2 = Mark::Bars(bars([300, 400]));
+        let data = vec![mark1, mark2].into_data();
         assert_eq!(data.primary.marks.len(), 2);
     }
 
     #[test]
     fn test_data_title() {
-        let data: Data = bars([100, 200]).into_data();
-        let data = data.title("Sales Data");
+        let data = bars([100, 200]).into_data().title("Sales Data");
         assert_eq!(data.title, Some("Sales Data".to_string()));
     }
 
     #[test]
     fn test_data_title_chainable() {
-        let data: Data = vec![Mark::<()>::Bars(bars([100, 200])), Mark::Bars(bars([300, 400]))]
+        let data = vec![Mark::Bars(bars([100, 200])), Mark::Bars(bars([300, 400]))]
             .into_data()
             .title("Multi-Series Chart");
 

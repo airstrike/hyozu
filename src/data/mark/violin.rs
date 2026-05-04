@@ -214,14 +214,10 @@ impl Violin {
     }
 }
 
-impl<Message, Theme, Renderer> From<Violin> for crate::Data<Message, Theme, Renderer>
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
+impl From<Violin> for crate::Data {
     fn from(v: Violin) -> Self {
-        <Violin as crate::data::IntoData<Message, Theme, Renderer>>::into_data(v)
+        use crate::data::IntoData;
+        v.into_data()
     }
 }
 

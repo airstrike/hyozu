@@ -245,13 +245,9 @@ impl Waterfall {
     }
 }
 
-impl<Message, Theme, Renderer> From<Waterfall> for crate::Data<Message, Theme, Renderer>
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
+impl From<Waterfall> for crate::Data {
     fn from(waterfall: Waterfall) -> Self {
-        <Waterfall as crate::data::IntoData<Message, Theme, Renderer>>::into_data(waterfall)
+        use crate::data::IntoData;
+        waterfall.into_data()
     }
 }

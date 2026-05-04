@@ -310,13 +310,9 @@ impl Choropleth {
 
 // ── Into Data ────────────────────────────────────────────────────
 
-impl<Message, Theme, Renderer> From<Choropleth> for crate::Data<Message, Theme, Renderer>
-where
-    Message: 'static,
-    Theme: 'static,
-    Renderer: 'static,
-{
+impl From<Choropleth> for crate::Data {
     fn from(c: Choropleth) -> Self {
-        <Choropleth as crate::data::IntoData<Message, Theme, Renderer>>::into_data(c)
+        use crate::data::IntoData;
+        c.into_data()
     }
 }
