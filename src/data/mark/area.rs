@@ -436,10 +436,14 @@ impl Area {
     }
 }
 
-impl From<Area> for crate::Data {
+impl<Message, Theme, Renderer> From<Area> for crate::Data<Message, Theme, Renderer>
+where
+    Message: 'static,
+    Theme: 'static,
+    Renderer: 'static,
+{
     fn from(area: Area) -> Self {
-        use crate::data::IntoData;
-        area.into_data()
+        <Area as crate::data::IntoData<Message, Theme, Renderer>>::into_data(area)
     }
 }
 

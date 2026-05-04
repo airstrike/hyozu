@@ -441,14 +441,23 @@ impl Bars {
     }
 }
 
-impl From<Bars> for crate::Data {
+impl<Message, Theme, Renderer> From<Bars> for crate::Data<Message, Theme, Renderer>
+where
+    Message: 'static,
+    Theme: 'static,
+    Renderer: 'static,
+{
     fn from(bars: Bars) -> Self {
-        use crate::data::IntoData;
-        bars.into_data()
+        <Bars as crate::data::IntoData<Message, Theme, Renderer>>::into_data(bars)
     }
 }
 
-impl<const N: usize> From<[Bars; N]> for crate::Data {
+impl<const N: usize, Message, Theme, Renderer> From<[Bars; N]> for crate::Data<Message, Theme, Renderer>
+where
+    Message: 'static,
+    Theme: 'static,
+    Renderer: 'static,
+{
     fn from(bars: [Bars; N]) -> Self {
         crate::Data::from(bars.into_iter().map(crate::Mark::Bars).collect::<Vec<_>>())
     }

@@ -170,9 +170,13 @@ impl Treemap {
     }
 }
 
-impl From<Treemap> for crate::Data {
+impl<Message, Theme, Renderer> From<Treemap> for crate::Data<Message, Theme, Renderer>
+where
+    Message: 'static,
+    Theme: 'static,
+    Renderer: 'static,
+{
     fn from(treemap: Treemap) -> Self {
-        use crate::data::IntoData;
-        treemap.into_data()
+        <Treemap as crate::data::IntoData<Message, Theme, Renderer>>::into_data(treemap)
     }
 }

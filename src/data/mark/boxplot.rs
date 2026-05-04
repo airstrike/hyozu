@@ -189,10 +189,14 @@ impl BoxPlot {
     }
 }
 
-impl From<BoxPlot> for crate::Data {
+impl<Message, Theme, Renderer> From<BoxPlot> for crate::Data<Message, Theme, Renderer>
+where
+    Message: 'static,
+    Theme: 'static,
+    Renderer: 'static,
+{
     fn from(bp: BoxPlot) -> Self {
-        use crate::data::IntoData;
-        bp.into_data()
+        <BoxPlot as crate::data::IntoData<Message, Theme, Renderer>>::into_data(bp)
     }
 }
 

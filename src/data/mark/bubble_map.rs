@@ -235,9 +235,13 @@ impl BubbleMap {
     }
 }
 
-impl From<BubbleMap> for crate::Data {
+impl<Message, Theme, Renderer> From<BubbleMap> for crate::Data<Message, Theme, Renderer>
+where
+    Message: 'static,
+    Theme: 'static,
+    Renderer: 'static,
+{
     fn from(bm: BubbleMap) -> Self {
-        use crate::data::IntoData;
-        bm.into_data()
+        <BubbleMap as crate::data::IntoData<Message, Theme, Renderer>>::into_data(bm)
     }
 }

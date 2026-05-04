@@ -323,9 +323,13 @@ impl Gauge {
     }
 }
 
-impl From<Gauge> for crate::Data {
+impl<Message, Theme, Renderer> From<Gauge> for crate::Data<Message, Theme, Renderer>
+where
+    Message: 'static,
+    Theme: 'static,
+    Renderer: 'static,
+{
     fn from(gauge: Gauge) -> Self {
-        use crate::data::IntoData;
-        gauge.into_data()
+        <Gauge as crate::data::IntoData<Message, Theme, Renderer>>::into_data(gauge)
     }
 }

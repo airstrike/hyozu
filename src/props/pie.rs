@@ -24,7 +24,12 @@ impl Map for Property {}
 
 impl Property {
     /// Applies this property to a Pie mark.
-    pub fn apply(&self, pie: &mut crate::data::mark::pie::Pie) {
+    pub fn apply<Message, Theme, Renderer>(&self, pie: &mut crate::data::mark::pie::Pie<Message, Theme, Renderer>)
+    where
+        Message: 'static,
+        Theme: 'static,
+        Renderer: 'static,
+    {
         match self {
             Property::Hole(v) => pie.hole = v.clamp(0.0, 0.99),
             Property::Gap(v) => pie.gap = v.max(0.0),
@@ -43,7 +48,14 @@ impl Property {
     }
 }
 
-fn apply_chart_label(p: &label::Property, pie: &mut crate::data::mark::pie::Pie) {
+fn apply_chart_label<Message, Theme, Renderer>(
+    p: &label::Property,
+    pie: &mut crate::data::mark::pie::Pie<Message, Theme, Renderer>,
+) where
+    Message: 'static,
+    Theme: 'static,
+    Renderer: 'static,
+{
     match p {
         label::Property::Position(v) => pie.set_label_position(*v),
         label::Property::Show(v) => pie.set_label_show(*v),

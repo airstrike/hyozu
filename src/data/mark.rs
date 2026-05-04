@@ -62,8 +62,16 @@ pub struct LegendEntry {
 }
 
 /// Represents a visual mark in a chart (bars, lines, scatter, etc.)
-#[derive(Debug, Clone)]
-pub enum Mark {
+///
+/// Parameterized over `Message`, `Theme`, `Renderer` so the `Pie` variant
+/// can carry a donut-hole overlay closure. Other variants ignore the
+/// parameters; defaults make the common case ergonomic.
+pub enum Mark<Message = (), Theme = crate::core::Theme, Renderer = crate::widget::Renderer>
+where
+    Message: 'static,
+    Theme: 'static,
+    Renderer: 'static,
+{
     Area(Area),
     Band(Band),
     Bars(Bars),
@@ -71,7 +79,7 @@ pub enum Mark {
     BubbleMap(BubbleMap),
     Choropleth(Choropleth),
     Line(Line),
-    Pie(Pie),
+    Pie(Pie<Message, Theme, Renderer>),
     Gauge(Gauge),
     Treemap(Treemap),
     Waterfall(Waterfall),
@@ -82,7 +90,71 @@ pub enum Mark {
     Violin(Violin),
 }
 
-impl Mark {
+// Manual Debug / Clone — the derives would require `Theme: Debug + Clone`
+// and `Renderer: Debug + Clone`, which the default `iced_widget::Renderer`
+// does not satisfy.
+impl<Message, Theme, Renderer> std::fmt::Debug for Mark<Message, Theme, Renderer>
+where
+    Message: 'static,
+    Theme: 'static,
+    Renderer: 'static,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Mark::Area(v) => f.debug_tuple("Area").field(v).finish(),
+            Mark::Band(v) => f.debug_tuple("Band").field(v).finish(),
+            Mark::Bars(v) => f.debug_tuple("Bars").field(v).finish(),
+            Mark::BoxPlot(v) => f.debug_tuple("BoxPlot").field(v).finish(),
+            Mark::BubbleMap(v) => f.debug_tuple("BubbleMap").field(v).finish(),
+            Mark::Choropleth(v) => f.debug_tuple("Choropleth").field(v).finish(),
+            Mark::Line(v) => f.debug_tuple("Line").field(v).finish(),
+            Mark::Pie(v) => f.debug_tuple("Pie").field(v).finish(),
+            Mark::Gauge(v) => f.debug_tuple("Gauge").field(v).finish(),
+            Mark::Treemap(v) => f.debug_tuple("Treemap").field(v).finish(),
+            Mark::Waterfall(v) => f.debug_tuple("Waterfall").field(v).finish(),
+            Mark::Xy(v) => f.debug_tuple("Xy").field(v).finish(),
+            Mark::Rule(v) => f.debug_tuple("Rule").field(v).finish(),
+            Mark::Tick(v) => f.debug_tuple("Tick").field(v).finish(),
+            Mark::Heatmap(v) => f.debug_tuple("Heatmap").field(v).finish(),
+            Mark::Violin(v) => f.debug_tuple("Violin").field(v).finish(),
+        }
+    }
+}
+
+impl<Message, Theme, Renderer> Clone for Mark<Message, Theme, Renderer>
+where
+    Message: 'static,
+    Theme: 'static,
+    Renderer: 'static,
+{
+    fn clone(&self) -> Self {
+        match self {
+            Mark::Area(v) => Mark::Area(v.clone()),
+            Mark::Band(v) => Mark::Band(v.clone()),
+            Mark::Bars(v) => Mark::Bars(v.clone()),
+            Mark::BoxPlot(v) => Mark::BoxPlot(v.clone()),
+            Mark::BubbleMap(v) => Mark::BubbleMap(v.clone()),
+            Mark::Choropleth(v) => Mark::Choropleth(v.clone()),
+            Mark::Line(v) => Mark::Line(v.clone()),
+            Mark::Pie(v) => Mark::Pie(v.clone()),
+            Mark::Gauge(v) => Mark::Gauge(v.clone()),
+            Mark::Treemap(v) => Mark::Treemap(v.clone()),
+            Mark::Waterfall(v) => Mark::Waterfall(v.clone()),
+            Mark::Xy(v) => Mark::Xy(v.clone()),
+            Mark::Rule(v) => Mark::Rule(v.clone()),
+            Mark::Tick(v) => Mark::Tick(v.clone()),
+            Mark::Heatmap(v) => Mark::Heatmap(v.clone()),
+            Mark::Violin(v) => Mark::Violin(v.clone()),
+        }
+    }
+}
+
+impl<Message, Theme, Renderer> Mark<Message, Theme, Renderer>
+where
+    Message: 'static,
+    Theme: 'static,
+    Renderer: 'static,
+{
     /// Extract legend entries from this mark.
     ///
     /// Returns entries with names and optional colors for the legend.
@@ -215,97 +287,177 @@ impl Mark {
     }
 }
 
-impl From<Area> for Mark {
+impl<Message, Theme, Renderer> From<Area> for Mark<Message, Theme, Renderer>
+where
+    Message: 'static,
+    Theme: 'static,
+    Renderer: 'static,
+{
     fn from(area: Area) -> Self {
         Mark::Area(area)
     }
 }
 
-impl From<Bars> for Mark {
+impl<Message, Theme, Renderer> From<Bars> for Mark<Message, Theme, Renderer>
+where
+    Message: 'static,
+    Theme: 'static,
+    Renderer: 'static,
+{
     fn from(bars: Bars) -> Self {
         Mark::Bars(bars)
     }
 }
 
-impl From<BoxPlot> for Mark {
+impl<Message, Theme, Renderer> From<BoxPlot> for Mark<Message, Theme, Renderer>
+where
+    Message: 'static,
+    Theme: 'static,
+    Renderer: 'static,
+{
     fn from(bp: BoxPlot) -> Self {
         Mark::BoxPlot(bp)
     }
 }
 
-impl From<Line> for Mark {
+impl<Message, Theme, Renderer> From<Line> for Mark<Message, Theme, Renderer>
+where
+    Message: 'static,
+    Theme: 'static,
+    Renderer: 'static,
+{
     fn from(line: Line) -> Self {
         Mark::Line(line)
     }
 }
 
-impl From<Pie> for Mark {
-    fn from(pie: Pie) -> Self {
+impl<Message, Theme, Renderer> From<Pie<Message, Theme, Renderer>> for Mark<Message, Theme, Renderer>
+where
+    Message: 'static,
+    Theme: 'static,
+    Renderer: 'static,
+{
+    fn from(pie: Pie<Message, Theme, Renderer>) -> Self {
         Mark::Pie(pie)
     }
 }
 
-impl From<Gauge> for Mark {
+impl<Message, Theme, Renderer> From<Gauge> for Mark<Message, Theme, Renderer>
+where
+    Message: 'static,
+    Theme: 'static,
+    Renderer: 'static,
+{
     fn from(gauge: Gauge) -> Self {
         Mark::Gauge(gauge)
     }
 }
 
-impl From<Waterfall> for Mark {
+impl<Message, Theme, Renderer> From<Waterfall> for Mark<Message, Theme, Renderer>
+where
+    Message: 'static,
+    Theme: 'static,
+    Renderer: 'static,
+{
     fn from(waterfall: Waterfall) -> Self {
         Mark::Waterfall(waterfall)
     }
 }
 
-impl From<Xy> for Mark {
+impl<Message, Theme, Renderer> From<Xy> for Mark<Message, Theme, Renderer>
+where
+    Message: 'static,
+    Theme: 'static,
+    Renderer: 'static,
+{
     fn from(xy: Xy) -> Self {
         Mark::Xy(xy)
     }
 }
 
-impl From<Rule> for Mark {
+impl<Message, Theme, Renderer> From<Rule> for Mark<Message, Theme, Renderer>
+where
+    Message: 'static,
+    Theme: 'static,
+    Renderer: 'static,
+{
     fn from(rule: Rule) -> Self {
         Mark::Rule(rule)
     }
 }
 
-impl From<Band> for Mark {
+impl<Message, Theme, Renderer> From<Band> for Mark<Message, Theme, Renderer>
+where
+    Message: 'static,
+    Theme: 'static,
+    Renderer: 'static,
+{
     fn from(band: Band) -> Self {
         Mark::Band(band)
     }
 }
 
-impl From<Tick> for Mark {
+impl<Message, Theme, Renderer> From<Tick> for Mark<Message, Theme, Renderer>
+where
+    Message: 'static,
+    Theme: 'static,
+    Renderer: 'static,
+{
     fn from(tick: Tick) -> Self {
         Mark::Tick(tick)
     }
 }
 
-impl From<Heatmap> for Mark {
+impl<Message, Theme, Renderer> From<Heatmap> for Mark<Message, Theme, Renderer>
+where
+    Message: 'static,
+    Theme: 'static,
+    Renderer: 'static,
+{
     fn from(heatmap: Heatmap) -> Self {
         Mark::Heatmap(heatmap)
     }
 }
 
-impl From<Treemap> for Mark {
+impl<Message, Theme, Renderer> From<Treemap> for Mark<Message, Theme, Renderer>
+where
+    Message: 'static,
+    Theme: 'static,
+    Renderer: 'static,
+{
     fn from(treemap: Treemap) -> Self {
         Mark::Treemap(treemap)
     }
 }
 
-impl From<Violin> for Mark {
+impl<Message, Theme, Renderer> From<Violin> for Mark<Message, Theme, Renderer>
+where
+    Message: 'static,
+    Theme: 'static,
+    Renderer: 'static,
+{
     fn from(violin: Violin) -> Self {
         Mark::Violin(violin)
     }
 }
 
-impl From<BubbleMap> for Mark {
+impl<Message, Theme, Renderer> From<BubbleMap> for Mark<Message, Theme, Renderer>
+where
+    Message: 'static,
+    Theme: 'static,
+    Renderer: 'static,
+{
     fn from(bm: BubbleMap) -> Self {
         Mark::BubbleMap(bm)
     }
 }
 
-impl From<Choropleth> for Mark {
+impl<Message, Theme, Renderer> From<Choropleth> for Mark<Message, Theme, Renderer>
+where
+    Message: 'static,
+    Theme: 'static,
+    Renderer: 'static,
+{
     fn from(c: Choropleth) -> Self {
         Mark::Choropleth(c)
     }
