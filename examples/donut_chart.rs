@@ -134,11 +134,15 @@ impl App {
         ]
         .align_y(Center);
 
-        let donut_widget = donut(&self.data).hole(0.6).design(&self.theme).padding(8).center(
-            column![text("$201M").size(48), text("FY 2026").size(13)]
-                .spacing(2)
-                .align_x(Center),
-        );
+        let donut_widget = donut(&self.data)
+            .hole(0.6)
+            .design(&self.theme)
+            .padding(8)
+            .center(center(
+                column![text("$201M").size(48), text("FY 2026").size(13)]
+                    .spacing(2)
+                    .align_x(Center),
+            ));
 
         let card = container(column![header, donut_widget].spacing(16))
             .padding(24)
