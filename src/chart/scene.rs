@@ -33,6 +33,8 @@ where
     color_slots: usize,
     /// Plot area offset within the scene, computed during layout.
     plot_area_offset: crate::core::Point,
+    /// Plot area size, computed during layout.
+    plot_area_size: crate::core::Size,
     /// Legend bounds (position + size) within the scene, computed during layout.
     /// Only set when a legend is configured.
     legend_bounds: Option<crate::core::Rectangle>,
@@ -266,6 +268,7 @@ where
             user_palette: data.palette.clone(),
             color_slots,
             plot_area_offset: crate::core::Point::ORIGIN,
+            plot_area_size: crate::core::Size::ZERO,
             legend_bounds: None,
             legend_edge,
             scale_legend_budgets: data.scale_legend_reservations(),
@@ -301,6 +304,12 @@ where
     /// Returns the plot area offset within the scene (stored during layout).
     pub(crate) fn plot_area_offset(&self) -> crate::core::Point {
         self.plot_area_offset
+    }
+
+    /// Returns the plot area size (stored during layout).
+    #[allow(dead_code)]
+    pub(crate) fn plot_area_size(&self) -> crate::core::Size {
+        self.plot_area_size
     }
 
     /// Returns the legend bounds within the scene, if a legend is configured.
@@ -711,6 +720,7 @@ where
 
         // Plot area
         self.plot_area_offset = Point::new(content_left, plot_top);
+        self.plot_area_size = Size::new(plot_width, plot_height);
         layout_children.push(plot_area_node.move_to(self.plot_area_offset));
 
         // Bottom axis

@@ -34,6 +34,17 @@ pub struct State {
     pub label_rects: Vec<Option<crate::core::Rectangle>>,
 }
 
+impl State {
+    /// Returns the pie's center point and inner radius in plot-local
+    /// coordinates, populated during [`Pie::layout`].
+    ///
+    /// Used by donut overlays to inscribe a center element inside the
+    /// hole. Returns zeros when no slices have been laid out yet.
+    pub fn center_geometry(&self) -> (crate::core::Point, f32) {
+        (crate::core::Point::new(self.center.0, self.center.1), self.inner_radius)
+    }
+}
+
 /// A Pie series that renders pie/donut charts.
 pub struct Pie<'a, Message, Renderer>
 where

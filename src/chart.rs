@@ -1,3 +1,4 @@
+pub mod donut;
 pub mod guide;
 pub(crate) mod hover;
 pub mod legend;
@@ -36,7 +37,21 @@ where
     on_action: Option<Box<dyn Fn(Action) -> Message + 'a>>,
     design: Option<Cow<'a, Design>>,
     style: StyleFn<'a>,
+    kind: Kind<'a, Message, Theme>,
     _theme: std::marker::PhantomData<Theme>,
+}
+
+/// Variant tag for [`Chart`], carrying any variant-specific overlay state.
+///
+/// `chart()` constructs `Kind::Generic`; `donut()` constructs
+/// `Kind::Donut(donut::Chart { .. })` so the donut variant can host a
+/// center overlay element without forcing every chart to pay for it.
+#[non_exhaustive]
+pub enum Kind<'a, Message, Theme> {
+    /// No variant-specific overlay; the chart renders only its scene.
+    Generic,
+    /// Donut variant with optional center overlay; see [`donut::Chart`].
+    Donut(donut::Chart<'a, Message, Theme>),
 }
 
 /// Internal state for the chart widget.
@@ -61,6 +76,21 @@ where
     Chart::new(data)
 }
 
+/// Creates a donut-variant chart from data.
+///
+/// Equivalent to [`chart`] with the donut variant pre-selected so
+/// donut-only knobs (`.center`, `.center_inset`) take effect. A donut's
+/// hole comes from the `pie::Pie` data spec; the variant just adds
+/// presentation overlays at the chart layer.
+pub fn donut<'a, Message, Theme>(data: &'a Data) -> Chart<'a, Message, Theme, Theme>
+where
+    Theme: design::Design + Clone,
+{
+    let mut chart = Chart::new(data);
+    chart.kind = Kind::Donut(donut::Chart::new());
+    chart
+}
+
 impl<'a, Message, Design, Theme> Chart<'a, Message, Design, Theme>
 where
     Design: design::Design + Clone,
@@ -80,6 +110,7 @@ where
             on_action: None,
             design: None,
             style: Box::new(default),
+            kind: Kind::Generic,
             _theme: std::marker::PhantomData,
         }
     }
@@ -119,6 +150,7 @@ where
             on_action: self.on_action,
             design: Some(design.into_design()),
             style: self.style,
+            kind: self.kind,
             _theme: std::marker::PhantomData,
         }
     }
@@ -132,6 +164,32 @@ where
     /// Sets the style of the [`Chart`].
     pub fn style(mut self, style: impl Fn(&dyn design::Design) -> Style + 'a) -> Self {
         self.style = Box::new(style);
+        self
+    }
+
+    /// Sets a center overlay element on a donut chart, sized to the
+    /// full plot area (`Placement::Stack`).
+    ///
+    /// No-op on a generic chart created via [`chart()`]. The overlay
+    /// composites above the donut so its content (e.g. a card with a
+    /// big number and label) isn't clipped by the hole.
+    pub fn center(mut self, element: impl Into<Element<'a, Message, Theme, Renderer>>) -> Self {
+        if let Kind::Donut(d) = &mut self.kind {
+            d.center = Some(donut::Center::new(element.into(), donut::Placement::Stack));
+        }
+        self
+    }
+
+    /// Sets a center overlay element on a donut chart, inscribed in
+    /// the donut hole (`Placement::Inset`).
+    ///
+    /// No-op on a generic chart created via [`chart()`]. The element
+    /// is sized to the largest axis-aligned square that fits inside
+    /// the hole, so circular badges and tight numbers stay readable.
+    pub fn center_inset(mut self, element: impl Into<Element<'a, Message, Theme, Renderer>>) -> Self {
+        if let Kind::Donut(d) = &mut self.kind {
+            d.center = Some(donut::Center::new(element.into(), donut::Placement::Inset));
+        }
         self
     }
 }
@@ -273,6 +331,67 @@ fn find_nearest_hover(local: Point, plot_area_tree: &Tree, plane: &plot_area::Pl
     Some(hover::State { data_x, entries })
 }
 
+/// Lays out a donut center overlay child as a sibling of the scene
+/// node, returning a `Node` already positioned in chart-local coords.
+///
+/// Resolves the first `Mark::Pie`'s laid-out state to inscribe an
+/// `Inset` element inside the donut hole, or to fill the plot area
+/// for `Stack`. When pie state isn't ready (no slices yet, or no
+/// `Mark::Pie` in the scene), returns a zero-sized node so `draw`
+/// becomes a no-op.
+fn layout_donut_center<Message, Theme>(
+    padding: Padding,
+    plot_area_offset: Point,
+    scene_tree: &Tree,
+    element: &mut Element<'_, Message, Theme, Renderer>,
+    placement: donut::Placement,
+    center_tree: &mut Tree,
+    renderer: &Renderer,
+) -> layout::Node {
+    let plot_area_tree = &scene_tree.children[6];
+    let plot_area_state = plot_area_tree.state.downcast_ref::<plot_area::State>();
+    let Some(plane) = &plot_area_state.plane else {
+        return layout::Node::new(Size::ZERO);
+    };
+
+    let pie_tag = tree::Tag::of::<plot_area::pie::State>();
+    let Some(pie_tree) = plot_area_tree.children.iter().find(|t| t.tag == pie_tag) else {
+        return layout::Node::new(Size::ZERO);
+    };
+    let pie_state = pie_tree.state.downcast_ref::<plot_area::pie::State>();
+    let (pie_center, inner_radius) = pie_state.center_geometry();
+
+    // Origin of the plot-area's plane in chart-local coords. Mirrors
+    // `compute_plot_bounds`'s offset chain so the overlay aligns with
+    // the same rectangle hover/click hit-tests against.
+    let plane_origin = Point::new(
+        padding.left + plot_area_offset.x + plane.bounds.x,
+        padding.top + plot_area_offset.y + plane.bounds.y,
+    );
+
+    let (origin, area_size) = match placement {
+        donut::Placement::Stack => (plane_origin, Size::new(plane.bounds.width, plane.bounds.height)),
+        donut::Placement::Inset => {
+            // Largest axis-aligned square inscribed in a circle of radius
+            // `inner_radius`: side = r * sqrt(2).
+            let side = inner_radius * std::f32::consts::SQRT_2;
+            let inset_origin = Point::new(
+                plane_origin.x + pie_center.x - side / 2.0,
+                plane_origin.y + pie_center.y - side / 2.0,
+            );
+            (inset_origin, Size::new(side, side))
+        }
+    };
+
+    if area_size.width <= 0.0 || area_size.height <= 0.0 {
+        return layout::Node::new(Size::ZERO);
+    }
+
+    let limits = layout::Limits::new(Size::ZERO, area_size);
+    let node = element.as_widget_mut().layout(center_tree, renderer, &limits);
+    node.move_to(origin)
+}
+
 impl<'a, Message, Design, Theme> Widget<Message, Theme, Renderer> for Chart<'a, Message, Design, Theme>
 where
     Design: design::Design + Clone + 'a,
@@ -287,7 +406,16 @@ where
     }
 
     fn children(&self) -> Vec<Tree> {
-        vec![self.scene.state()]
+        // Tree-shape invariant:
+        //   children[0] = Scene's tree
+        //   children[1] = donut center child (only when `Kind::Donut` carries a `Center`)
+        let mut children = vec![self.scene.state()];
+        if let Kind::Donut(d) = &self.kind
+            && let Some(c) = &d.center
+        {
+            children.push(Tree::new(&c.element));
+        }
+        children
     }
 
     fn diff(&self, tree: &mut Tree) {
@@ -298,6 +426,25 @@ where
             return;
         }
         self.scene.diff(&mut tree.children[0]);
+
+        // Reconcile the optional donut center child at children[1].
+        match &self.kind {
+            Kind::Donut(d) => match &d.center {
+                Some(c) => {
+                    if tree.children.len() < 2 {
+                        tree.children.push(Tree::new(&c.element));
+                    } else {
+                        tree.children[1].diff(c.element.as_widget());
+                    }
+                }
+                None => {
+                    tree.children.truncate(1);
+                }
+            },
+            Kind::Generic => {
+                tree.children.truncate(1);
+            }
+        }
     }
 
     fn size(&self) -> Size<Length> {
@@ -318,18 +465,40 @@ where
             (size.height - self.padding.top - self.padding.bottom).max(0.0),
         );
 
-        // Get the scene's tree
-        let scene_tree = &mut tree.children[0];
+        let scene_origin = Point::new(self.padding.left, self.padding.top);
+
+        // Split-borrow so we can lay out the optional center child after
+        // the scene has populated pie state at scene_tree.children[6].
+        let (scene_slot, rest) = tree.children.split_at_mut(1);
+        let scene_tree = &mut scene_slot[0];
 
         // Delegate layout to scene with padded limits
         let scene_node = self
             .scene
             .layout(scene_tree, renderer, &layout::Limits::new(Size::ZERO, inner_size));
 
-        // Position scene node with padding offset
-        layout::Node::with_children(size, vec![
-            scene_node.move_to(Point::new(self.padding.left, self.padding.top)),
-        ])
+        let mut layout_children = vec![scene_node.move_to(scene_origin)];
+
+        // Lay out the donut center child (if any) as a sibling of the
+        // scene node, so `update`/`draw` can resolve its bounds via
+        // `layout.children().nth(1)`.
+        if let Kind::Donut(d) = &mut self.kind
+            && let Some(center) = &mut d.center
+            && let Some(center_tree) = rest.first_mut()
+        {
+            let center_node = layout_donut_center(
+                self.padding,
+                self.scene.plot_area_offset(),
+                scene_tree,
+                &mut center.element,
+                center.placement,
+                center_tree,
+                renderer,
+            );
+            layout_children.push(center_node);
+        }
+
+        layout::Node::with_children(size, layout_children)
     }
 
     fn update(
@@ -338,12 +507,30 @@ where
         event: &Event,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
-        _renderer: &Renderer,
+        renderer: &Renderer,
         shell: &mut crate::core::Shell<'_, Message>,
-        _viewport: &Rectangle,
+        viewport: &Rectangle,
     ) {
         if shell.is_event_captured() {
             return;
+        }
+
+        // Forward to the donut center child first when the cursor is
+        // inside its bounds. Returning early on capture keeps us from
+        // double-delivering to the chart's own click/hover routing.
+        if let Kind::Donut(d) = &mut self.kind
+            && let Some(center) = &mut d.center
+            && let Some(center_layout) = layout.children().nth(1)
+            && let Some(center_tree) = tree.children.get_mut(1)
+            && cursor.is_over(center_layout.bounds())
+        {
+            center
+                .element
+                .as_widget_mut()
+                .update(center_tree, event, center_layout, cursor, renderer, shell, viewport);
+            if shell.is_event_captured() {
+                return;
+            }
         }
 
         let has_tooltip = self.scene.has_tooltip();
@@ -666,6 +853,27 @@ where
                     viewport,
                 );
             }
+        }
+
+        // Draw the donut center overlay last so it composites above the
+        // scene + tooltip, clipped to the chart's bounds.
+        if let Kind::Donut(d) = &self.kind
+            && let Some(center) = &d.center
+            && let Some(center_layout) = layout.children().nth(1)
+            && let Some(center_tree) = tree.children.get(1)
+        {
+            use crate::core::renderer::Renderer as _;
+            renderer.with_layer(layout.bounds(), |renderer| {
+                center.element.as_widget().draw(
+                    center_tree,
+                    renderer,
+                    theme,
+                    defaults,
+                    center_layout,
+                    cursor,
+                    viewport,
+                );
+            });
         }
     }
 
