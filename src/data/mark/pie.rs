@@ -124,6 +124,13 @@ pub fn slice(value: impl Into<f64>) -> Slice {
 /// guide override (e.g. `legend::Config::value_format`) → this field →
 /// `Data::value_scale` → built-in default. See [`crate::scale`] for the
 /// full chain.
+///
+/// Pie ignores `Scale::transform` — slice angles come from each value's
+/// share of the slice total, not from a numeric-axis mapping. Setting
+/// `.value_log()` on the parent `Data` doesn't change pie geometry; it
+/// only changes how the slice values are formatted (and even then only
+/// if a format closure happens to inspect `transform`, which the
+/// default doesn't).
 #[derive(Debug, Clone)]
 pub struct Pie {
     pub(crate) slices: Vec<Slice>,

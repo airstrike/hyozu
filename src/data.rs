@@ -474,6 +474,29 @@ impl Data {
         self
     }
 
+    /// Switches the y channel to a logarithmic transform. Honored by
+    /// numeric-axis marks (Bar, Line, Area, Xy); see
+    /// [`crate::scale::Transform::Log`] for the clamp semantics on
+    /// non-positive values. Sugar for `data.y_scale = data.y_scale.log()`.
+    pub fn y_log(mut self) -> Self {
+        self.y_scale = self.y_scale.log();
+        self
+    }
+
+    /// Switches the value channel to a logarithmic transform. Sugar for
+    /// `data.value_scale = data.value_scale.log()`.
+    pub fn value_log(mut self) -> Self {
+        self.value_scale = self.value_scale.log();
+        self
+    }
+
+    /// Switches the size channel to a logarithmic transform. Sugar for
+    /// `data.size_scale = data.size_scale.log()`.
+    pub fn size_log(mut self) -> Self {
+        self.size_scale = self.size_scale.log();
+        self
+    }
+
     /// Returns the value channel's scale.
     pub fn value_scale(&self) -> &crate::scale::Scale<f64> {
         &self.value_scale

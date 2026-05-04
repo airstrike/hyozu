@@ -108,6 +108,37 @@ fn target_tick_count(axis_length: Option<f32>, kind: Kind, orientation: Orientat
     raw.clamp(MIN as i64, MAX as i64) as usize
 }
 
+/// Snap a numeric domain outward to decade boundaries for log-axis use.
+/// Non-positive bounds clamp to `f64::EPSILON` first.
+fn log_nice_bounds(min: f64, max: f64) -> (f64, f64) {
+    let lo = min.max(f64::EPSILON);
+    let hi = max.max(lo * 10.0);
+    let lo_dec = 10_f64.powi(lo.log10().floor() as i32);
+    let hi_dec = 10_f64.powi(hi.log10().ceil() as i32);
+    (lo_dec, hi_dec)
+}
+
+/// Generate log-axis ticks at integer powers of 10 within `[min, max]`.
+///
+/// Non-positive bounds are clamped to `f64::EPSILON` to match
+/// [`crate::scale::Transform::Log`]'s mapping. The result always contains
+/// at least one entry — when the domain spans less than a full decade
+/// the function falls back to `[min, max]` so the axis still renders
+/// labelled endpoints.
+fn log_ticks(min: f64, max: f64) -> Vec<f64> {
+    if !(min.is_finite() && max.is_finite()) || min >= max {
+        return vec![min];
+    }
+    let lo = min.max(f64::EPSILON);
+    let hi = max.max(f64::EPSILON);
+    let lo_exp = lo.log10().ceil() as i32;
+    let hi_exp = hi.log10().floor() as i32;
+    if lo_exp > hi_exp {
+        return vec![min, max];
+    }
+    (lo_exp..=hi_exp).map(|k| 10_f64.powi(k)).collect()
+}
+
 /// Compute a nice step size for a given range and target tick count
 fn compute_nice_step(range: f64, target_count: usize) -> f64 {
     let rough_step = range / (target_count as f64);
@@ -417,6 +448,10 @@ where
 {
     axis: &'a Axis,
     marks: &'a [crate::Mark],
+    /// Transform applied to the numeric domain when generating ticks.
+    /// Categorical and time axes ignore this; only Scalar axes route
+    /// through it.
+    transform: crate::scale::Transform,
     _renderer: std::marker::PhantomData<(Message, Renderer)>,
 }
 
@@ -425,13 +460,24 @@ where
     Message: 'a,
     Renderer: text::Renderer<Font = crate::core::Font>,
 {
-    /// Create a new Guide borrowing an Axis and marks
+    /// Create a new Guide borrowing an Axis and marks. Defaults to
+    /// [`crate::scale::Transform::Linear`]; use [`Guide::with_transform`]
+    /// to override for log-axis support.
     pub fn new(axis: &'a Axis, marks: &'a [crate::Mark]) -> Self {
         Self {
             axis,
             marks,
+            transform: crate::scale::Transform::default(),
             _renderer: std::marker::PhantomData,
         }
+    }
+
+    /// Sets the numeric-domain transform used for tick generation. For
+    /// [`crate::scale::Transform::Log`], ticks land on integer powers of
+    /// 10 within the domain.
+    pub fn with_transform(mut self, transform: crate::scale::Transform) -> Self {
+        self.transform = transform;
+        self
     }
 
     /// Returns a reference to the underlying axis.
@@ -442,7 +488,9 @@ where
     /// Compute the axis bounds (visual range) for this axis.
     ///
     /// Uses `Kind::bounds()` to apply kind-appropriate normalization (padding,
-    /// nice numbers, zero-anchoring) based on the axis kind.
+    /// nice numbers, zero-anchoring) based on the axis kind. For log-transformed
+    /// axes, falls back to decade-aligned bounds instead so the nice-step path
+    /// doesn't snap the lower bound to zero (which has no place on a log axis).
     fn compute_axis_bounds(&self) -> Bounds {
         let is_x_axis = matches!(self.axis.orientation(), Orientation::Bottom | Orientation::Top);
 
@@ -459,7 +507,12 @@ where
             // Apply partial overrides if any, then let Kind compute proper bounds
             let min = self.axis.lower_bound.unwrap_or(data_min);
             let max = self.axis.upper_bound.unwrap_or(data_max);
-            self.axis.kind().bounds(min, max)
+            if matches!(self.transform, crate::scale::Transform::Log) {
+                let (lo, hi) = log_nice_bounds(min, max);
+                Bounds::exact(lo, hi)
+            } else {
+                self.axis.kind().bounds(min, max)
+            }
         }
     }
 
@@ -556,6 +609,11 @@ where
                     },
                     None,
                 )
+            } else if matches!(self.transform, crate::scale::Transform::Log) {
+                // Log axes use decade-boundary ticks. The label format
+                // helper uses None precision so the value is rendered
+                // as a clean integer (10, 100, 1000…).
+                (log_ticks(axis_min, axis_max), None)
             } else {
                 let (ticks, step) = self.nice_ticks(axis_min, axis_max, target, alignment);
                 (ticks, Some(step))

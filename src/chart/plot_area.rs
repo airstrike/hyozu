@@ -50,6 +50,11 @@ pub struct Plane {
     /// Obstacle rectangles that labels must avoid (axes, etc.)
     /// Coordinates are relative to plot area origin.
     pub obstacles: Vec<Rectangle>,
+    /// Transform applied to the y domain when mapping to pixels.
+    /// Honored by numeric-axis marks via [`Plane::to_pixel`]; categorical
+    /// or geographic marks (Pie, Treemap, BubbleMap, Choropleth) bypass
+    /// the plane entirely and aren't affected.
+    pub y_transform: crate::scale::Transform,
 }
 
 /// Axis layout dimensions passed from Scene to PlotArea
@@ -84,8 +89,8 @@ impl Plane {
         };
 
         let y = if self.y_max > self.y_min {
-            self.bounds.y + self.bounds.height
-                - (((datum.y - self.y_min) / (self.y_max - self.y_min)) as f32) * self.bounds.height
+            let unit = self.y_transform.map_to_unit(datum.y, self.y_min, self.y_max) as f32;
+            self.bounds.y + self.bounds.height - unit * self.bounds.height
         } else {
             self.bounds.y + self.bounds.height / 2.0
         };
@@ -657,7 +662,13 @@ where
         insets
     }
 
-    /// Layout the plot area - creates plane and delegates to each series
+    /// Layout the plot area - creates plane and delegates to each series.
+    ///
+    /// `y_transform` and `secondary_y_transform` carry the y-domain
+    /// transform (Linear / Log) for the primary and secondary planes
+    /// respectively. The x-axis transform isn't plumbed here yet;
+    /// `XScale` doesn't expose a numeric transform on its `Linear`
+    /// variant in the v1 surface.
     #[allow(clippy::too_many_arguments)]
     pub fn layout(
         &self,
@@ -667,6 +678,8 @@ where
         axis_bounds: Option<(f64, f64, f64, f64)>, // (x_min, x_max, y_min, y_max) from primary axes
         secondary_axis_bounds: Option<(f64, f64, f64, f64)>, // bounds from secondary axes
         axis_layout: AxisLayout,                   // Physical dimensions of axes
+        y_transform: crate::scale::Transform,
+        secondary_y_transform: crate::scale::Transform,
     ) -> Node {
         let state = tree.state.downcast_mut::<State>();
         let size = limits.max();
@@ -733,6 +746,7 @@ where
             y_max,
             bounds: plot_rect,
             obstacles: obstacles.clone(),
+            y_transform,
         };
 
         // Build a secondary plane when the scene provides secondary axis
@@ -748,6 +762,7 @@ where
                 y_max: sy_max,
                 bounds: plot_rect,
                 obstacles,
+                y_transform: secondary_y_transform,
             })
         } else {
             None

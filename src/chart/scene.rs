@@ -93,6 +93,15 @@ where
     /// reads this when [`Tooltip::format_is_default`] is true so the
     /// hover string stays consistent with the legend column.
     primary_mark_value_format: Vec<Option<crate::scale::Format<f64>>>,
+    /// Y-axis transform from `Data::y_scale.transform`, threaded into the
+    /// primary plane and the y-axis tick generator. Defaults to
+    /// [`crate::scale::Transform::Linear`] so existing charts render
+    /// identically.
+    y_transform: crate::scale::Transform,
+    /// Y-axis transform for the secondary (right) axis. Currently
+    /// mirrors the primary transform — a per-area scale slot is a
+    /// follow-up.
+    secondary_y_transform: crate::scale::Transform,
 }
 
 impl<'a, Message, Renderer> Scene<'a, Message, Renderer>
@@ -281,6 +290,7 @@ where
             }
         });
 
+        let y_transform = data.y_scale().transform;
         Self {
             title: data.title.as_deref().map(|t| Title::new(t, data.title_text)),
             legend,
@@ -293,7 +303,7 @@ where
                 .secondary
                 .y_axis
                 .as_ref()
-                .map(|axis| Guide::new(axis, data.secondary.marks())),
+                .map(|axis| Guide::new(axis, data.secondary.marks()).with_transform(y_transform)),
             bottom_axis: data
                 .primary
                 .x_axis
@@ -303,7 +313,7 @@ where
                 .primary
                 .y_axis
                 .as_ref()
-                .map(|axis| Guide::new(axis, data.primary.marks())),
+                .map(|axis| Guide::new(axis, data.primary.marks()).with_transform(y_transform)),
             plot_area: {
                 // Per-series value-format vector mirrors the order
                 // PlotArea::new + with_secondary appends series, so a
@@ -367,6 +377,8 @@ where
                 .iter()
                 .map(|mark| mark_value_format(mark).or_else(|| data.value_scale().format.clone()))
                 .collect(),
+            y_transform,
+            secondary_y_transform: y_transform,
         }
     }
 
@@ -745,6 +757,8 @@ where
             axis_bounds,
             secondary_bounds,
             axis_layout,
+            self.y_transform,
+            self.secondary_y_transform,
         );
 
         // --- Phase 8: Position all nodes ---
