@@ -11,12 +11,28 @@ pub(crate) enum Annotation {
     None,
 }
 
-/// Hover state: which data-x is snapped and which entries matched.
-pub(crate) struct State {
-    /// Snapped data-space x coordinate.
-    pub data_x: f64,
-    /// Matching entries: (mark_index, series_index, point_index).
-    pub entries: Vec<(usize, usize, usize)>,
+/// Hover state, split by chart geometry.
+///
+/// Cartesian marks (line/area/xy/bars) snap to a single data-x and
+/// collect every series that has a point near it. Pie marks hit-test
+/// a slice by polar angle, so they record the mark and slice index
+/// directly.
+#[non_exhaustive]
+pub(crate) enum State {
+    /// Hover over a Cartesian mark snapped to `data_x`.
+    Cartesian {
+        /// Snapped data-space x coordinate.
+        data_x: f64,
+        /// Matching entries: (mark_index, series_index, point_index).
+        entries: Vec<(usize, usize, usize)>,
+    },
+    /// Hover over a single pie slice.
+    Pie {
+        /// Index of the `Mark::Pie` in the marks list.
+        mark_idx: usize,
+        /// Index of the slice within the pie.
+        slice_idx: usize,
+    },
 }
 
 /// A single tooltip entry ready for rendering.

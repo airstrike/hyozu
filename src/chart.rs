@@ -209,10 +209,23 @@ fn compute_plot_bounds(
     }
 }
 
-/// Scan the plot area tree for the nearest pixel x, then collect all entries
-/// at that x. Returns `None` if no hoverable points exist or the cursor is
-/// too far from any point.
+/// Scan the plot area tree for the cursor's hover target.
+///
+/// Pie hit-test takes priority: a slice's polar bounds always describe
+/// a tighter hover region than the global "nearest pixel-x" snap a
+/// Cartesian mark would produce. Falls back to the Cartesian dispatch
+/// when no pie slice contains the cursor.
 fn find_nearest_hover(local: Point, plot_area_tree: &Tree, plane: &plot_area::Plane) -> Option<hover::State> {
+    if let Some(pie_hover) = find_pie_hover(local, plot_area_tree) {
+        return Some(pie_hover);
+    }
+    find_nearest_cartesian_hover(local, plot_area_tree, plane)
+}
+
+/// Scan Cartesian (line/area/xy/bars) marks for the nearest pixel x,
+/// then collect all entries at that x. Returns `None` if no hoverable
+/// points exist or the cursor is too far from any point.
+fn find_nearest_cartesian_hover(local: Point, plot_area_tree: &Tree, plane: &plot_area::Plane) -> Option<hover::State> {
     let line_tag = tree::Tag::of::<plot_area::line::State>();
     let area_tag = tree::Tag::of::<plot_area::area::State>();
     let xy_tag = tree::Tag::of::<plot_area::xy::State>();
@@ -328,7 +341,55 @@ fn find_nearest_hover(local: Point, plot_area_tree: &Tree, plane: &plot_area::Pl
     if entries.is_empty() {
         return None;
     }
-    Some(hover::State { data_x, entries })
+    Some(hover::State::Cartesian { data_x, entries })
+}
+
+/// Hit-test a point against a single pie's pre-laid-out polar state.
+///
+/// Returns the index of the slice containing `local`, or `None` if
+/// the point is in the donut hole, outside the outer radius, or in
+/// an inter-slice gap. Shared by the pie hover scan and the pie click
+/// dispatch in `update` so both use the exact same hit region.
+fn pie_slice_at(local: Point, pie_state: &plot_area::pie::State) -> Option<usize> {
+    let (cx, cy) = pie_state.center;
+    let dx = local.x - cx;
+    let dy = local.y - cy;
+    let dist = (dx * dx + dy * dy).sqrt();
+
+    if dist < pie_state.inner_radius || dist > pie_state.outer_radius {
+        return None;
+    }
+
+    let mut angle = dy.atan2(dx);
+    let first_start = pie_state.slice_angles.first().map(|(s, _)| *s).unwrap_or(0.0);
+    if angle < first_start {
+        angle += std::f32::consts::TAU;
+    }
+
+    pie_state
+        .slice_angles
+        .iter()
+        .position(|(start, end)| angle >= *start && angle <= *end)
+}
+
+/// Hit-test the cursor against any pie marks in the plot area tree.
+///
+/// The cursor must lie within `[inner_radius, outer_radius]` of the
+/// pie's center and inside one slice's `[start_angle, end_angle]`
+/// sweep. Returns the first matching slice across pie marks.
+fn find_pie_hover(local: Point, plot_area_tree: &Tree) -> Option<hover::State> {
+    let pie_tag = tree::Tag::of::<plot_area::pie::State>();
+
+    for (mark_idx, mark_tree) in plot_area_tree.children.iter().enumerate() {
+        if mark_tree.tag != pie_tag {
+            continue;
+        }
+        let pie_state = mark_tree.state.downcast_ref::<plot_area::pie::State>();
+        if let Some(slice_idx) = pie_slice_at(local, pie_state) {
+            return Some(hover::State::Pie { mark_idx, slice_idx });
+        }
+    }
+    None
 }
 
 /// Lays out a donut center overlay child as a sibling of the scene
@@ -587,9 +648,16 @@ where
                     let new_hover = find_nearest_hover(Point::new(local.x, local.y), plot_area_tree, plane);
 
                     let changed = match (&state.hover, &new_hover) {
-                        (Some(old), Some(new_h)) => (old.data_x - new_h.data_x).abs() > f64::EPSILON,
-                        (None, Some(_)) | (Some(_), None) => true,
+                        (
+                            Some(hover::State::Cartesian { data_x: a, .. }),
+                            Some(hover::State::Cartesian { data_x: b, .. }),
+                        ) => (a - b).abs() > f64::EPSILON,
+                        (
+                            Some(hover::State::Pie { slice_idx: a, .. }),
+                            Some(hover::State::Pie { slice_idx: b, .. }),
+                        ) => a != b,
                         (None, None) => false,
+                        _ => true,
                     };
 
                     state.hover = new_hover;
@@ -696,29 +764,13 @@ where
                             }
                         } else if mark_tree.tag == pie_tag {
                             let pie_state = mark_tree.state.downcast_ref::<plot_area::pie::State>();
-
-                            let (cx, cy) = pie_state.center;
-                            let dx = local.x - cx;
-                            let dy = local.y - cy;
-                            let dist = (dx * dx + dy * dy).sqrt();
-
-                            if dist >= pie_state.inner_radius && dist <= pie_state.outer_radius {
-                                let mut angle = dy.atan2(dx);
-                                let first_start = pie_state.slice_angles.first().map(|(s, _)| *s).unwrap_or(0.0);
-                                if angle < first_start {
-                                    angle += std::f32::consts::TAU;
-                                }
-
-                                for (slice_idx, (start_angle, end_angle)) in pie_state.slice_angles.iter().enumerate() {
-                                    if angle >= *start_angle && angle <= *end_angle {
-                                        shell.publish(on_action(Action::Clicked(crate::target::Target::Entry {
-                                            mark: mark_idx,
-                                            series: 0,
-                                            index: slice_idx,
-                                        })));
-                                        return;
-                                    }
-                                }
+                            if let Some(slice_idx) = pie_slice_at(local, pie_state) {
+                                shell.publish(on_action(Action::Clicked(crate::target::Target::Entry {
+                                    mark: mark_idx,
+                                    series: 0,
+                                    index: slice_idx,
+                                })));
+                                return;
                             }
                         } else if mark_tree.tag == treemap_tag {
                             let tm_state = mark_tree.state.downcast_ref::<plot_area::treemap::State>();
@@ -851,6 +903,7 @@ where
                     &self.scene,
                     scene_tree,
                     viewport,
+                    cursor,
                 );
             }
         }
@@ -971,11 +1024,11 @@ pub fn draw_background(renderer: &mut Renderer, style: &Style, bounds: Rectangle
     }
 }
 
-/// Draws the tooltip overlay (tracking line, markers, tooltip box).
+/// Dispatch the tooltip overlay to the variant-specific renderer.
 ///
-/// Wrapped in `renderer.with_layer()` so the entire overlay composites
-/// above chart content (lines, bars, axes, etc.).
-#[allow(clippy::too_many_arguments, clippy::unit_arg)]
+/// Wrapped layering, color resolution, and box layout all live in the
+/// inner functions; this just routes Cartesian vs. Pie hovers.
+#[allow(clippy::too_many_arguments)]
 fn draw_tooltip_overlay<Message>(
     renderer: &mut Renderer,
     design: &dyn design::Design,
@@ -988,9 +1041,62 @@ fn draw_tooltip_overlay<Message>(
     scene: &scene::Scene<'_, Message, Renderer>,
     scene_tree: &Tree,
     viewport: &Rectangle,
+    cursor: mouse::Cursor,
+) {
+    match hover {
+        hover::State::Cartesian { data_x, entries } => draw_cartesian_tooltip_overlay(
+            renderer,
+            design,
+            chart_bounds,
+            padding,
+            plot_area_offset,
+            plane,
+            *data_x,
+            entries,
+            tooltip_config,
+            scene,
+            scene_tree,
+            viewport,
+        ),
+        hover::State::Pie { mark_idx, slice_idx } => draw_pie_tooltip_overlay(
+            renderer,
+            design,
+            chart_bounds,
+            padding,
+            plot_area_offset,
+            plane,
+            *mark_idx,
+            *slice_idx,
+            tooltip_config,
+            scene,
+            viewport,
+            cursor,
+        ),
+    }
+}
+
+/// Draws the Cartesian tooltip overlay (tracking line, markers, box).
+///
+/// Builds one [`hover::Entry`] per matched (mark, series, point) at the
+/// snapped data-x, draws the dashed tracking line and any per-mark
+/// annotations on a canvas frame, then composites the tooltip box via
+/// [`draw_tooltip_box`].
+#[allow(clippy::too_many_arguments, clippy::unit_arg)]
+fn draw_cartesian_tooltip_overlay<Message>(
+    renderer: &mut Renderer,
+    design: &dyn design::Design,
+    chart_bounds: Rectangle,
+    padding: Padding,
+    plot_area_offset: Point,
+    plane: &plot_area::Plane,
+    data_x: f64,
+    cartesian_entries: &[(usize, usize, usize)],
+    tooltip_config: &crate::data::tooltip::Tooltip,
+    scene: &scene::Scene<'_, Message, Renderer>,
+    scene_tree: &Tree,
+    viewport: &Rectangle,
 ) {
     use crate::core::renderer::Renderer as _;
-    use crate::core::text::Renderer as _;
     use crate::widget::canvas::{Frame, Path, Stroke};
     use crate::widget::renderer::geometry;
 
@@ -1007,7 +1113,7 @@ fn draw_tooltip_overlay<Message>(
     // Compute the tracking pixel x from data_x
     let tracking_pixel_x = {
         let t = if plane.x_max > plane.x_min {
-            ((hover.data_x - plane.x_min) / (plane.x_max - plane.x_min)) as f32
+            ((data_x - plane.x_min) / (plane.x_max - plane.x_min)) as f32
         } else {
             0.5
         };
@@ -1022,7 +1128,7 @@ fn draw_tooltip_overlay<Message>(
 
     let mut entries: Vec<hover::Entry> = Vec::new();
 
-    for &(mark_idx, series_idx, pt_idx) in &hover.entries {
+    for &(mark_idx, series_idx, pt_idx) in cartesian_entries {
         let series = &plot_area.series[mark_idx];
         let child = &plot_area_tree.children[mark_idx];
 
@@ -1130,6 +1236,11 @@ fn draw_tooltip_overlay<Message>(
         return;
     }
 
+    // Vertically center on mean y of entries, in absolute coords.
+    let mean_y: f32 = entries.iter().map(|re| re.anchor.y).sum::<f32>() / entries.len() as f32;
+    let anchor_x = plot_bounds.x + tracking_pixel_x - plane.bounds.x;
+    let anchor_y = plot_bounds.y + mean_y - plane.bounds.y;
+
     // Wrap everything in a layer so it composites above chart content
     renderer.with_layer(*viewport, |renderer| {
         // --- Draw tracking line and markers via canvas Frame ---
@@ -1181,127 +1292,243 @@ fn draw_tooltip_overlay<Message>(
             geometry::Renderer::draw_geometry(renderer, frame.into_geometry());
         });
 
-        // --- Draw tooltip box using renderer fill_quad/fill_text ---
-        let font = renderer.default_font();
-        let font_size: f32 = 12.0;
-        let line_height_px: f32 = 18.0;
-        let swatch_size: f32 = 8.0;
-        let swatch_gap: f32 = 6.0;
-        let box_padding: f32 = 8.0;
-        let box_gap: f32 = 8.0;
-
-        let formatted: Vec<String> = entries.iter().map(|re| (tooltip_config.format)(&re.tooltip)).collect();
-
-        let char_width = font_size * 0.58;
-        let max_text_width: f32 = formatted
-            .iter()
-            .map(|s| s.len() as f32 * char_width)
-            .fold(0.0f32, f32::max);
-
-        let swatch_space = if tooltip_config.swatch {
-            swatch_size + swatch_gap
-        } else {
-            0.0
-        };
-        let box_width = box_padding * 2.0 + swatch_space + max_text_width;
-        let box_height = box_padding * 2.0 + entries.len() as f32 * line_height_px;
-
-        // Position tooltip box: right of tracking line if in left half, else left
-        let half_x = plot_bounds.x + plane.bounds.width / 2.0;
-        let abs_tracking_x = plot_bounds.x + tracking_pixel_x - plane.bounds.x;
-        let box_x = if abs_tracking_x < half_x {
-            abs_tracking_x + box_gap
-        } else {
-            abs_tracking_x - box_width - box_gap
-        };
-
-        // Vertically center on mean y of entries, clamped within chart bounds
-        let mean_y: f32 = entries.iter().map(|re| re.anchor.y).sum::<f32>() / entries.len() as f32;
-        let abs_mean_y = plot_bounds.y + mean_y - plane.bounds.y;
-        let box_y = (abs_mean_y - box_height / 2.0)
-            .max(chart_bounds.y + 2.0)
-            .min(chart_bounds.y + chart_bounds.height - box_height - 2.0);
-
-        // Tooltip background — opaque by default (ensures readability on transparent charts)
-        let tooltip_bg = crate::core::Color { a: 1.0, ..background };
-        let divider_color = design.divider_color().resolve(background, text_pair, &seed, None);
-
-        renderer.fill_quad(
-            crate::core::renderer::Quad {
-                bounds: Rectangle {
-                    x: box_x,
-                    y: box_y,
-                    width: box_width,
-                    height: box_height,
-                },
-                border: crate::core::Border {
-                    width: 1.0,
-                    radius: 4.0.into(),
-                    color: divider_color,
-                },
-                ..Default::default()
-            },
-            tooltip_bg,
+        let flip_axis_x = plot_bounds.x + plane.bounds.width / 2.0;
+        draw_tooltip_box(
+            renderer,
+            design,
+            tooltip_config,
+            &entries,
+            Point::new(anchor_x, anchor_y),
+            flip_axis_x,
+            chart_bounds,
+            text_color,
+            viewport,
         );
+    });
+}
 
-        // Draw each entry line
-        for (i, (re, text)) in entries.iter().zip(formatted.iter()).enumerate() {
-            let row_y = box_y + box_padding + i as f32 * line_height_px;
-            let mut text_x = box_x + box_padding;
+/// Draws the pie hover tooltip — a single-row box anchored at the cursor.
+///
+/// Unlike Cartesian tooltips, pie hover has no tracking line or marker:
+/// the hovered slice is the visual annotation. The synthesized
+/// [`TooltipEntry`] uses `x = slice_idx as f64` and `y = slice.value`
+/// so any user-supplied `tooltip_config.format` closure can read the
+/// slice value uniformly with line/bar entries.
+#[allow(clippy::too_many_arguments)]
+fn draw_pie_tooltip_overlay<Message>(
+    renderer: &mut Renderer,
+    design: &dyn design::Design,
+    chart_bounds: Rectangle,
+    padding: Padding,
+    plot_area_offset: Point,
+    plane: &plot_area::Plane,
+    mark_idx: usize,
+    slice_idx: usize,
+    tooltip_config: &crate::data::tooltip::Tooltip,
+    scene: &scene::Scene<'_, Message, Renderer>,
+    viewport: &Rectangle,
+    cursor: mouse::Cursor,
+) {
+    use crate::core::renderer::Renderer as _;
 
-            // Colored swatch circle (if enabled)
-            if tooltip_config.swatch {
-                let swatch_y = row_y + (line_height_px - swatch_size) / 2.0;
-                renderer.fill_quad(
-                    crate::core::renderer::Quad {
-                        bounds: Rectangle {
-                            x: text_x,
-                            y: swatch_y,
-                            width: swatch_size,
-                            height: swatch_size,
-                        },
-                        border: crate::core::Border {
-                            radius: (swatch_size / 2.0).into(),
-                            ..Default::default()
-                        },
+    let plot_area = scene.plot_area();
+
+    let plot_area::Series::Pie(pie) = &plot_area.series[mark_idx] else {
+        return;
+    };
+    let Some(slice) = pie.data.slices.get(slice_idx) else {
+        return;
+    };
+
+    let background = design.background_color();
+    let text_pair = design.text_pair();
+    let seed = design.seed();
+    let text_color = design.text_color().resolve(background, text_pair, &seed, None);
+    let palette = scene.resolve_palette(design);
+
+    let slice_color = if let Some(c) = slice.get_color() {
+        c.resolve(background, text_pair, &seed, None)
+    } else {
+        let color_idx = plot_area.color_offset_for(mark_idx, 0) + slice_idx;
+        palette.get(color_idx).resolve(background, text_pair, &seed, None)
+    };
+
+    let Some(cursor_pos) = cursor.position() else {
+        return;
+    };
+    let plot_bounds = compute_plot_bounds(chart_bounds, padding, plot_area_offset, plane);
+    let flip_axis_x = plot_bounds.x + plot_bounds.width / 2.0;
+
+    let entry = hover::Entry {
+        tooltip: TooltipEntry {
+            x: slice_idx as f64,
+            y: slice.value(),
+            series_name: slice.get_name().map(|s| s.to_string()),
+            series_index: 0,
+            mark_index: mark_idx,
+            color: slice_color,
+        },
+        anchor: cursor_pos,
+        color: slice_color,
+        annotation: hover::Annotation::None,
+    };
+    let entries = [entry];
+
+    renderer.with_layer(*viewport, |renderer| {
+        draw_tooltip_box(
+            renderer,
+            design,
+            tooltip_config,
+            &entries,
+            cursor_pos,
+            flip_axis_x,
+            chart_bounds,
+            text_color,
+            viewport,
+        );
+    });
+}
+
+/// Render the tooltip box body (background, swatches, text rows).
+///
+/// The caller picks the visual `anchor`, the L/R `flip_axis_x` that
+/// decides whether the box sits to the left or right of the anchor,
+/// and the `clamp_bounds` rectangle that the box's vertical position
+/// is clamped within. Returns nothing — the caller is responsible for
+/// the surrounding layering wrapper.
+#[allow(clippy::too_many_arguments)]
+fn draw_tooltip_box(
+    renderer: &mut Renderer,
+    design: &dyn design::Design,
+    tooltip_config: &crate::data::tooltip::Tooltip,
+    entries: &[hover::Entry],
+    anchor: Point,
+    flip_axis_x: f32,
+    clamp_bounds: Rectangle,
+    text_color: crate::core::Color,
+    viewport: &Rectangle,
+) {
+    use crate::core::renderer::Renderer as _;
+    use crate::core::text::Renderer as _;
+
+    let font = renderer.default_font();
+    let font_size: f32 = 12.0;
+    let line_height_px: f32 = 18.0;
+    let swatch_size: f32 = 8.0;
+    let swatch_gap: f32 = 6.0;
+    let box_padding: f32 = 8.0;
+    let box_gap: f32 = 8.0;
+
+    let formatted: Vec<String> = entries.iter().map(|re| (tooltip_config.format)(&re.tooltip)).collect();
+
+    let char_width = font_size * 0.58;
+    let max_text_width: f32 = formatted
+        .iter()
+        .map(|s| s.len() as f32 * char_width)
+        .fold(0.0f32, f32::max);
+
+    let swatch_space = if tooltip_config.swatch {
+        swatch_size + swatch_gap
+    } else {
+        0.0
+    };
+    let box_width = box_padding * 2.0 + swatch_space + max_text_width;
+    let box_height = box_padding * 2.0 + entries.len() as f32 * line_height_px;
+
+    // Position tooltip box: right of anchor if to the left of flip_axis_x, else left
+    let box_x = if anchor.x < flip_axis_x {
+        anchor.x + box_gap
+    } else {
+        anchor.x - box_width - box_gap
+    };
+
+    let box_y = (anchor.y - box_height / 2.0)
+        .max(clamp_bounds.y + 2.0)
+        .min(clamp_bounds.y + clamp_bounds.height - box_height - 2.0);
+
+    let background = design.background_color();
+    let text_pair = design.text_pair();
+    let seed = design.seed();
+
+    // Tooltip background — opaque by default (ensures readability on transparent charts)
+    let tooltip_bg = crate::core::Color { a: 1.0, ..background };
+    let divider_color = design.divider_color().resolve(background, text_pair, &seed, None);
+
+    renderer.fill_quad(
+        crate::core::renderer::Quad {
+            bounds: Rectangle {
+                x: box_x,
+                y: box_y,
+                width: box_width,
+                height: box_height,
+            },
+            border: crate::core::Border {
+                width: 1.0,
+                radius: 4.0.into(),
+                color: divider_color,
+            },
+            ..Default::default()
+        },
+        tooltip_bg,
+    );
+
+    // Draw each entry line
+    for (i, (re, text)) in entries.iter().zip(formatted.iter()).enumerate() {
+        let row_y = box_y + box_padding + i as f32 * line_height_px;
+        let mut text_x = box_x + box_padding;
+
+        // Colored swatch circle (if enabled)
+        if tooltip_config.swatch {
+            let swatch_y = row_y + (line_height_px - swatch_size) / 2.0;
+            renderer.fill_quad(
+                crate::core::renderer::Quad {
+                    bounds: Rectangle {
+                        x: text_x,
+                        y: swatch_y,
+                        width: swatch_size,
+                        height: swatch_size,
+                    },
+                    border: crate::core::Border {
+                        radius: (swatch_size / 2.0).into(),
                         ..Default::default()
                     },
-                    re.color,
-                );
-                text_x += swatch_size + swatch_gap;
-            }
-
-            // Text label — optionally colored to match series
-            let label_color = if tooltip_config.colored_text {
-                re.color
-            } else {
-                text_color
-            };
-
-            renderer.fill_text(
-                crate::core::text::Text {
-                    content: text.clone(),
-                    bounds: Size::new(max_text_width + 10.0, line_height_px),
-                    size: font_size.into(),
-                    font,
-                    align_x: crate::core::alignment::Horizontal::Left.into(),
-                    align_y: crate::core::alignment::Vertical::Top,
-                    line_height: crate::core::text::LineHeight::default(),
-                    shaping: crate::core::text::Shaping::Basic,
-                    wrapping: crate::core::text::Wrapping::None,
-                    ellipsis: crate::core::text::Ellipsis::default(),
-                    hint_factor: renderer.scale_factor(),
-                    font_features: Vec::new(),
-                    font_variations: Vec::new(),
-                    letter_spacing: Default::default(),
-                    weight: None,
+                    ..Default::default()
                 },
-                Point::new(text_x, row_y + (line_height_px - font_size) / 2.0),
-                label_color,
-                *viewport,
+                re.color,
             );
+            text_x += swatch_size + swatch_gap;
         }
-    });
+
+        // Text label — optionally colored to match series
+        let label_color = if tooltip_config.colored_text {
+            re.color
+        } else {
+            text_color
+        };
+
+        renderer.fill_text(
+            crate::core::text::Text {
+                content: text.clone(),
+                bounds: Size::new(max_text_width + 10.0, line_height_px),
+                size: font_size.into(),
+                font,
+                align_x: crate::core::alignment::Horizontal::Left.into(),
+                align_y: crate::core::alignment::Vertical::Top,
+                line_height: crate::core::text::LineHeight::default(),
+                shaping: crate::core::text::Shaping::Basic,
+                wrapping: crate::core::text::Wrapping::None,
+                ellipsis: crate::core::text::Ellipsis::default(),
+                hint_factor: renderer.scale_factor(),
+                font_features: Vec::new(),
+                font_variations: Vec::new(),
+                letter_spacing: Default::default(),
+                weight: None,
+            },
+            Point::new(text_x, row_y + (line_height_px - font_size) / 2.0),
+            label_color,
+            *viewport,
+        );
+    }
 }
 
 /// The appearance of a chart.
