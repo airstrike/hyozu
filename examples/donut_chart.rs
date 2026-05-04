@@ -1,11 +1,11 @@
 use hyozu::mark::pie;
-use hyozu::{Color, data, donut, palette, pie as pie_fn};
-use iced::widget::{center, column, pick_list, row};
-use iced::{Center, Fill, Subscription, Task, Theme, keyboard};
+use hyozu::{Color, LegendConfig, data, donut, palette};
+use iced::widget::{center, column, container, pick_list, row, space, text};
+use iced::{Border, Center, Fill, Subscription, Task, Theme, keyboard};
 
 pub fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
-        .window_size([700.0, 600.0])
+        .window_size([900.0, 620.0])
         .title("hyozu • donut chart")
         .theme(App::theme)
         .subscription(App::subscription)
@@ -29,20 +29,20 @@ enum Message {
 
 impl App {
     fn new() -> Self {
-        let chart = pie_fn([
-            pie::slice(42).name("Rent"),
-            pie::slice(25).name("Food"),
-            pie::slice(15).name("Transport"),
-            pie::slice(10).name("Utilities"),
-            pie::slice(8).name("Other"),
+        let chart = pie([
+            pie::slice(86.2).name("Enterprise Subscription"),
+            pie::slice(40.5).name("Mid-Market Subscription"),
+            pie::slice(12.8).name("SMB Subscription"),
+            pie::slice(42.1).name("Professional Services"),
+            pie::slice(19.8).name("Support & Training"),
         ])
-        .labels(pie::label::Label::percent())
+        .labels(pie::Label::percent())
         .gap(2.0);
 
         Self {
             data: data(chart)
-                .title("Monthly Expenses")
-                .palette(palette::sequential(Color::Primary)),
+                .palette(palette::sequential(Color::Primary))
+                .legend(LegendConfig::right()),
             theme: hyozu::theme::paper(),
             all_themes: hyozu::theme::all_themes().collect(),
         }
@@ -54,10 +54,14 @@ impl App {
                 self.theme = theme;
             }
             Message::FirstTheme => {
-                self.theme = self.all_themes.first().unwrap().clone();
+                if let Some(first) = self.all_themes.first() {
+                    self.theme = first.clone();
+                }
             }
             Message::LastTheme => {
-                self.theme = self.all_themes.last().unwrap().clone();
+                if let Some(last) = self.all_themes.last() {
+                    self.theme = last.clone();
+                }
             }
             Message::NextTheme => {
                 if let Some(next) = self
@@ -119,19 +123,47 @@ impl App {
         .align_y(Center)
         .spacing(10);
 
-        center(
+        let header = row![
             column![
-                theme_picker,
-                donut(&self.data).hole(0.55).design(&self.theme).padding(20)
+                text("Product Mix").size(18),
+                text("FY 2026 revenue · by offering").size(13),
             ]
-            .align_x(Center)
-            .spacing(20),
-        )
-        .padding(20)
-        .into()
+            .spacing(2),
+            space::horizontal(),
+            container(text("$201.4M").size(14)).padding([4, 10]).style(badge_style),
+        ]
+        .align_y(Center);
+
+        let donut_widget = donut(&self.data).hole(0.6).design(&self.theme).padding(8).center(
+            column![text("$201M").size(48), text("FY 2026").size(13)]
+                .spacing(2)
+                .align_x(Center),
+        );
+
+        let card = container(column![header, donut_widget].spacing(16))
+            .padding(24)
+            .style(container::rounded_box);
+
+        center(column![theme_picker, card].spacing(20).align_x(Center))
+            .padding(20)
+            .into()
     }
 
     fn theme(&self) -> Theme {
         self.theme.clone()
+    }
+}
+
+fn badge_style(theme: &Theme) -> container::Style {
+    let palette = theme.palette();
+    container::Style {
+        background: Some(palette.background.weakest.color.into()),
+        text_color: Some(palette.background.weakest.text),
+        border: Border {
+            width: 1.0,
+            color: palette.background.weak.color,
+            radius: 6.0.into(),
+        },
+        ..container::Style::default()
     }
 }
