@@ -1,5 +1,5 @@
 use crate::color::Color;
-use crate::core::Font;
+use crate::core::{Font, Pixels};
 use crate::text;
 
 /// Where on the plot area the legend attaches.
@@ -48,25 +48,25 @@ pub enum Orientation {
 
 /// Configuration for a chart legend.
 ///
-/// A single `Legend` drives both the series-key legend (swatches for each
+/// A single `Config` drives both the series-key legend (swatches for each
 /// data series) and the choropleth color-scale legend. Pick the edge with
-/// [`Legend::anchor`] + [`Legend::orientation`] and whether the chart should
-/// reserve space for it with [`Legend::placement`].
+/// [`Config::anchor`] + [`Config::orientation`] and whether the chart should
+/// reserve space for it with [`Config::placement`].
 ///
 /// # Examples
 ///
 /// ```
-/// use hyozu::{LegendConfig, legend};
+/// use hyozu::legend;
 ///
 /// // Short form — legend below the plot area (chart reserves space).
-/// let config = LegendConfig::below();
+/// let config = legend::Config::below();
 ///
 /// // Top-right overlay with vertical stacking.
-/// let config = LegendConfig::overlay(legend::Anchor::TopRight)
+/// let config = legend::Config::overlay(legend::Anchor::TopRight)
 ///     .orientation(legend::Orientation::Vertical);
 /// ```
 #[derive(Debug, Clone)]
-pub struct Legend {
+pub struct Config {
     pub(crate) anchor: Anchor,
     pub(crate) placement: Placement,
     pub(crate) orientation: Orientation,
@@ -83,7 +83,7 @@ pub struct Legend {
     pub(crate) interactive: bool,
 }
 
-impl Default for Legend {
+impl Default for Config {
     fn default() -> Self {
         Self {
             anchor: Anchor::Bottom,
@@ -97,7 +97,7 @@ impl Default for Legend {
     }
 }
 
-impl Legend {
+impl Config {
     /// Legend inset above the plot area (centered, horizontal).
     pub fn above() -> Self {
         Self {
@@ -182,6 +182,16 @@ impl Legend {
 
     /// Sets the font size for legend text.
     pub fn font_size(mut self, size: f32) -> Self {
+        self.text.size = Some(size.into());
+        self
+    }
+
+    /// Sets the font size for legend text. Accepts anything convertible to
+    /// [`Pixels`] (`14.0`, `Pixels(14.0)`).
+    ///
+    /// Unset (the default) falls back to the legend renderer's built-in
+    /// size.
+    pub fn size(mut self, size: impl Into<Pixels>) -> Self {
         self.text.size = Some(size.into());
         self
     }
@@ -271,7 +281,7 @@ pub enum Edge {
     Right,
 }
 
-impl From<Anchor> for Legend {
+impl From<Anchor> for Config {
     fn from(anchor: Anchor) -> Self {
         Self::overlay(anchor)
     }
@@ -283,7 +293,7 @@ mod tests {
 
     #[test]
     fn above_resolves_to_top_edge_inset_horizontal() {
-        let l = Legend::above();
+        let l = Config::above();
         assert_eq!(l.anchor_value(), Anchor::Top);
         assert_eq!(l.placement_value(), Placement::Inset);
         assert_eq!(l.orientation_value(), Orientation::Horizontal);
@@ -292,36 +302,36 @@ mod tests {
 
     #[test]
     fn below_resolves_to_bottom_edge() {
-        assert_eq!(Legend::below().edge(), Edge::Bottom);
+        assert_eq!(Config::below().edge(), Edge::Bottom);
     }
 
     #[test]
     fn left_and_right_resolve_to_vertical_edges() {
-        assert_eq!(Legend::left().edge(), Edge::Left);
-        assert_eq!(Legend::right().edge(), Edge::Right);
-        assert_eq!(Legend::left().orientation_value(), Orientation::Vertical);
-        assert_eq!(Legend::right().orientation_value(), Orientation::Vertical);
+        assert_eq!(Config::left().edge(), Edge::Left);
+        assert_eq!(Config::right().edge(), Edge::Right);
+        assert_eq!(Config::left().orientation_value(), Orientation::Vertical);
+        assert_eq!(Config::right().orientation_value(), Orientation::Vertical);
     }
 
     #[test]
     fn overlay_picks_horizontal_for_corners() {
-        let l = Legend::overlay(Anchor::BottomRight);
+        let l = Config::overlay(Anchor::BottomRight);
         assert_eq!(l.orientation_value(), Orientation::Horizontal);
         assert_eq!(l.placement_value(), Placement::Overlaid);
     }
 
     #[test]
     fn overlay_picks_vertical_for_left_and_right_sides() {
-        assert_eq!(Legend::overlay(Anchor::Left).orientation_value(), Orientation::Vertical);
+        assert_eq!(Config::overlay(Anchor::Left).orientation_value(), Orientation::Vertical);
         assert_eq!(
-            Legend::overlay(Anchor::Right).orientation_value(),
+            Config::overlay(Anchor::Right).orientation_value(),
             Orientation::Vertical
         );
     }
 
     #[test]
     fn builder_methods_override_defaults() {
-        let l = Legend::above()
+        let l = Config::above()
             .anchor(Anchor::TopRight)
             .orientation(Orientation::Vertical)
             .placement(Placement::Overlaid);
@@ -333,9 +343,15 @@ mod tests {
     }
 
     #[test]
-    fn anchor_converts_into_overlay_legend() {
-        let l: Legend = Anchor::TopLeft.into();
+    fn anchor_converts_into_overlay_config() {
+        let l: Config = Anchor::TopLeft.into();
         assert_eq!(l.placement_value(), Placement::Overlaid);
         assert_eq!(l.anchor_value(), Anchor::TopLeft);
+    }
+
+    #[test]
+    fn size_setter_overrides_text_size() {
+        let l = Config::below().size(14.0);
+        assert_eq!(l.text.size, Some(Pixels(14.0)));
     }
 }

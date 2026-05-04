@@ -54,7 +54,7 @@ pub struct Data {
     pub(crate) selection: Option<crate::target::Target>,
 
     /// Optional legend configuration
-    pub(crate) legend: Option<legend::Legend>,
+    pub(crate) legend: Option<legend::Config>,
 
     /// Tooltip configuration. Defaults to [`tooltip::Tooltip::default`] so
     /// hover is on out of the box; users replace it via [`Data::tooltip`].
@@ -389,15 +389,15 @@ impl Data {
     /// Configures the chart legend.
     ///
     /// ```
-    /// # use hyozu::{data, line, LegendConfig, legend};
+    /// # use hyozu::{data, line, legend};
     /// // Short form — inset below the plot area.
-    /// data(line([(0, 10)]).with_name("Revenue")).legend(LegendConfig::below());
+    /// data(line([(0, 10)]).with_name("Revenue")).legend(legend::Config::below());
     ///
     /// // Detailed form — builder.
     /// data(line([(0, 10)]).with_name("Revenue"))
-    ///     .legend(LegendConfig::overlay(legend::Anchor::TopRight).font_size(10.0));
+    ///     .legend(legend::Config::overlay(legend::Anchor::TopRight).size(10.0));
     /// ```
-    pub fn legend(mut self, legend: impl Into<legend::Legend>) -> Self {
+    pub fn legend(mut self, legend: impl Into<legend::Config>) -> Self {
         self.legend = Some(legend.into());
         self
     }
@@ -744,9 +744,9 @@ mod tests {
     #[test]
     fn inset_choropleth_on_right_reserves_right_edge_strip() {
         use crate::choropleth;
-        use crate::data::legend::{Anchor, Edge, Legend, Orientation, Placement};
+        use crate::data::legend::{Anchor, Config, Edge, Orientation, Placement};
 
-        let cfg = Legend::overlay(Anchor::Right)
+        let cfg = Config::overlay(Anchor::Right)
             .placement(Placement::Inset)
             .orientation(Orientation::Vertical);
         let data: Data = choropleth([("USA", 1.0), ("CAN", 2.0)]).legend(cfg).into_data();
@@ -763,10 +763,10 @@ mod tests {
     #[test]
     fn overlaid_choropleth_does_not_reserve() {
         use crate::choropleth;
-        use crate::data::legend::{Anchor, Legend};
+        use crate::data::legend::{Anchor, Config};
 
         let data: Data = choropleth([("USA", 1.0)])
-            .legend(Legend::overlay(Anchor::BottomRight))
+            .legend(Config::overlay(Anchor::BottomRight))
             .into_data();
         assert!(data.scale_legend_reservations().is_empty());
     }
@@ -774,9 +774,9 @@ mod tests {
     #[test]
     fn inset_choropleth_on_bottom_reserves_bottom_edge() {
         use crate::choropleth;
-        use crate::data::legend::{Edge, Legend};
+        use crate::data::legend::{Config, Edge};
 
-        let data: Data = choropleth([("USA", 1.0)]).legend(Legend::below()).into_data();
+        let data: Data = choropleth([("USA", 1.0)]).legend(Config::below()).into_data();
         let reservations = data.scale_legend_reservations();
         let bottom = *reservations.get(&Edge::Bottom).expect("bottom edge reserved");
         // No title: 42px (bar 10 + tick 4 + label 12 + padding 16).

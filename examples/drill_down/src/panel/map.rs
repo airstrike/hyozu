@@ -9,7 +9,7 @@ use std::sync::Arc;
 use iced::widget::{Renderer, pick_list, row, text};
 use iced::{Alignment, Element, Length, Theme};
 
-use hyozu::{GeoData, LegendConfig, MapScope};
+use hyozu::{GeoData, MapScope, legend};
 use tatami::query::{MemberRef, Options, Tuple};
 use tatami::schema::Schema;
 use tatami::series;
@@ -131,7 +131,7 @@ pub fn build_data(
     let mut choropleth_mark = hyozu::choropleth(entries)
         .geo(geo.clone())
         .scope(scope)
-        .legend(LegendConfig::right());
+        .legend(legend::Config::right());
     if !selected.is_empty() {
         choropleth_mark = choropleth_mark.selected(selected);
     }

@@ -1,5 +1,5 @@
 use hyozu::mark::pie;
-use hyozu::{Color, LegendConfig, data, donut, palette};
+use hyozu::{Color, data, donut, legend, palette};
 use iced::widget::{center, column, container, pick_list, row, space, text};
 use iced::{Border, Center, Fill, Subscription, Task, Theme, keyboard};
 
@@ -42,7 +42,7 @@ impl App {
         Self {
             data: data(chart)
                 .palette(palette::sequential(Color::Primary))
-                .legend(LegendConfig::right()),
+                .legend(legend::Config::right()),
             theme: hyozu::theme::paper(),
             all_themes: hyozu::theme::all_themes().collect(),
         }

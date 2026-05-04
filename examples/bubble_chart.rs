@@ -1,4 +1,4 @@
-use hyozu::{Color, LegendConfig, chart, data, encoding, xy};
+use hyozu::{Color, chart, data, encoding, legend, xy};
 use iced::Task;
 use iced::widget::center;
 
@@ -55,7 +55,7 @@ impl App {
             .title("Megacities: temperature, rainfall, population")
             .x_axis_labels(|v| format!("{v:.0}\u{00b0}C"))
             .y_axis_labels(|v| format!("{v:.0} cm"))
-            .legend(LegendConfig::right()),
+            .legend(legend::Config::right()),
         }
     }
 

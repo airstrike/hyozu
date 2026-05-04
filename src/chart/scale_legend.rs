@@ -1,7 +1,7 @@
 //! Color-scale legend drawn on top of (or alongside) the plot area.
 //!
 //! Shared between marks that carry a continuous-scale key — currently the
-//! choropleth — and driven by a [`data::legend::Legend`] config plus a
+//! choropleth — and driven by a [`data::legend::Config`] plus a
 //! theme-free [`Plan`] that the mark's `layout` step caches on state. The
 //! draw step reads the plan, resolves theme-dependent bits (colors, font),
 //! and emits geometry onto an existing [`Frame`].
@@ -18,7 +18,7 @@
 //!   budget a scene layout step should carve off.
 
 use crate::core::{Color, Point, Rectangle, Size, Vector, alignment};
-use crate::data::legend::{Anchor, Edge, Legend, Orientation, Placement};
+use crate::data::legend::{Anchor, Config, Edge, Orientation, Placement};
 use crate::palette;
 use crate::widget::canvas::{Frame, Path, Stroke, Text as CanvasText};
 use crate::widget::renderer::geometry;
@@ -66,7 +66,7 @@ const GLYPH_WIDTH_ESTIMATE: f32 = 6.0;
 /// right edge. The numeric budget includes both panel padding and label
 /// extents and is independent of the current plot size — the scene needs
 /// a value it can subtract before the plot dimensions are known.
-pub fn reservation(legend: &Legend, title: Option<&str>) -> Option<(Edge, f32)> {
+pub fn reservation(legend: &Config, title: Option<&str>) -> Option<(Edge, f32)> {
     if !matches!(legend.placement_value(), Placement::Inset) {
         return None;
     }
@@ -101,7 +101,7 @@ struct PanelLayout {
 ///
 /// Used for [`Placement::Overlaid`] where the panel floats inside the plot
 /// area: the bar length scales down gracefully on narrow charts.
-fn panel_for_overlay(legend: &Legend, title: Option<&str>, plot_bounds: Rectangle) -> PanelLayout {
+fn panel_for_overlay(legend: &Config, title: Option<&str>, plot_bounds: Rectangle) -> PanelLayout {
     let orientation = legend.orientation_value();
     let has_title = title.is_some();
     let title_line_height = if has_title { FONT_SIZE + 4.0 } else { 0.0 };
@@ -158,7 +158,7 @@ fn panel_for_overlay(legend: &Legend, title: Option<&str>, plot_bounds: Rectangl
 /// Used for [`Placement::Inset`]: the strip has a fixed thickness decided
 /// by [`reservation`], and the bar stretches along the flow axis up to the
 /// configured maximum.
-fn panel_for_strip(legend: &Legend, title: Option<&str>, strip: Rectangle) -> PanelLayout {
+fn panel_for_strip(legend: &Config, title: Option<&str>, strip: Rectangle) -> PanelLayout {
     let orientation = legend.orientation_value();
     let has_title = title.is_some();
     let title_line_height = if has_title { FONT_SIZE + 4.0 } else { 0.0 };
@@ -229,7 +229,7 @@ fn label_column_width(title: Option<&str>) -> f32 {
 pub fn draw<Theme, Renderer>(
     frame: &mut Frame<Renderer>,
     plan: &Plan,
-    legend: &Legend,
+    legend: &Config,
     title: Option<&str>,
     plot_bounds: Rectangle,
     strip_rect: Option<Rectangle>,
@@ -474,25 +474,25 @@ fn draw_vertical_gradient<Renderer: geometry::Renderer>(
 /// Returns `true` when the legend's placement is `Overlaid`. Exposed so
 /// the caller can decide whether to short-circuit or defer to scene-level
 /// space reservation.
-pub fn is_overlaid(legend: &Legend) -> bool {
+pub fn is_overlaid(legend: &Config) -> bool {
     matches!(legend.placement_value(), Placement::Overlaid)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data::legend::{Anchor, Legend, Orientation, Placement};
+    use crate::data::legend::{Anchor, Config, Orientation, Placement};
 
     #[test]
     fn overlaid_legend_reports_no_reservation() {
-        let l = Legend::overlay(Anchor::BottomRight);
+        let l = Config::overlay(Anchor::BottomRight);
         assert_eq!(l.placement_value(), Placement::Overlaid);
         assert!(reservation(&l, None).is_none());
     }
 
     #[test]
     fn inset_horizontal_bottom_reserves_vertical_strip_with_title() {
-        let l = Legend::below();
+        let l = Config::below();
         let (edge, size) = reservation(&l, Some("GDP")).expect("inset legend reserves");
         assert_eq!(edge, Edge::Bottom);
         // title(14) + bar(10) + tick(4) + label(12) + padding(16) = 56
@@ -501,7 +501,7 @@ mod tests {
 
     #[test]
     fn inset_horizontal_bottom_reserves_vertical_strip_without_title() {
-        let l = Legend::below();
+        let l = Config::below();
         let (_, size) = reservation(&l, None).unwrap();
         // bar(10) + tick(4) + label(12) + padding(16) = 42
         assert!(
@@ -512,7 +512,7 @@ mod tests {
 
     #[test]
     fn inset_vertical_right_reserves_horizontal_strip() {
-        let l = Legend::right();
+        let l = Config::right();
         let (edge, size) = reservation(&l, None).expect("inset legend reserves");
         assert_eq!(edge, Edge::Right);
         // bar(10) + tick(4) + label_col(6*6+4=40) + padding(16) = 70; with
@@ -523,7 +523,7 @@ mod tests {
 
     #[test]
     fn inset_vertical_right_widens_for_long_title() {
-        let l = Legend::right();
+        let l = Config::right();
         let (_, narrow) = reservation(&l, None).unwrap();
         let (_, wide) = reservation(&l, Some("Population density per km2")).unwrap();
         assert!(wide > narrow, "long title should widen vertical strip");
@@ -532,8 +532,8 @@ mod tests {
     #[test]
     fn inset_anchor_tieskew_resolves_via_edge() {
         // Orientation::Vertical + Anchor::TopRight must reserve on the
-        // right edge; this exercises `Legend::edge()` tie-breaking.
-        let l = Legend::overlay(Anchor::TopRight)
+        // right edge; this exercises `Config::edge()` tie-breaking.
+        let l = Config::overlay(Anchor::TopRight)
             .placement(Placement::Inset)
             .orientation(Orientation::Vertical);
         let (edge, _) = reservation(&l, None).unwrap();

@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::data::legend::{self, Legend};
+use crate::data::legend;
 use crate::feature;
 use crate::geo::{GeoData, MapScope, ProjectionKind};
 
@@ -84,7 +84,7 @@ pub struct Choropleth {
     /// Color-scale legend configuration. `None` suppresses the legend
     /// entirely. The default is an overlaid horizontal bar pinned to the
     /// bottom-right corner.
-    pub(crate) legend: Option<Legend>,
+    pub(crate) legend: Option<legend::Config>,
     /// Optional active-selection set. When `Some`, only IDs in the set
     /// render at full gradient saturation; other value-bearing features
     /// blend halfway toward `land_fill` to recede into the background
@@ -93,8 +93,8 @@ pub struct Choropleth {
     pub(crate) selected: Option<HashSet<feature::Id>>,
 }
 
-fn default_legend() -> Option<Legend> {
-    Some(Legend::overlay(legend::Anchor::BottomRight).orientation(legend::Orientation::Horizontal))
+fn default_legend() -> Option<legend::Config> {
+    Some(legend::Config::overlay(legend::Anchor::BottomRight).orientation(legend::Orientation::Horizontal))
 }
 
 /// Creates a choropleth from entries.
@@ -236,16 +236,16 @@ impl Choropleth {
 
     /// Configures the color-scale legend.
     ///
-    /// Pass a [`Legend`] to customize anchor / placement / orientation /
+    /// Pass a [`legend::Config`] to customize anchor / placement / orientation /
     /// text, or `None` to suppress the legend entirely. The default is an
     /// overlaid horizontal bar pinned to the bottom-right.
-    pub fn legend(mut self, legend: impl Into<Option<Legend>>) -> Self {
+    pub fn legend(mut self, legend: impl Into<Option<legend::Config>>) -> Self {
         self.legend = legend.into();
         self
     }
 
     /// Returns the current color-scale legend configuration.
-    pub fn legend_config(&self) -> Option<&Legend> {
+    pub fn legend_config(&self) -> Option<&legend::Config> {
         self.legend.as_ref()
     }
 

@@ -7,7 +7,7 @@ use sweeten::widget::tile_grid::{self, CellHeight, grid_content, title_bar};
 use hyozu::mark::bar::Label;
 use hyozu::mark::bar::label::Position as LabelPosition;
 use hyozu::mark::treemap::item;
-use hyozu::{LegendConfig, Target, bar, bars, chart, data, treemap};
+use hyozu::{Target, bar, bars, chart, data, legend, treemap};
 
 // ── Fonts ────────────────────────────────────────────────────────────
 
@@ -1029,7 +1029,7 @@ impl Screen {
             .data_labels(None),
         )
         .y_axis_labels(labels)
-        .legend(LegendConfig::right())
+        .legend(legend::Config::right())
     }
 
     fn build_treemap(model: &model::Dashboard) -> hyozu::Data {

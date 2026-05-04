@@ -15,7 +15,7 @@ use iced::{Font, Length, Task, Theme};
 use hyozu::axis::Placement::BetweenTicks;
 use hyozu::bar::label::Above;
 use hyozu::text::{Bold, Italic, Light, Semibold, font};
-use hyozu::{LegendConfig, Palette, bar, bars, chart, data};
+use hyozu::{Palette, bar, bars, chart, data, legend};
 
 const MONTHS: [&str; 6] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun"];
 
@@ -48,7 +48,7 @@ impl App {
         .title_style(font("Playfair Display") + 26.0 + Semibold)
         .x_axis_labels(BetweenTicks + MONTHS + font("Inter") + 14.0 + Semibold)
         .y_axis(|a| a.show_grid(true).labels(font("Inter") + 11.0 + Light + Italic))
-        .legend(LegendConfig::below().font("JetBrains Mono").font_size(11.0));
+        .legend(legend::Config::below().font("JetBrains Mono").font_size(11.0));
 
         let init = Task::batch([
             load_family("Playfair Display"),
