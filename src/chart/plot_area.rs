@@ -221,6 +221,9 @@ where
             if let Series::Area(area) = series {
                 area.set_animate(animate);
             }
+            if let Series::Xy(xy) = series {
+                xy.set_animate(animate);
+            }
         }
         self
     }
