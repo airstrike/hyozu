@@ -41,6 +41,7 @@ pub use geo::{GeoData, MapScope, ProjectionKind};
 
 pub use data::axis::{self, Axis, Orientation};
 pub use data::legend;
+pub use data::mark::text::text;
 pub use data::mark::{
     self, Area, Band, BandOrientation, Bars, BoxPlot, Choropleth, ChoroplethEntry, Gauge, Heatmap, LegendEntry, Line,
     LineStyle, MapPoint, Mark, Pie, Rule, Text, TextAlign, TextItem, Tick, Treemap, Violin, Waterfall, Xy, area, areas,
