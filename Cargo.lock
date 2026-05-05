@@ -1748,6 +1748,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ice_cream"
+version = "0.1.0"
+dependencies = [
+ "hyozu",
+ "iced",
+ "reqwest",
+]
+
+[[package]]
 name = "iced"
 version = "0.15.0-dev"
 source = "git+https://github.com/airstrike/iced.git?branch=dev#30033625ebe33b6e0ad6bac203744e2c770720fb"

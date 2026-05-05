@@ -1,0 +1,10 @@
+[package]
+name = "ice_cream"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+hyozu = { path = "../..", features = ["geojson"] }
+iced = { version = "0.15.0-dev", features = ["canvas", "tokio"] }
+reqwest = { version = "0.12", features = ["rustls-tls"] }
