@@ -128,16 +128,18 @@ pub fn build_data(
         }
     }
 
-    let mut choropleth_mark = hyozu::choropleth(entries)
-        .geo(geo.clone())
-        .scope(scope)
-        .legend(legend::Config::right());
+    let mut choropleth_mark = hyozu::choropleth(entries).legend(legend::Config::right());
     if !selected.is_empty() {
         choropleth_mark = choropleth_mark.selected(selected);
     }
     let choropleth = hyozu::Mark::Choropleth(choropleth_mark);
-    let bubbles = hyozu::Mark::BubbleMap(hyozu::bubble_map(points).geo(geo.clone()).scope(scope).no_basemap());
-    Some(hyozu::data(vec![choropleth, bubbles]))
+    let bubbles = hyozu::Mark::BubbleMap(hyozu::bubble_map(points));
+    Some(
+        hyozu::data(vec![choropleth, bubbles])
+            .geo_data(geo.clone())
+            .geo_scope(scope)
+            .geo_basemap(false),
+    )
 }
 
 /// Per-panel picker message.

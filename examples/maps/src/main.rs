@@ -1187,14 +1187,13 @@ impl App {
         };
 
         let choropleth = hyozu::choropleth(entries)
-            .geo(geo.clone())
-            .scope(self.scope)
             .log()
-            .projection(ProjectionKind::NaturalEarth)
             .scheme(self.color_scale.clone())
             .legend_title(self.indicator.label());
 
-        hyozu::data(choropleth).title(self.indicator.label())
+        hyozu::data(choropleth)
+            .geo(geo.clone(), self.scope, ProjectionKind::NaturalEarth)
+            .title(self.indicator.label())
     }
 }
 

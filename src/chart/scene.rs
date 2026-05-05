@@ -102,6 +102,11 @@ where
     /// mirrors the primary transform — a per-area scale slot is a
     /// follow-up.
     secondary_y_transform: crate::scale::Transform,
+    /// Chart-level geographic configuration sourced from
+    /// [`crate::Data`]'s `geo_data` / `geo_scope` / `geo_projection` /
+    /// `geo_basemap` fields. Threaded into `PlotArea::layout` for
+    /// geo-aware marks (Choropleth, BubbleMap).
+    geo_config: crate::chart::plot_area::GeoConfig,
 }
 
 impl<'a, Message, Renderer> Scene<'a, Message, Renderer>
@@ -379,6 +384,12 @@ where
                 .collect(),
             y_transform,
             secondary_y_transform: y_transform,
+            geo_config: crate::chart::plot_area::GeoConfig {
+                geo: data.geo_data.clone(),
+                scope: data.geo_scope,
+                projection: data.geo_projection,
+                basemap: data.geo_basemap,
+            },
         }
     }
 
@@ -759,6 +770,7 @@ where
             axis_layout,
             self.y_transform,
             self.secondary_y_transform,
+            &self.geo_config,
         );
 
         // --- Phase 8: Position all nodes ---

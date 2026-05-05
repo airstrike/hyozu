@@ -79,6 +79,30 @@ pub struct PlotInsets {
     pub bottom: f32,
 }
 
+/// Chart-level geographic configuration, sourced from
+/// [`crate::Data::geo_data`] / [`crate::Data::geo_scope`] /
+/// [`crate::Data::geo_projection`] / [`crate::Data::geo_basemap`] and
+/// threaded into the per-mark layout pass for geo-aware marks
+/// (Choropleth, BubbleMap). Cartesian marks ignore it.
+#[derive(Debug, Clone)]
+pub struct GeoConfig {
+    pub geo: Option<std::sync::Arc<crate::geo::GeoData>>,
+    pub scope: crate::geo::MapScope,
+    pub projection: crate::geo::ProjectionKind,
+    pub basemap: bool,
+}
+
+impl Default for GeoConfig {
+    fn default() -> Self {
+        Self {
+            geo: None,
+            scope: crate::geo::MapScope::World,
+            projection: crate::geo::ProjectionKind::default(),
+            basemap: true,
+        }
+    }
+}
+
 impl Plane {
     /// Transform a data point (f64) to pixel coordinates (f32) within the plane bounds.
     pub fn to_pixel(&self, datum: Datum) -> crate::core::Point {
@@ -731,6 +755,7 @@ where
         axis_layout: AxisLayout,                   // Physical dimensions of axes
         y_transform: crate::scale::Transform,
         secondary_y_transform: crate::scale::Transform,
+        geo_config: &GeoConfig,
     ) -> Node {
         let state = tree.state.downcast_mut::<State>();
         let size = limits.max();
@@ -853,10 +878,10 @@ where
                     bp.layout(series_tree, renderer, limits, use_plane);
                 }
                 Series::BubbleMap(bm) => {
-                    bm.layout(series_tree, renderer, limits, use_plane);
+                    bm.layout(series_tree, renderer, limits, use_plane, geo_config);
                 }
                 Series::Choropleth(c) => {
-                    c.layout(series_tree, renderer, limits, use_plane);
+                    c.layout(series_tree, renderer, limits, use_plane, geo_config);
                 }
                 Series::Pie(pie) => {
                     pie.layout(series_tree, renderer, limits, use_plane);

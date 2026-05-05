@@ -92,6 +92,22 @@ pub struct Data {
     /// (currently pie/donut) should animate. Default `true`, matching
     /// Recharts' `isAnimationActive`. Toggle via [`Data::animate`].
     pub(crate) animate: bool,
+
+    /// Optional geographic feature collection consumed by geo-aware marks
+    /// (Choropleth, BubbleMap). `None` leaves geo marks empty.
+    pub(crate) geo_data: Option<std::sync::Arc<crate::geo::GeoData>>,
+
+    /// Region of the world the geo-aware marks render. Defaults to
+    /// [`crate::geo::MapScope::World`].
+    pub(crate) geo_scope: crate::geo::MapScope,
+
+    /// Projection used when mapping `(lon, lat)` to pixel coordinates.
+    /// Defaults to [`crate::geo::ProjectionKind::Mercator`].
+    pub(crate) geo_projection: crate::geo::ProjectionKind,
+
+    /// Whether the geographic basemap (land polygons under bubbles) draws.
+    /// Default `true`. Has no effect when no geo-aware mark is present.
+    pub(crate) geo_basemap: bool,
 }
 
 impl Default for Data {
@@ -112,6 +128,10 @@ impl Default for Data {
             x_scale: crate::scale::XScale::default(),
             generation: 0,
             animate: true,
+            geo_data: None,
+            geo_scope: crate::geo::MapScope::World,
+            geo_projection: crate::geo::ProjectionKind::Mercator,
+            geo_basemap: true,
         }
     }
 }
@@ -481,6 +501,49 @@ impl Data {
     /// rest render unchanged.
     pub fn animate(mut self, animate: bool) -> Self {
         self.animate = animate;
+        self
+    }
+
+    /// Sets the geographic feature collection consumed by Choropleth /
+    /// BubbleMap marks. Replaces the per-mark `.geo(...)` builder that
+    /// existed before geo configuration moved to chart-level.
+    pub fn geo_data(mut self, geo: impl Into<std::sync::Arc<crate::geo::GeoData>>) -> Self {
+        self.geo_data = Some(geo.into());
+        self
+    }
+
+    /// Sets the geographic scope (which region of the world geo-aware
+    /// marks should render).
+    pub fn geo_scope(mut self, scope: crate::geo::MapScope) -> Self {
+        self.geo_scope = scope;
+        self
+    }
+
+    /// Sets the geographic projection algorithm used to map `(lon, lat)`
+    /// to pixels.
+    pub fn geo_projection(mut self, projection: crate::geo::ProjectionKind) -> Self {
+        self.geo_projection = projection;
+        self
+    }
+
+    /// Toggles the geographic basemap (land polygons drawn under bubbles
+    /// in BubbleMap). Default `true`.
+    pub fn geo_basemap(mut self, show: bool) -> Self {
+        self.geo_basemap = show;
+        self
+    }
+
+    /// Convenience setter that sets feature collection, scope, and
+    /// projection in one call. Leaves `geo_basemap` at its current value.
+    pub fn geo(
+        mut self,
+        geo: impl Into<std::sync::Arc<crate::geo::GeoData>>,
+        scope: crate::geo::MapScope,
+        projection: crate::geo::ProjectionKind,
+    ) -> Self {
+        self.geo_data = Some(geo.into());
+        self.geo_scope = scope;
+        self.geo_projection = projection;
         self
     }
 

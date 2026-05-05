@@ -12,7 +12,7 @@ use crate::widget::canvas::{Frame, Path, Stroke};
 use crate::core::text;
 use crate::widget::renderer::geometry;
 
-use super::Plane;
+use super::{GeoConfig, Plane};
 
 /// Per-feature display state, derived from the entries map and the
 /// feature's value (or absence thereof). Drives the 3-way color decision
@@ -294,7 +294,14 @@ where
 
     pub(super) fn diff(&self, _tree: &mut Tree) {}
 
-    pub fn layout(&self, tree: &mut Tree, _renderer: &Renderer, limits: &Limits, _plane: &Plane) -> Node {
+    pub fn layout(
+        &self,
+        tree: &mut Tree,
+        _renderer: &Renderer,
+        limits: &Limits,
+        _plane: &Plane,
+        geo_config: &GeoConfig,
+    ) -> Node {
         let state = tree.state.downcast_mut::<State>();
         let size = limits.max();
         let current_size = (size.width, size.height);
@@ -305,20 +312,20 @@ where
         // unconditionally below — entries can change without triggering the
         // projection-level dirty bits, and the entry walk is O(n) on a
         // small collection.
-        let geo_changed = match (&state.prev_geo, &self.data.geo) {
+        let geo_changed = match (&state.prev_geo, &geo_config.geo) {
             (Some(prev), Some(cur)) => !Arc::ptr_eq(prev, cur),
             (None, None) => false,
             _ => true,
         };
-        let needs_reproject = geo_changed || state.prev_size != current_size || state.prev_scope != self.data.scope;
+        let needs_reproject = geo_changed || state.prev_size != current_size || state.prev_scope != geo_config.scope;
 
         if needs_reproject {
             // Update dirty-check fields.
             state.prev_size = current_size;
-            state.prev_scope = self.data.scope;
-            state.prev_geo = self.data.geo.clone();
+            state.prev_scope = geo_config.scope;
+            state.prev_geo = geo_config.geo.clone();
 
-            match &self.data.geo {
+            match &geo_config.geo {
                 None => {
                     state.projected_polygons.clear();
                     state.filtered_ids.clear();
@@ -326,9 +333,9 @@ where
                 }
                 Some(geo) => {
                     // Filter features by scope and build projection.
-                    let filtered = geo.filter_by_scope(self.data.scope);
-                    let scope_bounds = self.data.scope.bounds();
-                    let projection = crate::geo::Projection::new(self.data.projection).fit_size(
+                    let filtered = geo.filter_by_scope(geo_config.scope);
+                    let scope_bounds = geo_config.scope.bounds();
+                    let projection = crate::geo::Projection::new(geo_config.projection).fit_size(
                         size.width,
                         size.height,
                         scope_bounds,

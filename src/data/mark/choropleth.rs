@@ -1,9 +1,7 @@
 use std::collections::HashSet;
-use std::sync::Arc;
 
 use crate::data::legend;
 use crate::feature;
-use crate::geo::{GeoData, MapScope, ProjectionKind};
 use crate::palette::Palette;
 use crate::scale::ColorScale;
 
@@ -63,9 +61,6 @@ impl ChoroplethEntry {
 #[derive(Debug, Clone)]
 pub struct Choropleth {
     pub(crate) entries: Vec<ChoroplethEntry>,
-    pub(crate) geo: Option<Arc<GeoData>>,
-    pub(crate) scope: MapScope,
-    pub(crate) projection: ProjectionKind,
     /// Color encoding scale: domain (auto-inferred when `None`), palette
     /// (mark default when `None`), transform, and optional legend tick
     /// formatter. Default is [`ColorScale::default().sqrt()`] to preserve
@@ -105,9 +100,6 @@ impl<const N: usize> IntoChoropleth for [ChoroplethEntry; N] {
     fn into_choropleth(self) -> Choropleth {
         Choropleth {
             entries: self.into(),
-            geo: None,
-            scope: MapScope::World,
-            projection: ProjectionKind::default(),
             color: ColorScale::default().sqrt(),
             legend_title: None,
             legend: default_legend(),
@@ -122,9 +114,6 @@ impl IntoChoropleth for Vec<ChoroplethEntry> {
     fn into_choropleth(self) -> Choropleth {
         Choropleth {
             entries: self,
-            geo: None,
-            scope: MapScope::World,
-            projection: ProjectionKind::default(),
             color: ColorScale::default().sqrt(),
             legend_title: None,
             legend: default_legend(),
@@ -149,9 +138,6 @@ where
                     value: Some(value.into()),
                 })
                 .collect(),
-            geo: None,
-            scope: MapScope::World,
-            projection: ProjectionKind::default(),
             color: ColorScale::default().sqrt(),
             legend_title: None,
             legend: default_legend(),
@@ -176,9 +162,6 @@ where
                     value: Some(value.into()),
                 })
                 .collect(),
-            geo: None,
-            scope: MapScope::World,
-            projection: ProjectionKind::default(),
             color: ColorScale::default().sqrt(),
             legend_title: None,
             legend: default_legend(),
@@ -190,18 +173,6 @@ where
 // ── Builder methods ──────────────────────────────────────────────
 
 impl Choropleth {
-    /// Sets the geographic data used to resolve feature geometries.
-    pub fn geo(mut self, geo: Arc<GeoData>) -> Self {
-        self.geo = Some(geo);
-        self
-    }
-
-    /// Sets the map scope (which region of the world to show).
-    pub fn scope(mut self, scope: MapScope) -> Self {
-        self.scope = scope;
-        self
-    }
-
     /// Sets a named or custom color scheme.
     ///
     /// Use `-scheme` to reverse: `.scheme(-palette::Scheme::GreenRed)`.
@@ -300,12 +271,6 @@ impl Choropleth {
     /// Returns the active selection set, if any.
     pub fn selected_ids(&self) -> Option<&HashSet<feature::Id>> {
         self.selected.as_ref()
-    }
-
-    /// Sets the projection kind (default: Mercator).
-    pub fn projection(mut self, kind: ProjectionKind) -> Self {
-        self.projection = kind;
-        self
     }
 
     /// Returns the entries.

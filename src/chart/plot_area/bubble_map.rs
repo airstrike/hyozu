@@ -9,7 +9,7 @@ use crate::widget::canvas::{Frame, Path, Stroke, Text as CanvasText};
 use crate::core::text;
 use crate::widget::renderer::geometry;
 
-use super::Plane;
+use super::{GeoConfig, Plane};
 
 // ── State ──────────────────────────────────────────────────────────
 
@@ -38,6 +38,10 @@ pub struct State {
     /// Per-frame entrance/transition lifecycle (progress, pending-start
     /// flag, latest captured `Instant`) advanced by the chart widget.
     pub tick: animation::Tick,
+    /// Whether the basemap (land polygons) draws this frame. Captured
+    /// from [`super::GeoConfig::basemap`] in `layout` so `draw` doesn't
+    /// need access to the chart-level config.
+    pub show_basemap: bool,
     // Dirty-check fields
     pub(crate) prev_size: (f32, f32),
     pub(crate) prev_scope: crate::geo::MapScope,
@@ -60,6 +64,7 @@ impl State {
             projection: None,
             previous_bubble_circles: Vec::new(),
             tick: animation::Tick::new(),
+            show_basemap: true,
             prev_size: (0.0, 0.0),
             prev_scope: crate::geo::MapScope::World,
             prev_geo: None,
@@ -132,23 +137,31 @@ where
 
     // ── Layout ─────────────────────────────────────────────────────
 
-    pub fn layout(&self, tree: &mut Tree, _renderer: &Renderer, limits: &Limits, _plane: &Plane) -> Node {
+    pub fn layout(
+        &self,
+        tree: &mut Tree,
+        _renderer: &Renderer,
+        limits: &Limits,
+        _plane: &Plane,
+        geo_config: &GeoConfig,
+    ) -> Node {
         let state = tree.state.downcast_mut::<State>();
         let size = limits.max();
-        let scope = self.data.scope;
+        let scope = geo_config.scope;
+        state.show_basemap = geo_config.basemap;
 
         // Build projection for this viewport + scope.
         let projection =
-            crate::geo::Projection::new(self.data.projection).fit_size(size.width, size.height, scope.bounds());
+            crate::geo::Projection::new(geo_config.projection).fit_size(size.width, size.height, scope.bounds());
         state.projection = Some(projection);
 
         // Reproject basemap polygons only when inputs change.
         let size_key = (size.width, size.height);
-        if state.is_dirty(size_key, scope, &self.data.geo) {
+        if state.is_dirty(size_key, scope, &geo_config.geo) {
             state.projected_polygons.clear();
             state.feature_bboxes.clear();
 
-            if let Some(geo) = &self.data.geo {
+            if let Some(geo) = &geo_config.geo {
                 let filtered = geo.filter_by_scope(scope);
 
                 for feature in &filtered.features {
@@ -183,7 +196,7 @@ where
                 }
             }
 
-            state.mark_clean(size_key, scope, &self.data.geo);
+            state.mark_clean(size_key, scope, &geo_config.geo);
         }
 
         // Always recompute bubble positions (cheap).
@@ -257,7 +270,7 @@ where
         // ── Land polygons ──────────────────────────────────────────
         let mut land_frame = Frame::new(renderer, layout_bounds.size());
 
-        if self.data.show_basemap && !state.projected_polygons.is_empty() {
+        if state.show_basemap && !state.projected_polygons.is_empty() {
             let land_fill = crate::core::Color {
                 r: background.r * 0.92 + 0.08 * 0.7,
                 g: background.g * 0.92 + 0.08 * 0.72,
