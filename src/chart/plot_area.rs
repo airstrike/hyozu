@@ -892,7 +892,13 @@ where
             state.geo_plane = None;
         }
 
-        // Layout each series with its assigned plane
+        // Layout each series with its assigned plane. Reborrow the
+        // shared geo plane before the dispatch loop so geo-aware marks
+        // can read it without holding a mutable borrow on `state` —
+        // the post-loop writes to `state.plane` and
+        // `state.secondary_plane` reacquire the mutable borrow once
+        // this scope ends.
+        let geo_plane_ref: Option<&geo::Plane> = state.geo_plane.as_ref();
         for (i, series) in self.series.iter().enumerate() {
             let series_tree = &mut tree.children[i];
             let use_plane: &Plane = match self.axis_side[i] {
@@ -916,7 +922,7 @@ where
                     bm.layout(series_tree, renderer, limits, use_plane, geo_config);
                 }
                 Series::Choropleth(c) => {
-                    c.layout(series_tree, renderer, limits, use_plane, geo_config);
+                    c.layout(series_tree, renderer, limits, use_plane, geo_plane_ref);
                 }
                 Series::Pie(pie) => {
                     pie.layout(series_tree, renderer, limits, use_plane);
@@ -1304,6 +1310,12 @@ where
         // Track cumulative color offset across series
         let mut color_offset: usize = 0;
 
+        // The chart-level geo projection cache, threaded into geo-aware
+        // marks (Choropleth) during draw. `None` for purely cartesian
+        // charts.
+        let plot_state = tree.state.downcast_ref::<State>();
+        let geo_plane_ref: Option<&geo::Plane> = plot_state.geo_plane.as_ref();
+
         // Draw each series
         for (i, series) in self.series.iter().enumerate() {
             let series_tree = &tree.children[i];
@@ -1395,6 +1407,7 @@ where
                         viewport,
                         color_offset,
                         palette,
+                        geo_plane_ref,
                     );
                 }
                 Series::Pie(pie) => {

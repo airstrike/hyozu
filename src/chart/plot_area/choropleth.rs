@@ -1,6 +1,5 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use crate::animation;
 use crate::chart::scale_legend;
@@ -12,7 +11,7 @@ use crate::widget::canvas::{Frame, Path, Stroke};
 use crate::core::text;
 use crate::widget::renderer::geometry;
 
-use super::{GeoConfig, Plane};
+use super::{Plane, geo};
 
 /// Per-feature display state, derived from the entries map and the
 /// feature's value (or absence thereof). Drives the 3-way color decision
@@ -28,8 +27,14 @@ pub enum FeatureState {
     Missing,
 }
 
-/// State for Choropleth -- stores projected polygon geometry, feature IDs,
-/// bounding boxes, and the pre-computed transform-mapped t for each feature.
+/// State for Choropleth -- stores the entry-derived per-frame view of the
+/// chart-level [`super::geo::Plane`]: feature display states, value range,
+/// legend plan, and the resolved-fill snapshot pipeline used by the
+/// data-change animation.
+///
+/// Geometry (projected polygons, filtered ids, feature bboxes) lives on
+/// the shared `geo::Plane` reachable from [`super::State::geo_plane`] —
+/// not duplicated here.
 ///
 /// The per-feature `feature_state` values, the scale legend plan, and the
 /// data value range are all theme-independent and computed in `layout` so
@@ -37,10 +42,8 @@ pub enum FeatureState {
 /// HashMap on every repaint. See the `iced layout-vs-draw discipline` note
 /// for the broader principle.
 pub struct State {
-    pub projected_polygons: Vec<Vec<Vec<(f32, f32)>>>,
-    pub filtered_ids: Vec<crate::feature::Id>,
-    pub feature_bboxes: Vec<crate::core::Rectangle>,
-    /// Per-filtered-feature display state, in `filtered_ids` order.
+    /// Per-filtered-feature display state, in
+    /// `geo::Plane::filtered_ids` order.
     pub feature_state: Vec<FeatureState>,
     /// Min/max of the entry values. Cached so the scale legend doesn't
     /// need to re-walk entries each draw.
@@ -51,7 +54,7 @@ pub struct State {
     /// [`Choropleth::draw`] at the start of each repaint and read by
     /// [`crate::chart::Chart::diff`] to seed `previous_fill_colors`
     /// during a data-change replant. Aligned 1:1 with
-    /// [`Self::filtered_ids`]. Lives in a [`RefCell`] because fill
+    /// `geo::Plane::filtered_ids`. Lives in a [`RefCell`] because fill
     /// resolution is theme-dependent and only `draw` carries the
     /// theme — `layout` cannot bake fills without staling on a theme
     /// change.
@@ -65,9 +68,6 @@ pub struct State {
     /// Per-frame entrance/transition lifecycle (progress, pending-start
     /// flag, latest captured `Instant`) advanced by the chart widget.
     pub tick: animation::Tick,
-    pub(crate) prev_size: (f32, f32),
-    pub(crate) prev_scope: crate::geo::MapScope,
-    pub(crate) prev_geo: Option<Arc<crate::geo::GeoData>>,
 }
 
 /// A Choropleth series that renders geographic features filled with
@@ -275,18 +275,12 @@ where
         Tree {
             tag: tree::Tag::of::<State>(),
             state: tree::State::new(State {
-                projected_polygons: Vec::new(),
-                filtered_ids: Vec::new(),
-                feature_bboxes: Vec::new(),
                 feature_state: Vec::new(),
                 value_range: (0.0, 1.0),
                 legend_plan: scale_legend::Plan::default(),
                 fill_colors: RefCell::new(Vec::new()),
                 previous_fill_colors: Vec::new(),
                 tick: animation::Tick::new(),
-                prev_size: (0.0, 0.0),
-                prev_scope: crate::geo::MapScope::World,
-                prev_geo: None,
             }),
             children: Vec::new(),
         }
@@ -298,100 +292,17 @@ where
         &self,
         tree: &mut Tree,
         _renderer: &Renderer,
-        limits: &Limits,
+        _limits: &Limits,
         _plane: &Plane,
-        geo_config: &GeoConfig,
+        geo_plane: Option<&geo::Plane>,
     ) -> Node {
         let state = tree.state.downcast_mut::<State>();
-        let size = limits.max();
-        let current_size = (size.width, size.height);
 
-        // Dirty check for the EXPENSIVE projection step: skip re-projection
-        // if size, scope, and geo are unchanged. The cheaper entry-derived
-        // state (value range, normalized t, legend strings) is recomputed
-        // unconditionally below — entries can change without triggering the
-        // projection-level dirty bits, and the entry walk is O(n) on a
-        // small collection.
-        let geo_changed = match (&state.prev_geo, &geo_config.geo) {
-            (Some(prev), Some(cur)) => !Arc::ptr_eq(prev, cur),
-            (None, None) => false,
-            _ => true,
-        };
-        let needs_reproject = geo_changed || state.prev_size != current_size || state.prev_scope != geo_config.scope;
-
-        if needs_reproject {
-            // Update dirty-check fields.
-            state.prev_size = current_size;
-            state.prev_scope = geo_config.scope;
-            state.prev_geo = geo_config.geo.clone();
-
-            match &geo_config.geo {
-                None => {
-                    state.projected_polygons.clear();
-                    state.filtered_ids.clear();
-                    state.feature_bboxes.clear();
-                }
-                Some(geo) => {
-                    // Filter features by scope and build projection.
-                    let filtered = geo.filter_by_scope(geo_config.scope);
-                    let scope_bounds = geo_config.scope.bounds();
-                    let projection = crate::geo::Projection::new(geo_config.projection).fit_size(
-                        size.width,
-                        size.height,
-                        scope_bounds,
-                    );
-
-                    // Project all filtered-feature polygons into pixel space.
-                    state.projected_polygons = filtered
-                        .features
-                        .iter()
-                        .map(|feature| {
-                            feature
-                                .polygons
-                                .iter()
-                                .map(|ring| ring.iter().map(|&(lon, lat)| projection.project(lon, lat)).collect())
-                                .collect()
-                        })
-                        .collect();
-
-                    // Store the ID of each filtered feature in the same order.
-                    state.filtered_ids = filtered.features.iter().map(|f| f.id.clone()).collect();
-
-                    // Compute bounding boxes for each feature.
-                    state.feature_bboxes = state
-                        .projected_polygons
-                        .iter()
-                        .map(|rings| {
-                            let mut min_x = f32::INFINITY;
-                            let mut min_y = f32::INFINITY;
-                            let mut max_x = f32::NEG_INFINITY;
-                            let mut max_y = f32::NEG_INFINITY;
-                            for ring in rings {
-                                for &(x, y) in ring {
-                                    min_x = min_x.min(x);
-                                    min_y = min_y.min(y);
-                                    max_x = max_x.max(x);
-                                    max_y = max_y.max(y);
-                                }
-                            }
-                            crate::core::Rectangle {
-                                x: min_x,
-                                y: min_y,
-                                width: (max_x - min_x).max(0.0),
-                                height: (max_y - min_y).max(0.0),
-                            }
-                        })
-                        .collect();
-                }
-            }
-        }
-
-        // ── Entry-derived state (always recomputed) ──────────────────
-        //
-        // value_range, feature_state, and legend strings depend on
-        // `self.data.entries` and the color scale's transform, neither of
-        // which is covered by the projection dirty check. The work is O(n)
-        // on entries (typically dozens, not millions), so unconditional
+        // Entry-derived state recomputed every layout. value_range,
+        // feature_state, and legend strings depend on `self.data.entries`
+        // and the color scale's transform, neither of which is covered by
+        // the geo plane's projection dirty check. The work is O(n) on
+        // entries (typically dozens, not millions), so unconditional
         // recompute is fine. Moves the per-frame walk out of `draw`.
         let entries = &self.data.entries;
         let (lo, hi) = self.data.color.resolved_domain(|| compute_value_range(entries));
@@ -405,7 +316,11 @@ where
         //   Missing — no entry; renders as decorative land fill.
         // NaN/Inf-valued entries are downgraded to Available so non-finite
         // values can never reach `sample_gradient → from_oklch`.
-        state.feature_state = compute_feature_states(entries, &state.filtered_ids, lo, hi, self.data.color.transform);
+        let filtered_ids: &[crate::feature::Id] = match geo_plane {
+            Some(plane) => &plane.filtered_ids,
+            None => &[],
+        };
+        state.feature_state = compute_feature_states(entries, filtered_ids, lo, hi, self.data.color.transform);
 
         state.legend_plan = scale_legend::Plan {
             min_label: format_legend_value(lo),
@@ -427,12 +342,16 @@ where
         _viewport: &crate::core::Rectangle,
         _color_offset: usize,
         _palette: &crate::palette::Resolved,
+        geo_plane: Option<&geo::Plane>,
     ) where
         Theme: crate::design::Design + ?Sized,
     {
         let state = tree.state.downcast_ref::<State>();
 
-        if state.projected_polygons.is_empty() {
+        let Some(plane) = geo_plane else {
+            return;
+        };
+        if plane.projected_polygons.is_empty() {
             return;
         }
 
@@ -502,14 +421,14 @@ where
         // The cache is written to `state.fill_colors` so a subsequent
         // data-change replant in `chart::diff` can snapshot it onto
         // the post-rebuild tree's `previous_fill_colors`.
-        let target_fills: Vec<crate::core::Color> = state
+        let target_fills: Vec<crate::core::Color> = plane
             .projected_polygons
             .iter()
             .enumerate()
             .map(|(feat_idx, _)| match state.feature_state.get(feat_idx).copied() {
                 Some(FeatureState::Value(t)) => {
                     let gradient = crate::palette::sample_gradient(&color_stops, t);
-                    let id = state.filtered_ids.get(feat_idx);
+                    let id = plane.filtered_ids.get(feat_idx);
                     let is_selected = self
                         .data
                         .selected
@@ -541,7 +460,7 @@ where
         let has_prev = !state.previous_fill_colors.is_empty();
 
         // ── Draw features ────────────────────────────────────────
-        for (feat_idx, feature_rings) in state.projected_polygons.iter().enumerate() {
+        for (feat_idx, feature_rings) in plane.projected_polygons.iter().enumerate() {
             let target = target_fills[feat_idx];
             let fill = if has_prev {
                 let prev = state.previous_fill_colors.get(feat_idx).copied().unwrap_or(target);

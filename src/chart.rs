@@ -619,27 +619,14 @@ fn replant_treemap(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
 
 /// Snapshots a Choropleth mark's pre-rebuild `fill_colors` onto the
 /// post-rebuild tree's `previous_fill_colors` and arms the next redraw
-/// to interpolate from there. Independent of the animation gate, the
-/// projection cache (`prev_size`, `prev_scope`, `prev_geo`,
-/// `projected_polygons`, `filtered_ids`, `feature_bboxes`) and the
-/// derived per-frame state (`feature_state`, `value_range`,
-/// `legend_plan`) are always replanted onto the new tree so the next
-/// layout's dirty-check stays a hit and the projection isn't
-/// re-flattened on a data change. The caller is responsible for
-/// confirming both nodes carry a `choropleth::State`.
+/// to interpolate from there. The projection cache lives on the
+/// shared [`plot_area::geo::Plane`] (sibling-replanted by
+/// [`replant_geo_plane`]); only the data-change animation snapshot
+/// belongs here. The caller is responsible for confirming both nodes
+/// carry a `choropleth::State`.
 fn replant_choropleth(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
     let old_state = old_mark.state.downcast_ref::<plot_area::choropleth::State>();
     let new_state = new_mark.state.downcast_mut::<plot_area::choropleth::State>();
-
-    new_state.prev_size = old_state.prev_size;
-    new_state.prev_scope = old_state.prev_scope;
-    new_state.prev_geo = old_state.prev_geo.clone();
-    new_state.projected_polygons = old_state.projected_polygons.clone();
-    new_state.filtered_ids = old_state.filtered_ids.clone();
-    new_state.feature_bboxes = old_state.feature_bboxes.clone();
-    new_state.feature_state = old_state.feature_state.clone();
-    new_state.value_range = old_state.value_range;
-    new_state.legend_plan = old_state.legend_plan.clone();
 
     if animate {
         new_state.previous_fill_colors = old_state.fill_colors.borrow().clone();
@@ -1273,17 +1260,21 @@ where
                                     return;
                                 }
                             }
-                        } else if mark_tree.tag == choropleth_tag {
-                            let choro_state = mark_tree.state.downcast_ref::<plot_area::choropleth::State>();
-
-                            // Bbox pre-filter then ray-cast point-in-polygon
-                            for (feat_idx, bbox) in choro_state.feature_bboxes.iter().enumerate() {
-                                if !bbox.contains(local) {
+                        } else if mark_tree.tag == choropleth_tag
+                            && let Some(geo_plane) = plot_area_state.geo_plane.as_ref()
+                        {
+                            // Bbox pre-filter then ray-cast point-in-polygon.
+                            // Geometry lives on the shared geo plane;
+                            // the per-mark choropleth state holds only
+                            // entry-derived view data.
+                            for (feat_idx, &(min_x, min_y, max_x, max_y)) in geo_plane.feature_bboxes.iter().enumerate()
+                            {
+                                if local.x < min_x || local.x > max_x || local.y < min_y || local.y > max_y {
                                     continue;
                                 }
                                 // Ray-casting: count crossings of a horizontal ray to the right
                                 let mut inside = false;
-                                for ring in &choro_state.projected_polygons[feat_idx] {
+                                for ring in &geo_plane.projected_polygons[feat_idx] {
                                     let n = ring.len();
                                     let mut j = n.wrapping_sub(1);
                                     for i in 0..n {
@@ -1297,7 +1288,7 @@ where
                                         j = i;
                                     }
                                 }
-                                if inside && let Some(id) = choro_state.filtered_ids.get(feat_idx) {
+                                if inside && let Some(id) = geo_plane.filtered_ids.get(feat_idx) {
                                     shell.publish(on_action(Action::Clicked(crate::target::Target::Feature {
                                         mark: mark_idx,
                                         id: id.clone(),
