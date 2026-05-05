@@ -1,4 +1,5 @@
 use super::Plane;
+use crate::animation;
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
 use crate::core::{Rectangle, Size};
@@ -20,6 +21,19 @@ pub struct State {
     pub tops: Vec<f32>,
     /// Estimated label rectangles (None = no label drawn for that entry)
     pub label_rects: Vec<Option<Rectangle>>,
+    /// Bar rectangles from the most recent layout before the current one,
+    /// captured by [`crate::chart::Chart::diff`] when data changes so the
+    /// next sweep can interpolate from previous bounds to current bounds.
+    /// Empty on a fresh mount, in which case the animation collapses to a
+    /// baseline-anchored grow-in.
+    pub previous_rects: Vec<Rectangle>,
+    /// Connector top y-coordinates from the previous layout, snapshotted
+    /// alongside [`Self::previous_rects`] so the joining lines lerp from
+    /// where they were to where they are. Empty on a fresh mount.
+    pub previous_tops: Vec<f32>,
+    /// Per-frame entrance/transition lifecycle (progress, pending-start
+    /// flag, latest captured `Instant`) advanced by the chart widget.
+    pub tick: animation::Tick,
 }
 
 /// A Waterfall series that renders waterfall charts.
@@ -29,6 +43,10 @@ where
     Renderer: text::Renderer + geometry::Renderer,
 {
     pub(super) data: &'a crate::mark::waterfall::Waterfall,
+    /// Whether the mount/data-change sweep runs. Mirrors
+    /// [`crate::Data::animate`] (the chart-level toggle); `false` makes
+    /// `draw` snap to the laid-out geometry.
+    pub(crate) animate: bool,
     _marker: std::marker::PhantomData<(Message, Renderer)>,
 }
 
@@ -48,8 +66,15 @@ where
     pub fn new(data: &'a crate::mark::waterfall::Waterfall) -> Self {
         Self {
             data,
+            animate: true,
             _marker: std::marker::PhantomData,
         }
+    }
+
+    /// Sets whether the mount/data-change sweep should run. Wired by
+    /// [`super::PlotArea::with_animate`] from [`crate::Data::animate`].
+    pub(crate) fn set_animate(&mut self, animate: bool) {
+        self.animate = animate;
     }
 
     /// Returns the initial tree state for this Waterfall
@@ -61,6 +86,9 @@ where
                 kinds: Vec::new(),
                 tops: Vec::new(),
                 label_rects: Vec::new(),
+                previous_rects: Vec::new(),
+                previous_tops: Vec::new(),
+                tick: animation::Tick::new(),
             }),
             children: Vec::new(),
         }
@@ -235,8 +263,36 @@ where
 
         let mut bar_colors: Vec<crate::core::Color> = Vec::with_capacity(state.rects.len());
 
+        // Sweep: each bar's rectangle interpolates from its previous-layout
+        // rect (or from a baseline-anchored zero-extent rect on fresh mount)
+        // toward its current rect; the connector y-coordinates track the
+        // animated bar edges so connector lines emerge in lockstep with the
+        // bars they span. With `animate = false` progress pins to `1.0` and
+        // the animated geometry equals `state.rects` / `state.tops` exactly,
+        // reproducing today's geometry.
+        let progress = if !self.animate { 1.0 } else { state.tick.progress() };
+        let animating = progress < 1.0 - f32::EPSILON;
+        let animated_rects: Vec<Rectangle> = state
+            .rects
+            .iter()
+            .enumerate()
+            .map(|(i, cur)| {
+                let prev = state.previous_rects.get(i).copied();
+                animate_rect(*cur, prev, progress)
+            })
+            .collect();
+        let animated_tops: Vec<f32> = state
+            .tops
+            .iter()
+            .zip(state.rects.iter())
+            .enumerate()
+            .map(|(i, (&cur_top, &cur_rect))| {
+                animate_top(cur_top, cur_rect, state.previous_tops.get(i).copied(), progress)
+            })
+            .collect();
+
         // Draw bars
-        for (i, (rect, entry)) in state.rects.iter().zip(self.data.entries.iter()).enumerate() {
+        for (i, (rect, entry)) in animated_rects.iter().zip(self.data.entries.iter()).enumerate() {
             let color = if let Some(entry_color) = entry.color {
                 entry_color.resolve(background, text_pair, &seed, None)
             } else {
@@ -258,16 +314,16 @@ where
         }
 
         // Connector lines
-        if self.data.connector && state.rects.len() > 1 {
+        if self.data.connector && animated_rects.len() > 1 {
             let connector_color = crate::core::Color {
                 a: 0.4,
                 ..text_pair.on_light
             };
 
-            for i in 0..state.rects.len() - 1 {
-                let from_rect = &state.rects[i];
-                let to_rect = &state.rects[i + 1];
-                let y = state.tops[i];
+            for i in 0..animated_rects.len() - 1 {
+                let from_rect = &animated_rects[i];
+                let to_rect = &animated_rects[i + 1];
+                let y = animated_tops[i];
 
                 let path = Path::new(|builder| {
                     builder.move_to(crate::core::Point::new(from_rect.x + from_rect.width, y));
@@ -278,76 +334,79 @@ where
             }
         }
 
-        // Labels
+        // Labels — suppressed mid-sweep so they don't pop in over bars
+        // that haven't grown into their final positions yet.
         let chart_label = self.data.label.as_ref();
         let theme_default_size = theme.font_size();
         let total_entries = self.data.entries.len();
 
-        for (i, (rect, entry)) in state.rects.iter().zip(self.data.entries.iter()).enumerate() {
-            let LabelDraw {
-                text: label_text,
-                position,
-                size,
-            } = match resolve_label(entry, chart_label, theme_default_size) {
-                Some(d) => d,
-                None => continue,
-            };
+        if !animating {
+            for (i, (rect, entry)) in state.rects.iter().zip(self.data.entries.iter()).enumerate() {
+                let LabelDraw {
+                    text: label_text,
+                    position,
+                    size,
+                } = match resolve_label(entry, chart_label, theme_default_size) {
+                    Some(d) => d,
+                    None => continue,
+                };
 
-            if !chart_label
-                .map(|l| l.show.allows(i, total_entries, entry.kind))
-                .unwrap_or(true)
-            {
-                continue;
-            }
+                if !chart_label
+                    .map(|l| l.show.allows(i, total_entries, entry.kind))
+                    .unwrap_or(true)
+                {
+                    continue;
+                }
 
-            let (lx, ly, align_x, align_y) = label_position(rect, position, entry.kind, entry.value);
+                let (lx, ly, align_x, align_y) = label_position(rect, position, entry.kind, entry.value);
 
-            // Background fill
-            if let Some(label) = chart_label
-                && let Some(fill_spec) = label.fill
-                && let Some(Some(lr)) = state.label_rects.get(i)
-            {
-                let fill_resolved = fill_spec.resolve(background, text_pair, &seed, None);
-                let fill_path = Path::new(|b| {
-                    b.rectangle(
-                        crate::core::Point::new(lr.x, lr.y),
-                        crate::core::Size::new(lr.width, lr.height),
-                    );
+                // Background fill
+                if let Some(label) = chart_label
+                    && let Some(fill_spec) = label.fill
+                    && let Some(Some(lr)) = state.label_rects.get(i)
+                {
+                    let fill_resolved = fill_spec.resolve(background, text_pair, &seed, None);
+                    let fill_path = Path::new(|b| {
+                        b.rectangle(
+                            crate::core::Point::new(lr.x, lr.y),
+                            crate::core::Size::new(lr.width, lr.height),
+                        );
+                    });
+                    frame.fill(&fill_path, fill_resolved);
+                }
+
+                let label_color_spec = chart_label
+                    .and_then(|l| l.color)
+                    .unwrap_or(crate::color::Color::CONTRAST);
+                let label_color = match position {
+                    Position::Above => label_color_spec.resolve(background, text_pair, &seed, None),
+                    _ => label_color_spec.resolve(bar_colors[i], text_pair, &seed, Some(background)),
+                };
+
+                let base_font = theme.data_label_text().resolved_font(theme.font());
+                let mut font = chart_label
+                    .map(|l| l.text.resolved_font(base_font))
+                    .unwrap_or(base_font);
+                if let Some(w) = chart_label.and_then(|l| l.text.weight) {
+                    font.weight = w;
+                }
+                if let Some(s) = chart_label.and_then(|l| l.text.style) {
+                    font.style = s;
+                }
+
+                frame.fill_text(CanvasText {
+                    content: label_text,
+                    position: crate::core::Point::new(lx, ly),
+                    color: label_color,
+                    size: size.into(),
+                    font,
+                    align_x: align_x.into(),
+                    align_y,
+                    line_height: crate::core::text::LineHeight::default(),
+                    shaping: crate::core::text::Shaping::Basic,
+                    ..CanvasText::default()
                 });
-                frame.fill(&fill_path, fill_resolved);
             }
-
-            let label_color_spec = chart_label
-                .and_then(|l| l.color)
-                .unwrap_or(crate::color::Color::CONTRAST);
-            let label_color = match position {
-                Position::Above => label_color_spec.resolve(background, text_pair, &seed, None),
-                _ => label_color_spec.resolve(bar_colors[i], text_pair, &seed, Some(background)),
-            };
-
-            let base_font = theme.data_label_text().resolved_font(theme.font());
-            let mut font = chart_label
-                .map(|l| l.text.resolved_font(base_font))
-                .unwrap_or(base_font);
-            if let Some(w) = chart_label.and_then(|l| l.text.weight) {
-                font.weight = w;
-            }
-            if let Some(s) = chart_label.and_then(|l| l.text.style) {
-                font.style = s;
-            }
-
-            frame.fill_text(CanvasText {
-                content: label_text,
-                position: crate::core::Point::new(lx, ly),
-                color: label_color,
-                size: size.into(),
-                font,
-                align_x: align_x.into(),
-                align_y,
-                line_height: crate::core::text::LineHeight::default(),
-                shaping: crate::core::text::Shaping::Basic,
-                ..CanvasText::default()
-            });
         }
 
         let geometry = frame.into_geometry();
@@ -434,5 +493,49 @@ fn label_position(
                 (cx, rect.y + rect.height - 4.0, Horizontal::Center, Vertical::Bottom)
             }
         }
+    }
+}
+
+/// Computes the on-screen rectangle for a waterfall bar at the current
+/// sweep progress. With a `prev` rect (data change), x/y/width/height
+/// each lerp linearly from `prev` to `cur`. Without one (fresh mount),
+/// the bar grows vertically: its bottom edge stays anchored at
+/// `cur.y + cur.height` and its top slides up toward `cur.y` as
+/// `progress` advances. At `progress == 1.0` the result equals `cur`
+/// exactly in every branch, so disabling animation reproduces today's
+/// geometry.
+fn animate_rect(cur: Rectangle, prev: Option<Rectangle>, progress: f32) -> Rectangle {
+    if let Some(prev) = prev {
+        let x = prev.x + (cur.x - prev.x) * progress;
+        let y = prev.y + (cur.y - prev.y) * progress;
+        let width = prev.width + (cur.width - prev.width) * progress;
+        let height = prev.height + (cur.height - prev.height) * progress;
+        Rectangle { x, y, width, height }
+    } else {
+        Rectangle {
+            x: cur.x,
+            y: cur.y + cur.height * (1.0 - progress),
+            width: cur.width,
+            height: cur.height * progress,
+        }
+    }
+}
+
+/// Computes the connector y-coordinate for bar `i` at the current sweep
+/// progress. With a `prev_top` (data change), lerps linearly from
+/// `prev_top` to `cur_top`. Without one (fresh mount), tracks the
+/// animated bar edge that the static `cur_top` lands on: the anchor is
+/// the bar's bottom edge (`cur_rect.y + cur_rect.height`, where the
+/// mount-grow rect collapses) and `cur_top` is the final connector
+/// position. For `Increase` and `Total` entries this slides up with the
+/// growing bar's top edge; for `Decrease` entries it stays pinned at
+/// `cur_top` (which equals the anchor). At `progress == 1.0` the result
+/// equals `cur_top` exactly in every branch.
+fn animate_top(cur_top: f32, cur_rect: Rectangle, prev_top: Option<f32>, progress: f32) -> f32 {
+    if let Some(prev_top) = prev_top {
+        prev_top + (cur_top - prev_top) * progress
+    } else {
+        let anchor = cur_rect.y + cur_rect.height;
+        anchor + (cur_top - anchor) * progress
     }
 }

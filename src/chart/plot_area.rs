@@ -212,6 +212,9 @@ where
             if let Series::Bars(bars) = series {
                 bars.set_animate(animate);
             }
+            if let Series::Waterfall(wf) = series {
+                wf.set_animate(animate);
+            }
         }
         self
     }

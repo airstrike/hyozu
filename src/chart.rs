@@ -427,6 +427,9 @@ fn animation_tick_mut(tree: &mut Tree) -> Option<&mut animation::Tick> {
     if tag == tree::Tag::of::<plot_area::bars::State>() {
         return Some(&mut tree.state.downcast_mut::<plot_area::bars::State>().tick);
     }
+    if tag == tree::Tag::of::<plot_area::waterfall::State>() {
+        return Some(&mut tree.state.downcast_mut::<plot_area::waterfall::State>().tick);
+    }
     None
 }
 
@@ -460,12 +463,29 @@ fn replant_bars(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
     }
 }
 
+/// Snapshots a Waterfall mark's pre-rebuild `rects` and `tops` onto the
+/// post-rebuild tree's `previous_rects` and `previous_tops` and arms
+/// the next redraw to interpolate from there. The caller is responsible
+/// for confirming both nodes carry a `waterfall::State`.
+fn replant_waterfall(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
+    let old_state = old_mark.state.downcast_ref::<plot_area::waterfall::State>();
+    let new_state = new_mark.state.downcast_mut::<plot_area::waterfall::State>();
+    if animate {
+        new_state.previous_rects = old_state.rects.clone();
+        new_state.previous_tops = old_state.tops.clone();
+        new_state.tick.pending_start = true;
+    } else {
+        new_state.tick.pending_start = false;
+    }
+}
+
 /// Walks old/new plot-area children pairwise and dispatches per-tag
 /// to the matching `replant_<mark>` snapshot helper. A no-op when
 /// either tree lacks a plot area.
 fn replant_mark_animations(old_children: &[Tree], new_children: &mut [Tree], animate: bool) {
     let pie_tag = tree::Tag::of::<plot_area::pie::State>();
     let bars_tag = tree::Tag::of::<plot_area::bars::State>();
+    let waterfall_tag = tree::Tag::of::<plot_area::waterfall::State>();
     let Some(old_scene) = old_children.first() else {
         return;
     };
@@ -486,6 +506,10 @@ fn replant_mark_animations(old_children: &[Tree], new_children: &mut [Tree], ani
         }
         if old_mark.tag == bars_tag && new_mark.tag == bars_tag {
             replant_bars(old_mark, new_mark, animate);
+            continue;
+        }
+        if old_mark.tag == waterfall_tag && new_mark.tag == waterfall_tag {
+            replant_waterfall(old_mark, new_mark, animate);
             continue;
         }
     }
