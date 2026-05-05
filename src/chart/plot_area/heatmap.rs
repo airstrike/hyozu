@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use super::Plane;
 use super::choropleth::palette_to_continuous_stops;
 use crate::animation;
@@ -63,36 +65,25 @@ fn compute_value_range(values: &[f64]) -> (f64, f64) {
     (lo, hi)
 }
 
-/// Neutral seed used to bridge `Palette` into raw stops at layout time,
-/// where no theme is available. Heatmap's preset palettes
-/// (`sequential_stops`, `divergent_stops`, `warm_stops`) and any
-/// user-supplied `Vec<core::Color>` route through `Color::Fixed`, which
-/// ignores the seed entirely — so the neutral values matter only for the
-/// rare case where a caller hands a `ColorScale` whose palette references
-/// theme seed slots (`Color::Success` etc.). Those colors then resolve to
-/// these neutral defaults rather than the active theme's hues; this is
-/// the documented trade-off for keeping cell color resolution in layout.
-fn neutral_seed() -> crate::palette::Seed {
-    crate::palette::Seed {
-        primary: Color::from_rgb(0.5, 0.5, 0.5),
-        secondary: Color::from_rgb(0.5, 0.5, 0.5),
-        success: Color::from_rgb(0.3, 0.7, 0.3),
-        warning: Color::from_rgb(0.9, 0.7, 0.2),
-        danger: Color::from_rgb(0.8, 0.3, 0.3),
-        background: Color::from_rgb(1.0, 1.0, 1.0),
-    }
-}
-
-/// State for Heatmap - stores positioned cell rectangles and pre-computed
-/// per-cell fill colors (theme-independent: derived from the heatmap's
-/// own value range and color stops).
+/// State for Heatmap - stores positioned cell rectangles, the cached
+/// data-derived value range, and the per-cell fill colors written by
+/// `draw` for animation snapshotting.
 pub struct State {
     pub cell_rects: Vec<Rectangle>,
-    /// Per-cell fill colors computed in [`Heatmap::layout`], paired 1:1
-    /// with [`Self::cell_rects`]. Cached so `draw` is a pure read and
-    /// the data-change interpolation has a stable target.
-    pub cell_colors: Vec<Color>,
-    /// Per-cell fill colors from the most recent layout before the
+    /// Cached `(min, max)` of the heatmap's values resolved against the
+    /// color scale's domain override. Theme-independent; computed in
+    /// [`Heatmap::layout`] and read by [`Heatmap::draw`] so the gradient
+    /// mapping doesn't re-walk `self.data.values` each frame.
+    pub value_range: (f64, f64),
+    /// Per-cell fill colors written by [`Heatmap::draw`] at the start of
+    /// each repaint, paired 1:1 with [`Self::cell_rects`]. Read by
+    /// [`crate::chart::Chart::diff`] to seed `previous_cell_colors`
+    /// during a data-change replant. Lives in a [`RefCell`] because fill
+    /// resolution is theme-dependent (the palette can reference seed
+    /// slots) and only `draw` carries the theme — `layout` cannot bake
+    /// fills without staling on a theme swap.
+    pub cell_colors: RefCell<Vec<Color>>,
+    /// Per-cell fill colors from the most recent draw before the
     /// current one, captured by [`crate::chart::Chart::diff`] when data
     /// changes so the next sweep can interpolate from previous fills to
     /// current fills. Empty on a fresh mount, in which case the
@@ -143,7 +134,8 @@ where
             tag: tree::Tag::of::<State>(),
             state: tree::State::new(State {
                 cell_rects: Vec::new(),
-                cell_colors: Vec::new(),
+                value_range: (0.0, 1.0),
+                cell_colors: RefCell::new(Vec::new()),
                 previous_cell_colors: Vec::new(),
                 tick: animation::Tick::new(),
             }),
@@ -156,14 +148,21 @@ where
         // No children to diff
     }
 
-    /// Layout the heatmap - calculates cell positions and sizes.
+    /// Layout the heatmap - calculates cell positions and sizes, plus the
+    /// data-derived value range. Per-cell fill colors are theme-dependent
+    /// and resolve in [`Self::draw`] so a seed-based palette renders with
+    /// the active theme's hues.
     pub fn layout(&self, tree: &mut Tree, _renderer: &Renderer, _limits: &Limits, plane: &Plane) -> Node {
         let state = tree.state.downcast_mut::<State>();
         state.cell_rects.clear();
-        state.cell_colors.clear();
 
         let rows = self.data.rows();
         let cols = self.data.cols();
+
+        state.value_range = self
+            .data
+            .color
+            .resolved_domain(|| compute_value_range(&self.data.values));
 
         if rows == 0 || cols == 0 {
             return Node::new(Size::ZERO);
@@ -171,15 +170,6 @@ where
 
         let cell_width = plane.bounds.width / cols as f32;
         let cell_height = plane.bounds.height / rows as f32;
-
-        let (v_min, v_max) = self
-            .data
-            .color
-            .resolved_domain(|| compute_value_range(&self.data.values));
-        let palette = self.data.color.resolved_palette(default_heatmap_palette);
-        let seed = neutral_seed();
-        let stops: Vec<Color> = palette_to_continuous_stops(&palette, &seed);
-        let transform = self.data.color.transform;
 
         for row in 0..rows {
             for col in 0..cols {
@@ -191,10 +181,6 @@ where
                     width: cell_width,
                     height: cell_height,
                 });
-
-                let value = self.data.get(row, col);
-                let t = transform.map_to_unit(value, v_min, v_max).clamp(0.0, 1.0) as f32;
-                state.cell_colors.push(crate::palette::sample_gradient(&stops, t));
             }
         }
 
@@ -229,12 +215,36 @@ where
         let mut cell_frame = Frame::new(renderer, layout_bounds.size());
         let mut label_frame = Frame::new(renderer, layout_bounds.size());
 
-        // With a previous-layout snapshot (data change), each cell's
-        // fill lerps per-channel from prev to cur. Without one (fresh
-        // mount), the alpha component multiplies by progress so cells
-        // fade in from fully transparent to their final color. With
+        // ── Resolve color scale ───────────────────────────────────
+        // Theme-dependent (a palette referencing seed slots resolves
+        // through the active theme's hues), so it stays in draw. The
+        // user's explicit palette wins; otherwise the closure produces
+        // the mark's default sequential gradient.
+        let palette = self.data.color.resolved_palette(default_heatmap_palette);
+        let stops: Vec<Color> = palette_to_continuous_stops(&palette, &seed);
+        let transform = self.data.color.transform;
+        let (v_min, v_max) = state.value_range;
+
+        // ── Resolve target fill per cell ──────────────────────────
+        // The cache is written to `state.cell_colors` so a subsequent
+        // data-change replant in `chart::diff` can snapshot it onto the
+        // post-rebuild tree's `previous_cell_colors`.
+        let target_fills: Vec<Color> = (0..rows * cols)
+            .map(|idx| {
+                let row = idx / cols;
+                let col = idx % cols;
+                let value = self.data.get(row, col);
+                let t = transform.map_to_unit(value, v_min, v_max).clamp(0.0, 1.0) as f32;
+                crate::palette::sample_gradient(&stops, t)
+            })
+            .collect();
+
+        // With a previous-draw snapshot (data change), each cell's fill
+        // lerps per-channel from prev to cur. Without one (fresh mount),
+        // the alpha component multiplies by progress so cells fade in
+        // from fully transparent to their final color. With
         // `animate = false` progress pins to `1.0` and the rendered
-        // color equals `state.cell_colors[idx]` exactly.
+        // color equals `target_fills[idx]` exactly.
         let progress = if !self.animate { 1.0 } else { state.tick.progress() };
         let animating = progress < 1.0 - f32::EPSILON;
         let has_prev = !state.previous_cell_colors.is_empty();
@@ -244,7 +254,7 @@ where
                 let idx = row * cols + col;
                 let rect = &state.cell_rects[idx];
                 let value = self.data.get(row, col);
-                let cur_color = state.cell_colors[idx];
+                let cur_color = target_fills[idx];
 
                 let cell_color = if has_prev {
                     let prev_color = state.previous_cell_colors.get(idx).copied().unwrap_or(cur_color);
@@ -284,6 +294,12 @@ where
                 }
             }
         }
+
+        // Snapshot the resolved targets for the next replant to seed
+        // `previous_cell_colors` from. Always written, regardless of
+        // `self.animate`, so toggling animation on later still has a
+        // valid baseline.
+        *state.cell_colors.borrow_mut() = target_fills;
 
         let translation = crate::core::Vector::new(layout_bounds.x, layout_bounds.y);
 

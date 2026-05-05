@@ -595,7 +595,7 @@ fn replant_heatmap(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
     let old_state = old_mark.state.downcast_ref::<plot_area::heatmap::State>();
     let new_state = new_mark.state.downcast_mut::<plot_area::heatmap::State>();
     if animate {
-        new_state.previous_cell_colors = old_state.cell_colors.clone();
+        new_state.previous_cell_colors = old_state.cell_colors.borrow().clone();
         new_state.tick.pending_start = true;
     } else {
         new_state.tick.pending_start = false;
