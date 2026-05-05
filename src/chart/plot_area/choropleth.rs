@@ -85,8 +85,16 @@ where
     _marker: std::marker::PhantomData<(Message, Renderer)>,
 }
 
-/// Format a legend value with human-friendly abbreviations.
+/// Format a legend value with human-friendly abbreviations. Used as
+/// the built-in fallback when the choropleth's legend / ColorScale /
+/// Data chain doesn't supply a closure.
 fn format_legend_value(v: f64) -> String {
+    // Exact zero gets a clean "0" rather than the scientific form
+    // produced by the `< 0.01` branch below — `{:.1e}` on 0.0 prints
+    // "0.0e0", which is technically right and visually unacceptable.
+    if v == 0.0 {
+        return "0".to_string();
+    }
     let abs = v.abs();
     let raw = if abs >= 1_000_000_000.0 {
         format!("{:.1}B", v / 1_000_000_000.0)
@@ -331,9 +339,28 @@ where
         };
         state.feature_state = compute_feature_states(entries, filtered_ids, lo, hi, self.data.color.transform);
 
+        // Legend value-format chain: a guide-level override on
+        // `legend::Config.value_format` wins, then the mark-level
+        // `ColorScale.format`, then the built-in `format_legend_value`
+        // abbreviation. Data-level `Data::value_format` is not reachable
+        // from this renderer today (no thread-through from scene); a
+        // caller wanting it applied to the legend can pass the same
+        // closure via `legend::Config::value_format`.
+        let legend_format = self
+            .data
+            .legend
+            .as_ref()
+            .and_then(|l| l.value_format_ref().cloned())
+            .or_else(|| self.data.color.format.clone());
+        let format = |v: f64| -> String {
+            match &legend_format {
+                Some(f) => f(&v),
+                None => format_legend_value(v),
+            }
+        };
         state.legend_plan = scale_legend::Plan {
-            min_label: format_legend_value(lo),
-            max_label: format_legend_value(hi),
+            min_label: format(lo),
+            max_label: format(hi),
         };
 
         Node::new(Size::ZERO)

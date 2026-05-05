@@ -185,9 +185,16 @@ fn panel_for_strip(legend: &Config, title: Option<&str>, strip: Rectangle) -> Pa
             let panel_w = strip.width;
             let panel_h = title_line_height + bar_length + PANEL_PADDING * 2.0;
             let bar_offset_y = PANEL_PADDING + title_line_height;
+            // Center the bar+labels cluster (bar + tick gap + label
+            // column) horizontally inside the panel. Without this the
+            // bar sticks to the left edge while the label column reaches
+            // toward the right, leaving the cluster looking left-pinned.
+            let label_w = label_column_width(title);
+            let cluster_w = BAR_THICKNESS + TICK_LENGTH + 2.0 + label_w;
+            let bar_offset_x = ((panel_w - cluster_w) * 0.5).max(PANEL_PADDING);
             (
                 Size::new(panel_w, panel_h),
-                Vector::new(PANEL_PADDING, bar_offset_y),
+                Vector::new(bar_offset_x, bar_offset_y),
                 Size::new(BAR_THICKNESS, bar_length),
             )
         }
