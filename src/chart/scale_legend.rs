@@ -185,12 +185,15 @@ fn panel_for_strip(legend: &Config, title: Option<&str>, strip: Rectangle) -> Pa
             let panel_w = strip.width;
             let panel_h = title_line_height + bar_length + PANEL_PADDING * 2.0;
             let bar_offset_y = PANEL_PADDING + title_line_height;
-            // Center the bar+labels cluster (bar + tick gap + label
-            // column) horizontally inside the panel. Without this the
-            // bar sticks to the left edge while the label column reaches
-            // toward the right, leaving the cluster looking left-pinned.
-            let label_w = label_column_width(title);
-            let cluster_w = BAR_THICKNESS + TICK_LENGTH + 2.0 + label_w;
+            // Center the bar+labels cluster (bar + tick gap + numeric
+            // label) horizontally inside the panel. The numeric label
+            // column is short — formatted values like "$500K" or
+            // "1.2M" cap around 6 glyphs — so use that width instead
+            // of `label_column_width`, which sizes for the title and
+            // would shrink the centering offset to almost zero.
+            const NUMERIC_LABEL_CHARS: f32 = 6.0;
+            let numeric_label_w = NUMERIC_LABEL_CHARS * GLYPH_WIDTH_ESTIMATE;
+            let cluster_w = BAR_THICKNESS + TICK_LENGTH + 2.0 + numeric_label_w;
             let bar_offset_x = ((panel_w - cluster_w) * 0.5).max(PANEL_PADDING);
             (
                 Size::new(panel_w, panel_h),
