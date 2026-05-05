@@ -451,6 +451,12 @@ fn animation_tick_mut(tree: &mut Tree) -> Option<&mut animation::Tick> {
     if tag == tree::Tag::of::<plot_area::choropleth::State>() {
         return Some(&mut tree.state.downcast_mut::<plot_area::choropleth::State>().tick);
     }
+    if tag == tree::Tag::of::<plot_area::gauge::State>() {
+        return Some(&mut tree.state.downcast_mut::<plot_area::gauge::State>().tick);
+    }
+    if tag == tree::Tag::of::<plot_area::band::State>() {
+        return Some(&mut tree.state.downcast_mut::<plot_area::band::State>().tick);
+    }
     None
 }
 
@@ -637,6 +643,38 @@ fn replant_choropleth(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
     }
 }
 
+/// Snapshots a Gauge mark's pre-rebuild `value_angle` onto the
+/// post-rebuild tree's `previous_value_angle` and arms the next redraw
+/// to interpolate from there. The caller is responsible for confirming
+/// both nodes carry a `gauge::State`.
+fn replant_gauge(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
+    let old_state = old_mark.state.downcast_ref::<plot_area::gauge::State>();
+    let new_state = new_mark.state.downcast_mut::<plot_area::gauge::State>();
+    if animate {
+        new_state.previous_value_angle = old_state.value_angle;
+        new_state.tick.pending_start = true;
+    } else {
+        new_state.tick.pending_start = false;
+    }
+}
+
+/// Snapshots a Band mark's pre-rebuild `lower_pixel` and `upper_pixel`
+/// onto the post-rebuild tree's `previous_lower_pixel` and
+/// `previous_upper_pixel` and arms the next redraw to interpolate from
+/// there. The caller is responsible for confirming both nodes carry a
+/// `band::State`.
+fn replant_band(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
+    let old_state = old_mark.state.downcast_ref::<plot_area::band::State>();
+    let new_state = new_mark.state.downcast_mut::<plot_area::band::State>();
+    if animate {
+        new_state.previous_lower_pixel = Some(old_state.lower_pixel);
+        new_state.previous_upper_pixel = Some(old_state.upper_pixel);
+        new_state.tick.pending_start = true;
+    } else {
+        new_state.tick.pending_start = false;
+    }
+}
+
 /// Walks old/new plot-area children pairwise and dispatches per-tag
 /// to the matching `replant_<mark>` snapshot helper. A no-op when
 /// either tree lacks a plot area.
@@ -651,6 +689,8 @@ fn replant_mark_animations(old_children: &[Tree], new_children: &mut [Tree], ani
     let heatmap_tag = tree::Tag::of::<plot_area::heatmap::State>();
     let treemap_tag = tree::Tag::of::<plot_area::treemap::State>();
     let choropleth_tag = tree::Tag::of::<plot_area::choropleth::State>();
+    let gauge_tag = tree::Tag::of::<plot_area::gauge::State>();
+    let band_tag = tree::Tag::of::<plot_area::band::State>();
     let Some(old_scene) = old_children.first() else {
         return;
     };
@@ -703,6 +743,14 @@ fn replant_mark_animations(old_children: &[Tree], new_children: &mut [Tree], ani
         }
         if old_mark.tag == choropleth_tag && new_mark.tag == choropleth_tag {
             replant_choropleth(old_mark, new_mark, animate);
+            continue;
+        }
+        if old_mark.tag == gauge_tag && new_mark.tag == gauge_tag {
+            replant_gauge(old_mark, new_mark, animate);
+            continue;
+        }
+        if old_mark.tag == band_tag && new_mark.tag == band_tag {
+            replant_band(old_mark, new_mark, animate);
             continue;
         }
     }

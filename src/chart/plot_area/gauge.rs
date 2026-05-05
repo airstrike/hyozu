@@ -1,4 +1,5 @@
 use super::Plane;
+use crate::animation;
 use crate::core::Size;
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
@@ -17,6 +18,15 @@ pub struct State {
     pub value_angle: f32,
     /// Total sweep in radians
     pub sweep_rad: f32,
+    /// Value angle from the most recent layout before the current one,
+    /// captured by [`crate::chart::Chart::diff`] when data changes so the
+    /// next sweep can interpolate from the previous angle to the current
+    /// one. `0.0` on a fresh mount, in which case the animation collapses
+    /// to a `0 → value_angle` sweep.
+    pub previous_value_angle: f32,
+    /// Per-frame entrance/transition lifecycle (progress, pending-start
+    /// flag, latest captured `Instant`) advanced by the chart widget.
+    pub tick: animation::Tick,
 }
 
 /// A Gauge series that renders gauge/meter charts.
@@ -26,6 +36,10 @@ where
     Renderer: text::Renderer + geometry::Renderer,
 {
     pub(super) data: &'a crate::mark::gauge::Gauge,
+    /// Whether the mount/data-change sweep runs. Mirrors
+    /// [`crate::Data::animate`] (the chart-level toggle); `false` makes
+    /// `draw` snap to the laid-out geometry.
+    pub(crate) animate: bool,
     _marker: std::marker::PhantomData<(Message, Renderer)>,
 }
 
@@ -38,8 +52,15 @@ where
     pub fn new(data: &'a crate::mark::gauge::Gauge) -> Self {
         Self {
             data,
+            animate: true,
             _marker: std::marker::PhantomData,
         }
+    }
+
+    /// Sets whether the mount/data-change sweep should run. Wired by
+    /// [`super::PlotArea::with_animate`] from [`crate::Data::animate`].
+    pub(crate) fn set_animate(&mut self, animate: bool) {
+        self.animate = animate;
     }
 
     /// Returns the initial tree state for this Gauge
@@ -49,6 +70,8 @@ where
             state: tree::State::new(State {
                 value_angle: 0.0,
                 sweep_rad: 0.0,
+                previous_value_angle: 0.0,
+                tick: animation::Tick::new(),
             }),
             children: Vec::new(),
         }
@@ -130,6 +153,17 @@ where
         let range = self.data.max - self.data.min;
         let has_zones = !self.data.zones.is_empty() && range > 0.0;
 
+        // Sweep: the visible value angle interpolates from the previous
+        // layout's value angle toward the current one. With no previous
+        // value (fresh mount) `previous_value_angle` is `0.0`, so the
+        // expression collapses to a `0 → value_angle` mount sweep. When
+        // animation is opted out, progress pins to `1.0` and
+        // `animated_value_angle` equals `state.value_angle` exactly.
+        let progress = if !self.animate { 1.0 } else { state.tick.progress() };
+        let animating = progress < 1.0 - f32::EPSILON;
+        let animated_value_angle =
+            state.previous_value_angle + (state.value_angle - state.previous_value_angle) * progress;
+
         // Background track
         let track_color = crate::core::Color {
             a: 0.12,
@@ -170,7 +204,7 @@ where
                 inner_radius,
                 radius,
                 start_angle,
-                state.value_angle,
+                animated_value_angle,
                 state.sweep_rad,
                 background,
                 self.data.dim_opacity,
@@ -204,7 +238,7 @@ where
                 inner_radius,
                 radius,
                 start_angle,
-                state.value_angle,
+                animated_value_angle,
                 state.sweep_rad,
                 background,
                 self.data.dim_opacity,
@@ -237,7 +271,7 @@ where
                 inner_radius,
                 radius,
                 start_angle,
-                state.value_angle,
+                animated_value_angle,
                 state.sweep_rad,
                 background,
                 self.data.dim_opacity,
@@ -245,7 +279,7 @@ where
         } else {
             // Simple value arc (original behavior)
             let value_color = palette.get(color_offset).resolve(background, text_pair, &seed, None);
-            if state.value_angle > 0.001 {
+            if animated_value_angle > 0.001 {
                 draw_arc_segment(
                     &mut frame,
                     cx,
@@ -253,13 +287,18 @@ where
                     inner_radius,
                     radius,
                     start_angle,
-                    start_angle + state.value_angle,
+                    start_angle + animated_value_angle,
                     value_color,
                 );
             }
         }
 
-        if let Some(ticks) = &self.data.ticks {
+        // Tick marks and labels — suppressed mid-sweep so labels don't
+        // pop in over arc segments that haven't grown into their final
+        // positions yet.
+        if let Some(ticks) = &self.data.ticks
+            && !animating
+        {
             draw_ticks(
                 &mut frame,
                 self.data,
@@ -287,7 +326,7 @@ where
                 inner_radius,
                 radius,
                 start_angle,
-                state.value_angle,
+                animated_value_angle,
                 text_pair,
                 &seed,
                 background,
@@ -309,7 +348,9 @@ where
         let font_size = radius * 0.35;
         let mut label_bottom = text_cy;
 
-        if self.data.show_value {
+        // Center value, unit, and subtitle — suppressed mid-sweep so
+        // text doesn't pop in before the arc reaches its final position.
+        if self.data.show_value && !animating {
             let value_text = if let Some(fmt) = &self.data.format {
                 (fmt)(self.data.value)
             } else {
@@ -352,7 +393,9 @@ where
         }
 
         // --- Subtitle ---
-        if let Some(subtitle) = &self.data.subtitle {
+        if let Some(subtitle) = &self.data.subtitle
+            && !animating
+        {
             let sub_size = font_size * 0.3;
             frame.fill_text(Text {
                 content: subtitle.clone(),

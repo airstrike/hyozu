@@ -1,4 +1,5 @@
 use super::Plane;
+use crate::animation;
 use crate::core::Size;
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
@@ -15,6 +16,18 @@ pub struct State {
     pub lower_pixel: f32,
     /// Upper pixel coordinate along the band's orientation axis.
     pub upper_pixel: f32,
+    /// Lower edge pixel from the most recent layout before the current
+    /// one, captured by [`crate::chart::Chart::diff`] when data changes
+    /// so the next sweep can interpolate from the previous edge to the
+    /// current one. `None` on a fresh mount, in which case both edges
+    /// grow apart from the band's center axis.
+    pub previous_lower_pixel: Option<f32>,
+    /// Upper edge pixel from the most recent layout before the current
+    /// one. See [`State::previous_lower_pixel`] for the lifecycle.
+    pub previous_upper_pixel: Option<f32>,
+    /// Per-frame entrance/transition lifecycle (progress, pending-start
+    /// flag, latest captured `Instant`) advanced by the chart widget.
+    pub tick: animation::Tick,
 }
 
 /// A Band series that renders a translucent shaded value range.
@@ -24,6 +37,10 @@ where
     Renderer: text::Renderer + geometry::Renderer,
 {
     pub(super) data: &'a crate::mark::band::Band,
+    /// Whether the mount/data-change sweep runs. Mirrors
+    /// [`crate::Data::animate`] (the chart-level toggle); `false` makes
+    /// `draw` snap to the laid-out geometry.
+    pub(crate) animate: bool,
     _marker: std::marker::PhantomData<(Message, Renderer)>,
 }
 
@@ -36,8 +53,15 @@ where
     pub fn new(data: &'a crate::mark::band::Band) -> Self {
         Self {
             data,
+            animate: true,
             _marker: std::marker::PhantomData,
         }
+    }
+
+    /// Sets whether the mount/data-change sweep should run. Wired by
+    /// [`super::PlotArea::with_animate`] from [`crate::Data::animate`].
+    pub(crate) fn set_animate(&mut self, animate: bool) {
+        self.animate = animate;
     }
 
     /// Returns the initial tree state for this Band
@@ -47,6 +71,9 @@ where
             state: tree::State::new(State {
                 lower_pixel: 0.0,
                 upper_pixel: 0.0,
+                previous_lower_pixel: None,
+                previous_upper_pixel: None,
+                tick: animation::Tick::new(),
             }),
             children: Vec::new(),
         }
@@ -107,22 +134,40 @@ where
             ..base_color
         };
 
+        // Sweep: each edge interpolates from its previous-layout pixel
+        // toward its current pixel. With no previous (fresh mount) both
+        // edges interpolate from the band's center axis outward, so the
+        // band grows symmetrically. When animation is opted out, progress
+        // pins to `1.0` and the animated edges equal `state.lower_pixel`
+        // and `state.upper_pixel` exactly.
+        let progress = if !self.animate { 1.0 } else { state.tick.progress() };
+        let animating = progress < 1.0 - f32::EPSILON;
+        let center = (state.lower_pixel + state.upper_pixel) / 2.0;
+        let animated_lower = match state.previous_lower_pixel {
+            Some(prev) => prev + (state.lower_pixel - prev) * progress,
+            None => center + (state.lower_pixel - center) * progress,
+        };
+        let animated_upper = match state.previous_upper_pixel {
+            Some(prev) => prev + (state.upper_pixel - prev) * progress,
+            None => center + (state.upper_pixel - center) * progress,
+        };
+
         let rect = match self.data.orientation {
             BandOrientation::Horizontal => {
                 // Y-range band spans full plot width. Plane pixel values grow
                 // downward, so `upper` (data) maps to a smaller pixel y.
-                let (y0, y1) = if state.upper_pixel <= state.lower_pixel {
-                    (state.upper_pixel, state.lower_pixel)
+                let (y0, y1) = if animated_upper <= animated_lower {
+                    (animated_upper, animated_lower)
                 } else {
-                    (state.lower_pixel, state.upper_pixel)
+                    (animated_lower, animated_upper)
                 };
                 (0.0_f32, y0, layout_bounds.width, (y1 - y0).max(0.0))
             }
             BandOrientation::Vertical => {
-                let (x0, x1) = if state.lower_pixel <= state.upper_pixel {
-                    (state.lower_pixel, state.upper_pixel)
+                let (x0, x1) = if animated_lower <= animated_upper {
+                    (animated_lower, animated_upper)
                 } else {
-                    (state.upper_pixel, state.lower_pixel)
+                    (animated_upper, animated_lower)
                 };
                 (x0, 0.0_f32, (x1 - x0).max(0.0), layout_bounds.height)
             }
@@ -137,7 +182,11 @@ where
         }
 
         // Optional label at the near edge (top for horizontal, left for vertical).
-        if let Some(label_text) = &self.data.label {
+        // Suppressed mid-sweep so it doesn't pop in over edges that
+        // haven't reached their final positions yet.
+        if let Some(label_text) = &self.data.label
+            && !animating
+        {
             let label_size = 11.0_f32;
             let (position, align_x, align_y) = match self.data.orientation {
                 BandOrientation::Horizontal => (

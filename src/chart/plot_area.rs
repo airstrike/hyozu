@@ -236,6 +236,12 @@ where
             if let Series::Choropleth(c) = series {
                 c.set_animate(animate);
             }
+            if let Series::Gauge(gauge) = series {
+                gauge.set_animate(animate);
+            }
+            if let Series::Band(band) = series {
+                band.set_animate(animate);
+            }
         }
         self
     }
