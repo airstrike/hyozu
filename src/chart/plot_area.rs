@@ -13,6 +13,7 @@ pub mod boxplot;
 pub mod bubble_map;
 pub mod choropleth;
 pub mod gauge;
+pub mod geo;
 pub mod heatmap;
 pub mod line;
 pub mod pie;
@@ -173,6 +174,14 @@ pub struct State {
     pub plane: Option<Plane>,
     /// The coordinate plane for the secondary (top/right) axes, if any.
     pub secondary_plane: Option<Plane>,
+    /// Chart-level geo projection cache, populated whenever a
+    /// geo-aware mark (Choropleth, BubbleMap) is present. `None` for
+    /// purely cartesian charts. Survives [`crate::chart::Chart`]'s
+    /// wholesale `diff` rebuild via the sibling `replant_geo_plane`
+    /// helper, which moves the cache from the old tree onto the new
+    /// one so the next layout's dirty-check short-circuits when geo
+    /// inputs are unchanged.
+    pub geo_plane: Option<geo::Plane>,
 }
 
 /// A PlotArea renders the data series within the chart.
@@ -356,6 +365,7 @@ where
             state: tree::State::new(State {
                 plane: None,
                 secondary_plane: None,
+                geo_plane: None,
             }),
             children,
         }
@@ -856,6 +866,31 @@ where
         } else {
             None
         };
+
+        // Build (or reuse) the chart-level geo projection cache when a
+        // geo-aware mark is in the series list. The plane's bounds are
+        // the full plot-area limits-max with origin (0, 0); per-mark
+        // renderers translate by `layout_bounds.{x, y}` when drawing.
+        let needs_geo_plane = self
+            .series
+            .iter()
+            .any(|s| matches!(s, Series::Choropleth(_) | Series::BubbleMap(_)));
+        if needs_geo_plane {
+            let geo_bounds = Rectangle {
+                x: 0.0,
+                y: 0.0,
+                width: size.width,
+                height: size.height,
+            };
+            state.geo_plane.get_or_insert_with(geo::Plane::new).ensure(
+                geo_bounds,
+                &geo_config.geo,
+                geo_config.scope,
+                geo_config.projection,
+            );
+        } else {
+            state.geo_plane = None;
+        }
 
         // Layout each series with its assigned plane
         for (i, series) in self.series.iter().enumerate() {

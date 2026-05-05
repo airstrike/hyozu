@@ -804,6 +804,41 @@ fn replant_mark_animations(old_children: &[Tree], new_children: &mut [Tree], ani
     }
 }
 
+/// Moves the chart-level `geo_plane` from the pre-rebuild
+/// [`plot_area::State`] onto the post-rebuild one so the next layout's
+/// `Arc::ptr_eq + prev_size + prev_scope + prev_projection` dirty-check
+/// short-circuits when the geo inputs are unchanged. Sibling to
+/// [`replant_mark_animations`] (which walks per-mark child trees but
+/// never the plot-area's own state). A no-op when either tree lacks
+/// the expected `[scene][plot_area]` shape — defensive against future
+/// shape drift the way the animation walker is.
+///
+/// Takes `old_children` by `&mut` rather than `&` so the cached
+/// projection (potentially many KB of `Vec<Vec<Vec<(f32, f32)>>>`)
+/// moves rather than clones; the old tree is dropped immediately
+/// after this call returns.
+fn replant_geo_plane(old_children: &mut [Tree], new_children: &mut [Tree]) {
+    let plot_area_tag = tree::Tag::of::<plot_area::State>();
+    let Some(old_scene) = old_children.first_mut() else {
+        return;
+    };
+    let Some(new_scene) = new_children.first_mut() else {
+        return;
+    };
+    let Some(old_plot_area) = old_scene.children.get_mut(6) else {
+        return;
+    };
+    let Some(new_plot_area) = new_scene.children.get_mut(6) else {
+        return;
+    };
+    if old_plot_area.tag != plot_area_tag || new_plot_area.tag != plot_area_tag {
+        return;
+    }
+    let old_state = old_plot_area.state.downcast_mut::<plot_area::State>();
+    let new_state = new_plot_area.state.downcast_mut::<plot_area::State>();
+    new_state.geo_plane = old_state.geo_plane.take();
+}
+
 /// Walks the plot-area subtree and advances every animated mark's
 /// [`animation::Tick`] by one frame. Kicks pending sweeps off on the
 /// first redraw that carries an `Instant` and asks for another redraw
@@ -924,8 +959,9 @@ where
             // of mounting from `0`. Done positionally — each pie mark
             // stays at its plot-area child index across rebuilds, since
             // the data's mark vector drives both layouts.
-            let old_children = std::mem::replace(&mut tree.children, self.children());
+            let mut old_children = std::mem::replace(&mut tree.children, self.children());
             replant_mark_animations(&old_children, &mut tree.children, self.animate);
+            replant_geo_plane(&mut old_children, &mut tree.children);
             return;
         }
         self.scene.diff(&mut tree.children[0]);
