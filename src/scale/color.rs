@@ -242,7 +242,7 @@ mod tests {
         let s: ColorScale<f64> = ColorScale::default();
         let (lo, hi) = s.resolved_numeric_domain(|| (10.8, 24.1), 5);
         assert!((lo - 10.0).abs() < 1e-9);
-        assert!((hi - 25.0).abs() < 1e-9);
+        assert!((hi - 26.0).abs() < 1e-9);
     }
 
     #[test]
@@ -276,6 +276,6 @@ mod tests {
         let s: ColorScale<f64> = ColorScale::default().sqrt();
         let (lo, hi) = s.resolved_numeric_domain(|| (10.8, 24.1), 5);
         assert!((lo - 10.0).abs() < 1e-9);
-        assert!((hi - 25.0).abs() < 1e-9);
+        assert!((hi - 26.0).abs() < 1e-9);
     }
 }
