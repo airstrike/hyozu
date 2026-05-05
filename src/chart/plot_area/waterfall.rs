@@ -278,7 +278,8 @@ where
             .enumerate()
             .map(|(i, cur)| {
                 let prev = state.previous_rects.get(i).copied();
-                animate_rect(*cur, prev, progress)
+                let kind = state.kinds.get(i).copied().unwrap_or(EntryKind::Increase);
+                animate_rect(*cur, prev, progress, kind)
             })
             .collect();
         let animated_tops: Vec<f32> = state
@@ -287,7 +288,8 @@ where
             .zip(state.rects.iter())
             .enumerate()
             .map(|(i, (&cur_top, &cur_rect))| {
-                animate_top(cur_top, cur_rect, state.previous_tops.get(i).copied(), progress)
+                let kind = state.kinds.get(i).copied().unwrap_or(EntryKind::Increase);
+                animate_top(cur_top, cur_rect, state.previous_tops.get(i).copied(), progress, kind)
             })
             .collect();
 
@@ -499,12 +501,19 @@ fn label_position(
 /// Computes the on-screen rectangle for a waterfall bar at the current
 /// sweep progress. With a `prev` rect (data change), x/y/width/height
 /// each lerp linearly from `prev` to `cur`. Without one (fresh mount),
-/// the bar grows vertically: its bottom edge stays anchored at
-/// `cur.y + cur.height` and its top slides up toward `cur.y` as
-/// `progress` advances. At `progress == 1.0` the result equals `cur`
-/// exactly in every branch, so disabling animation reproduces today's
-/// geometry.
-fn animate_rect(cur: Rectangle, prev: Option<Rectangle>, progress: f32) -> Rectangle {
+/// the bar grows from a kind-specific anchor edge:
+///
+/// - `Increase` and `Total` bars grow upward from their bottom edge
+///   (`cur.y + cur.height`), since that edge represents the running
+///   total before the bar's value is applied.
+/// - `Decrease` bars grow downward from their top edge (`cur.y`), which
+///   represents the running total before the decrement. Anchoring at
+///   the top makes the bar visually emerge from the previous total
+///   rather than from below the new total.
+///
+/// At `progress == 1.0` the result equals `cur` exactly in every
+/// branch, so disabling animation reproduces today's geometry.
+fn animate_rect(cur: Rectangle, prev: Option<Rectangle>, progress: f32, kind: EntryKind) -> Rectangle {
     if let Some(prev) = prev {
         let x = prev.x + (cur.x - prev.x) * progress;
         let y = prev.y + (cur.y - prev.y) * progress;
@@ -512,11 +521,19 @@ fn animate_rect(cur: Rectangle, prev: Option<Rectangle>, progress: f32) -> Recta
         let height = prev.height + (cur.height - prev.height) * progress;
         Rectangle { x, y, width, height }
     } else {
-        Rectangle {
-            x: cur.x,
-            y: cur.y + cur.height * (1.0 - progress),
-            width: cur.width,
-            height: cur.height * progress,
+        match kind {
+            EntryKind::Decrease => Rectangle {
+                x: cur.x,
+                y: cur.y,
+                width: cur.width,
+                height: cur.height * progress,
+            },
+            EntryKind::Increase | EntryKind::Total => Rectangle {
+                x: cur.x,
+                y: cur.y + cur.height * (1.0 - progress),
+                width: cur.width,
+                height: cur.height * progress,
+            },
         }
     }
 }
@@ -524,18 +541,20 @@ fn animate_rect(cur: Rectangle, prev: Option<Rectangle>, progress: f32) -> Recta
 /// Computes the connector y-coordinate for bar `i` at the current sweep
 /// progress. With a `prev_top` (data change), lerps linearly from
 /// `prev_top` to `cur_top`. Without one (fresh mount), tracks the
-/// animated bar edge that the static `cur_top` lands on: the anchor is
-/// the bar's bottom edge (`cur_rect.y + cur_rect.height`, where the
-/// mount-grow rect collapses) and `cur_top` is the final connector
-/// position. For `Increase` and `Total` entries this slides up with the
-/// growing bar's top edge; for `Decrease` entries it stays pinned at
-/// `cur_top` (which equals the anchor). At `progress == 1.0` the result
-/// equals `cur_top` exactly in every branch.
-fn animate_top(cur_top: f32, cur_rect: Rectangle, prev_top: Option<f32>, progress: f32) -> f32 {
+/// animated bar's running-total edge: for `Increase` / `Total` the
+/// anchor is the bottom edge (`cur_rect.y + cur_rect.height`); for
+/// `Decrease` it's the top edge (`cur_rect.y`). The connector slides
+/// from that anchor toward `cur_top` so it stays glued to the animated
+/// bar's running-total edge across the sweep. At `progress == 1.0` the
+/// result equals `cur_top` exactly in every branch.
+fn animate_top(cur_top: f32, cur_rect: Rectangle, prev_top: Option<f32>, progress: f32, kind: EntryKind) -> f32 {
     if let Some(prev_top) = prev_top {
         prev_top + (cur_top - prev_top) * progress
     } else {
-        let anchor = cur_rect.y + cur_rect.height;
+        let anchor = match kind {
+            EntryKind::Decrease => cur_rect.y,
+            EntryKind::Increase | EntryKind::Total => cur_rect.y + cur_rect.height,
+        };
         anchor + (cur_top - anchor) * progress
     }
 }

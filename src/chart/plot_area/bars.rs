@@ -662,12 +662,37 @@ where
         let radius = self.data.corner_radius;
 
         // Sweep: each bar's rectangle interpolates from its previous-layout
-        // rect (or from a baseline-anchored zero-extent rect on fresh mount)
-        // toward its current rect. With `animate = false` progress pins to
-        // `1.0` and the animated rect equals `state.series_rects[s][i]`,
-        // reproducing today's geometry exactly.
+        // rect (or from a column-shared baseline on fresh mount) toward its
+        // current rect. The mount anchor is the bottom-most edge of the
+        // column for vertical layouts (or leftmost for horizontal) — for
+        // stacked layouts every segment in the column collapses to the
+        // same edge, keeping the stack flush against itself instead of
+        // opening gaps between segments. With `animate = false` progress
+        // pins to `1.0` and the animated rect equals
+        // `state.series_rects[s][i]`, reproducing today's geometry exactly.
         let progress = if !self.animate { 1.0 } else { state.tick.progress() };
         let animating = progress < 1.0 - f32::EPSILON;
+        let n_columns = state.series_rects.iter().map(|s| s.len()).max().unwrap_or(0);
+        let baselines: Vec<f32> = (0..n_columns)
+            .map(|col| {
+                let init = if is_horizontal {
+                    f32::INFINITY
+                } else {
+                    f32::NEG_INFINITY
+                };
+                state
+                    .series_rects
+                    .iter()
+                    .filter_map(|s| s.get(col))
+                    .fold(init, |acc, r| {
+                        if is_horizontal {
+                            acc.min(r.x)
+                        } else {
+                            acc.max(r.y + r.height)
+                        }
+                    })
+            })
+            .collect();
         let animated_series_rects: Vec<Vec<Rectangle>> = state
             .series_rects
             .iter()
@@ -678,7 +703,12 @@ where
                     .enumerate()
                     .map(|(i, cur)| {
                         let prev = state.previous_series_rects.get(s).and_then(|v| v.get(i)).copied();
-                        animate_rect(*cur, prev, progress, is_horizontal)
+                        let baseline =
+                            baselines
+                                .get(i)
+                                .copied()
+                                .unwrap_or(if is_horizontal { cur.x } else { cur.y + cur.height });
+                        animate_rect(*cur, prev, progress, is_horizontal, baseline)
                     })
                     .collect()
             })
@@ -1041,17 +1071,27 @@ fn label_position(
 /// Computes the on-screen rectangle for a bar at the current sweep
 /// progress. With a `prev` rect (data change), x/y/width/height each
 /// lerp linearly from `prev` to `cur`. Without one (fresh mount), the
-/// bar grows from the orientation-appropriate baseline:
+/// bar grows from the column-shared `baseline`:
 ///
-/// - Vertical bars (height changes, anchored at the bottom edge):
-///   `height` scales by `progress`, the top edge slides down so the
-///   bottom stays put.
-/// - Horizontal bars (width changes, anchored at the left edge):
-///   `width` scales by `progress`, x and y stay current.
+/// - Vertical bars: top edge slides up from `baseline` toward `cur.y`,
+///   bottom edge slides up at the same speed. Height scales by
+///   `progress`. For stacked segments sharing a column, every segment
+///   collapses to the same `baseline` edge at `progress = 0` and pulls
+///   apart proportionally as `progress` advances, so adjacent segments
+///   stay flush against each other.
+/// - Horizontal bars: left edge slides right from `baseline` toward
+///   `cur.x`, right edge tracks at the same rate. Width scales by
+///   `progress`.
 ///
 /// At `progress == 1.0` the result equals `cur` exactly in every
 /// branch, so disabling animation reproduces today's geometry.
-fn animate_rect(cur: Rectangle, prev: Option<Rectangle>, progress: f32, is_horizontal: bool) -> Rectangle {
+fn animate_rect(
+    cur: Rectangle,
+    prev: Option<Rectangle>,
+    progress: f32,
+    is_horizontal: bool,
+    baseline: f32,
+) -> Rectangle {
     if let Some(prev) = prev {
         let x = prev.x + (cur.x - prev.x) * progress;
         let y = prev.y + (cur.y - prev.y) * progress;
@@ -1060,7 +1100,7 @@ fn animate_rect(cur: Rectangle, prev: Option<Rectangle>, progress: f32, is_horiz
         Rectangle { x, y, width, height }
     } else if is_horizontal {
         Rectangle {
-            x: cur.x,
+            x: baseline + (cur.x - baseline) * progress,
             y: cur.y,
             width: cur.width * progress,
             height: cur.height,
@@ -1068,7 +1108,7 @@ fn animate_rect(cur: Rectangle, prev: Option<Rectangle>, progress: f32, is_horiz
     } else {
         Rectangle {
             x: cur.x,
-            y: cur.y + cur.height * (1.0 - progress),
+            y: baseline - (baseline - cur.y) * progress,
             width: cur.width,
             height: cur.height * progress,
         }
