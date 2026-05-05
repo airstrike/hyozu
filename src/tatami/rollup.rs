@@ -40,19 +40,23 @@ where
     Mark::Choropleth(crate::choropleth(entries)).into()
 }
 
-/// Build [`Data`] with a single [`Mark::BubbleMap`] from a rollup tree.
+/// Build [`Data`] with a single bubble-map mark from a rollup tree.
 ///
 /// Each node whose `centroid` closure returned `Some((lat, lon))` becomes a
 /// bubble sized by the node's value. Nodes without a centroid are skipped.
 /// Useful for centroid-marker overlays on choropleths (call both, combine
 /// the marks into one `Data` via [`Vec<Mark>`] conversion).
+///
+/// The mark is a [`Mark::Xy`] with geographic projection enabled — the
+/// public `bubble_map(...)` constructor returns an [`crate::Xy`] sugared
+/// for `(lon, lat) → bubble` rendering, so the rollup adapter just wraps it.
 #[must_use]
 pub fn bubble_map<F>(tree: &rollup::Tree, centroid: F) -> Data
 where
     F: Fn(&tatami::MemberRef) -> Option<(f64, f64)>,
 {
     let points = collect_map_points(tree, &centroid);
-    Mark::BubbleMap(crate::bubble_map(points)).into()
+    Mark::Xy(crate::bubble_map(points)).into()
 }
 
 fn collect_choropleth_entries<F>(tree: &rollup::Tree, feature_id: &F) -> Vec<ChoroplethEntry>
@@ -196,10 +200,10 @@ mod tests {
             }
         });
         assert_eq!(data.marks().len(), 1);
-        if let Mark::BubbleMap(bm) = &data.marks()[0] {
-            assert_eq!(bm.points().len(), 1);
+        if let Mark::Xy(xy) = &data.marks()[0] {
+            assert_eq!(xy.points().len(), 1);
         } else {
-            panic!("expected Mark::BubbleMap");
+            panic!("expected Mark::Xy from bubble_map");
         }
     }
 

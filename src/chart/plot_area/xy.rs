@@ -265,8 +265,17 @@ where
                 color
             };
 
+            // Apply the per-mark opacity multiplier on top of the resolved
+            // fill alpha. Stroke keeps its full alpha so the outline reads
+            // sharply over translucent fills (matches the bubble-map
+            // convention this Xy path replaces).
+            let fill_color = crate::core::Color {
+                a: marker_color.a * self.data.opacity.clamp(0.0, 1.0),
+                ..marker_color
+            };
+
             if marker_config.shape != Shape::X {
-                frame.fill(&path, marker_color);
+                frame.fill(&path, fill_color);
             }
 
             // Stroke

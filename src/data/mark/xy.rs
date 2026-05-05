@@ -41,6 +41,10 @@ pub struct Xy {
     pub(crate) size_by: Option<Encoding<channel::Size>>,
     /// How `(x, y)` coordinates are interpreted. See [`CoordKind`].
     pub(crate) coord_kind: CoordKind,
+    /// Marker fill opacity multiplier (0.0 = fully transparent, 1.0 =
+    /// opaque). Multiplies the resolved fill color's alpha channel at
+    /// draw time; defaults to `1.0` so cartesian scatter is unchanged.
+    pub(crate) opacity: f32,
 }
 
 /// Creates an XY scatter chart from point data.
@@ -64,6 +68,7 @@ pub fn xy(data: impl IntoDatums) -> Xy {
         name: None,
         size_by: None,
         coord_kind: CoordKind::Cartesian,
+        opacity: 1.0,
     }
 }
 
@@ -109,6 +114,14 @@ impl Xy {
     /// Pairs with [`Xy::size_by`] for bubble-sized geographic scatter.
     pub fn on_geo(mut self) -> Self {
         self.coord_kind = CoordKind::Geo;
+        self
+    }
+
+    /// Sets the marker fill opacity (a multiplier on the resolved fill
+    /// color's alpha channel; `0.0` = fully transparent, `1.0` = opaque).
+    /// Inputs outside `[0.0, 1.0]` are clamped at draw time.
+    pub fn opacity(mut self, o: f32) -> Self {
+        self.opacity = o;
         self
     }
 
@@ -244,5 +257,17 @@ mod tests {
     fn on_geo_flips_coord_kind() {
         let mark = xy([(1.0, 2.0)]).on_geo();
         assert_eq!(mark.coord_kind, CoordKind::Geo);
+    }
+
+    #[test]
+    fn opacity_defaults_to_one() {
+        let mark = xy([(1.0, 2.0)]);
+        assert_eq!(mark.opacity, 1.0);
+    }
+
+    #[test]
+    fn opacity_setter_writes_through() {
+        let mark = xy([(1.0, 2.0)]).opacity(0.5);
+        assert_eq!(mark.opacity, 0.5);
     }
 }

@@ -1,4 +1,8 @@
 use crate::color::Color;
+use crate::data::Datum;
+use crate::data::mark::line::marker;
+use crate::data::mark::xy::{CoordKind, Xy};
+use crate::encoding;
 
 /// A single point on a bubble map.
 #[derive(Debug, Clone)]
@@ -110,6 +114,13 @@ pub struct BubbleMap {
 
 /// Creates a bubble map from a collection of map points.
 ///
+/// Returns an [`Xy`] configured for geographic projection: each point's
+/// `(lon, lat)` is projected through the chart's geo plane (configured via
+/// [`crate::Data::geo`]), and a sqrt-area size encoding maps the magnitudes
+/// to bubble diameters in the range `8.0..=60.0` px (i.e. radii `4..=30`,
+/// matching the historical bubble-map defaults). The marker fill uses the
+/// per-mark opacity multiplier of `0.7`.
+///
 /// # Examples
 ///
 /// ```
@@ -121,8 +132,91 @@ pub struct BubbleMap {
 ///     map_point(52.2, 21.0, 29.0).label("Warsaw"),
 /// ]);
 /// ```
-pub fn bubble_map(points: impl IntoBubbleMap) -> BubbleMap {
-    points.into_bubble_map()
+pub fn bubble_map(points: impl IntoIterator<Item = MapPoint>) -> Xy {
+    /// Historical bubble-map defaults — kept here so `bubble_map(...)`
+    /// still produces visually identical bubbles after the migration to
+    /// `Xy::on_geo()` + a `size_by` encoding. Diameters are 2× the radii.
+    const MIN_RADIUS: f32 = 4.0;
+    const MAX_RADIUS: f32 = 30.0;
+    const MIN_DIAMETER: f32 = 2.0 * MIN_RADIUS;
+    const MAX_DIAMETER: f32 = 2.0 * MAX_RADIUS;
+
+    let entries: Vec<MapPoint> = points.into_iter().collect();
+
+    // Match the legacy renderer's `value_range`: take `value.abs()`,
+    // collapse a degenerate or all-non-finite domain to a `+1.0` span so
+    // the normalizer below can't divide by zero or produce a NaN.
+    let (v_lo, v_hi) = compute_value_range(&entries);
+
+    // Capture the magnitudes alongside the datums so the size closure
+    // can look the value up by point index. Datum carries only `(x, y)`,
+    // and the size encoding's extractor receives `(usize, &Datum)` — the
+    // index is what bridges the two parallel vectors.
+    let values: Vec<f64> = entries.iter().map(|e| e.value.abs()).collect();
+    let datums: Vec<Datum> = entries.iter().map(|e| Datum::new(e.lon, e.lat)).collect();
+
+    let size_encoding = encoding::size_by(move |i, _d| {
+        // The closure returns the desired pixel diameter directly. The
+        // outer encoding is configured as a `linear` identity passthrough
+        // (domain == range == diameter range) so the diameter we compute
+        // here lands in `state.resolved_sizes` unchanged. Sqrt-of-`t` is
+        // the historical bubble_map formula (area-proportional, matches
+        // `chart::plot_area::bubble_map::interpolate_radius`).
+        let v = values.get(i).copied().unwrap_or(0.0);
+        let span = v_hi - v_lo;
+        let t = if span > 0.0 {
+            ((v - v_lo) / span).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let radius = MIN_RADIUS as f64 + t.sqrt() * (MAX_RADIUS - MIN_RADIUS) as f64;
+        2.0 * radius
+    })
+    .domain(MIN_DIAMETER as f64..=MAX_DIAMETER as f64)
+    .range(MIN_DIAMETER..=MAX_DIAMETER)
+    .linear();
+
+    // Construct the Xy via a struct literal because `mark::xy::xy(...)`
+    // takes `impl IntoDatums` (which builds datums from numeric tuples or
+    // arrays) and there's no identity impl for `Vec<Datum>`. We already
+    // have the datums in hand here, so the literal is the direct path —
+    // the rest of the field defaults mirror `mark::xy::xy(...)`.
+    Xy {
+        points: datums,
+        color: None,
+        marker: marker::Marker::default(),
+        name: None,
+        size_by: Some(size_encoding),
+        coord_kind: CoordKind::Geo,
+        opacity: 0.7,
+    }
+}
+
+/// Compute the value-magnitude range over a slice of map points. Mirrors
+/// the historical `chart::plot_area::bubble_map::value_range` so the
+/// migrated `bubble_map(...)` produces visually identical bubbles for
+/// degenerate, empty, and all-non-finite inputs.
+fn compute_value_range(points: &[MapPoint]) -> (f64, f64) {
+    let mut v_lo = f64::INFINITY;
+    let mut v_hi = f64::NEG_INFINITY;
+    for pt in points {
+        let v = pt.value.abs();
+        if v.is_finite() {
+            if v < v_lo {
+                v_lo = v;
+            }
+            if v > v_hi {
+                v_hi = v;
+            }
+        }
+    }
+    if !v_lo.is_finite() {
+        v_lo = 0.0;
+    }
+    if !v_hi.is_finite() || v_hi <= v_lo {
+        v_hi = v_lo + 1.0;
+    }
+    (v_lo, v_hi)
 }
 
 /// Trait for converting various inputs into a BubbleMap.

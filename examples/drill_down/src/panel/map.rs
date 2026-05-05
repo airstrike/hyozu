@@ -133,7 +133,7 @@ pub fn build_data(
         choropleth_mark = choropleth_mark.selected(selected);
     }
     let choropleth = hyozu::Mark::Choropleth(choropleth_mark);
-    let bubbles = hyozu::Mark::BubbleMap(hyozu::bubble_map(points));
+    let bubbles = hyozu::Mark::Xy(hyozu::bubble_map(points));
     Some(
         hyozu::data(vec![choropleth, bubbles])
             .geo_data(geo.clone())
@@ -354,8 +354,8 @@ mod tests {
             _ => panic!("expected Choropleth as first mark"),
         }
         match &data.marks()[1] {
-            hyozu::Mark::BubbleMap(bm) => assert_eq!(bm.points().len(), 0),
-            _ => panic!("expected BubbleMap as second mark"),
+            hyozu::Mark::Xy(xy) => assert_eq!(xy.points().len(), 0),
+            _ => panic!("expected Xy (bubble_map) as second mark"),
         }
     }
 
