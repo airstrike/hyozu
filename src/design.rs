@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use crate::color::{Color, Pair};
-use crate::core::{Font, theme};
+use crate::core::{Font, color, theme};
 use crate::palette::Seed;
 
 /// Design system trait for chart styling.
@@ -64,6 +64,26 @@ pub trait Design {
 
     /// Returns the color for axis lines and ticks.
     fn axis_color(&self) -> Color;
+
+    /// Returns the fill color for "in-scope feature with no entry"
+    /// regions on data-driven maps (the choropleth's `Missing` state).
+    ///
+    /// Distinct from the decorative land/ocean fill used for purely
+    /// out-of-scope features: this slot signals "this region IS part
+    /// of the chart's universe, but no data was supplied for it."
+    /// ggplot, D3, and Vega-Lite all reserve a dedicated knob for
+    /// this — matching the convention here.
+    ///
+    /// The default is theme-aware: light gray (`0xDDDDDD`, the news-
+    /// graphics convention used by NYT/FT/BBC) on light backgrounds,
+    /// mid-dark gray (`0x6B6B6B`) on dark backgrounds.
+    fn missing_fill(&self) -> crate::core::Color {
+        if crate::palette::is_dark_background(self.background_color()) {
+            color!(0x6B6B6B)
+        } else {
+            color!(0xDDDDDD)
+        }
+    }
 
     /// Returns the color for major gridlines inside the plot area.
     ///
@@ -182,6 +202,10 @@ impl<T: Design> Design for &T {
 
     fn axis_color(&self) -> Color {
         (*self).axis_color()
+    }
+
+    fn missing_fill(&self) -> crate::core::Color {
+        (*self).missing_fill()
     }
 
     fn grid_color(&self) -> Color {

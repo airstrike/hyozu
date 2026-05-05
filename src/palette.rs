@@ -304,7 +304,7 @@ fn finite_unit(v: f32) -> f32 {
 }
 
 /// Determine if a background is dark (OKLch lightness < 0.5).
-fn is_dark_background(bg: crate::core::Color) -> bool {
+pub(crate) fn is_dark_background(bg: crate::core::Color) -> bool {
     to_oklch(bg).l < 0.5
 }
 

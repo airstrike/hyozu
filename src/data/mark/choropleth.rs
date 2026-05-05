@@ -78,6 +78,10 @@ pub struct Choropleth {
     /// while remaining clickable. When `None`, every value-bearing
     /// feature renders at full saturation (no selection mode).
     pub(crate) selected: Option<HashSet<feature::Id>>,
+    /// Optional override for the fill color used on in-scope features
+    /// whose entry is absent from the data. When `None`, the renderer
+    /// falls back to the theme's [`Design::missing_fill`](crate::Design::missing_fill).
+    pub(crate) missing_color: Option<crate::core::Color>,
 }
 
 fn default_legend() -> Option<legend::Config> {
@@ -104,6 +108,7 @@ impl<const N: usize> IntoChoropleth for [ChoroplethEntry; N] {
             legend_title: None,
             legend: default_legend(),
             selected: None,
+            missing_color: None,
         }
     }
 }
@@ -118,6 +123,7 @@ impl IntoChoropleth for Vec<ChoroplethEntry> {
             legend_title: None,
             legend: default_legend(),
             selected: None,
+            missing_color: None,
         }
     }
 }
@@ -142,6 +148,7 @@ where
             legend_title: None,
             legend: default_legend(),
             selected: None,
+            missing_color: None,
         }
     }
 }
@@ -166,6 +173,7 @@ where
             legend_title: None,
             legend: default_legend(),
             selected: None,
+            missing_color: None,
         }
     }
 }
@@ -271,6 +279,16 @@ impl Choropleth {
     /// Returns the active selection set, if any.
     pub fn selected_ids(&self) -> Option<&HashSet<feature::Id>> {
         self.selected.as_ref()
+    }
+
+    /// Sets the fill color used for in-scope features whose entry is
+    /// absent from the data. Overrides the theme's
+    /// [`Design::missing_fill`](crate::Design::missing_fill) default.
+    /// Use this to art-direct news-graphics-style choropleths where
+    /// missing/no-data needs a specific brand color.
+    pub fn missing_color(mut self, color: impl Into<crate::core::Color>) -> Self {
+        self.missing_color = Some(color.into());
+        self
     }
 
     /// Returns the entries.

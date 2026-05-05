@@ -391,6 +391,11 @@ where
         // the gradient's red/yellow/green channel which carries value
         // semantics.
         let available_fill = crate::palette::shift_lightness(land_fill, background, 2);
+        // "In-scope feature with no entry" — distinct slot from
+        // `land_fill` (which paints purely out-of-scope decoration).
+        // User override on the mark wins; otherwise fall back to the
+        // theme's `missing_fill`.
+        let missing_fill = self.data.missing_color.unwrap_or_else(|| theme.missing_fill());
         let border_color = theme.divider_color().resolve(background, text_pair, &seed, None);
 
         // ── Draw ocean background ────────────────────────────────
@@ -452,7 +457,8 @@ where
                     }
                 }
                 Some(FeatureState::Available) => available_fill,
-                Some(FeatureState::Missing) | None => land_fill,
+                Some(FeatureState::Missing) => missing_fill,
+                None => land_fill,
             })
             .collect();
 
