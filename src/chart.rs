@@ -10,6 +10,7 @@ pub mod value;
 
 use std::borrow::Cow;
 
+use crate::animation;
 use crate::core::time::Instant;
 use crate::core::widget::{Tree, tree};
 use crate::core::{
@@ -414,12 +415,37 @@ fn find_pie_hover(local: Point, plot_area_tree: &Tree) -> Option<hover::State> {
     None
 }
 
-/// Copies each pie's `slice_angles` from the pre-rebuild tree into
-/// `previous_angles` on the post-rebuild tree, and arms the animation
-/// so the next redraw interpolates from those previous deltas to the
-/// new ones. A no-op when either tree lacks a plot area or the pie
-/// position changed (different mark types at the same index).
-fn replant_pie_angles(old_children: &[Tree], new_children: &mut [Tree], animate: bool) {
+/// Returns a mutable handle to the [`animation::Tick`] hosted on
+/// whichever per-mark `State` the tree node carries, or `None` when
+/// the mark type doesn't host a tick. Tag is matched linearly so each
+/// new animated mark adds exactly one branch.
+fn animation_tick_mut(tree: &mut Tree) -> Option<&mut animation::Tick> {
+    let tag = tree.tag;
+    if tag == tree::Tag::of::<plot_area::pie::State>() {
+        return Some(&mut tree.state.downcast_mut::<plot_area::pie::State>().tick);
+    }
+    None
+}
+
+/// Snapshots a pie's pre-rebuild `slice_angles` onto the post-rebuild
+/// tree's `previous_angles` and arms the next redraw to interpolate
+/// from there. The caller is responsible for confirming both nodes
+/// carry a `pie::State`.
+fn replant_pie(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
+    let old_state = old_mark.state.downcast_ref::<plot_area::pie::State>();
+    let new_state = new_mark.state.downcast_mut::<plot_area::pie::State>();
+    if animate {
+        new_state.previous_angles = old_state.slice_angles.clone();
+        new_state.tick.pending_start = true;
+    } else {
+        new_state.tick.pending_start = false;
+    }
+}
+
+/// Walks old/new plot-area children pairwise and dispatches per-tag
+/// to the matching `replant_<mark>` snapshot helper. A no-op when
+/// either tree lacks a plot area.
+fn replant_mark_animations(old_children: &[Tree], new_children: &mut [Tree], animate: bool) {
     let pie_tag = tree::Tag::of::<plot_area::pie::State>();
     let Some(old_scene) = old_children.first() else {
         return;
@@ -435,30 +461,22 @@ fn replant_pie_angles(old_children: &[Tree], new_children: &mut [Tree], animate:
     };
 
     for (old_mark, new_mark) in old_plot_area.children.iter().zip(new_plot_area.children.iter_mut()) {
-        if old_mark.tag != pie_tag || new_mark.tag != pie_tag {
+        if old_mark.tag == pie_tag && new_mark.tag == pie_tag {
+            replant_pie(old_mark, new_mark, animate);
             continue;
-        }
-        let old_state = old_mark.state.downcast_ref::<plot_area::pie::State>();
-        let new_state = new_mark.state.downcast_mut::<plot_area::pie::State>();
-        if animate {
-            new_state.previous_angles = old_state.slice_angles.clone();
-            new_state.tick.pending_start = true;
-        } else {
-            new_state.tick.pending_start = false;
         }
     }
 }
 
-/// Walks the plot-area subtree, kicks pending pie sweeps off on the
-/// first redraw that carries an `Instant`, and asks for another redraw
-/// while any pie is still animating. Mirrors the
-/// `pending_start` / `is_animating` lifecycle used by sweeten's
-/// `Transition` widget.
-fn advance_pie_animations<Message>(tree: &mut Tree, now: Instant, animate: bool, shell: &mut Shell<'_, Message>) {
+/// Walks the plot-area subtree and advances every animated mark's
+/// [`animation::Tick`] by one frame. Kicks pending sweeps off on the
+/// first redraw that carries an `Instant` and asks for another redraw
+/// while any sweep is still in flight. Gated at the top by the
+/// chart-level `animate` toggle so opted-out charts don't churn.
+fn advance_mark_animations<Message>(tree: &mut Tree, now: Instant, animate: bool, shell: &mut Shell<'_, Message>) {
     if !animate {
         return;
     }
-    let pie_tag = tree::Tag::of::<plot_area::pie::State>();
     let Some(scene_tree) = tree.children.get_mut(0) else {
         return;
     };
@@ -467,11 +485,9 @@ fn advance_pie_animations<Message>(tree: &mut Tree, now: Instant, animate: bool,
     };
 
     for mark_tree in plot_area_tree.children.iter_mut() {
-        if mark_tree.tag != pie_tag {
-            continue;
+        if let Some(tick) = animation_tick_mut(mark_tree) {
+            tick.advance(now, shell);
         }
-        let pie_state = mark_tree.state.downcast_mut::<plot_area::pie::State>();
-        pie_state.tick.advance(now, shell);
     }
 }
 
@@ -573,7 +589,7 @@ where
             // stays at its plot-area child index across rebuilds, since
             // the data's mark vector drives both layouts.
             let old_children = std::mem::replace(&mut tree.children, self.children());
-            replant_pie_angles(&old_children, &mut tree.children, self.animate);
+            replant_mark_animations(&old_children, &mut tree.children, self.animate);
             return;
         }
         self.scene.diff(&mut tree.children[0]);
@@ -667,9 +683,9 @@ where
         viewport: &Rectangle,
     ) {
         // Animation tick — independent of capture / tooltip / action so
-        // pie sweeps run regardless of which widgets are listening.
+        // mark sweeps run regardless of which widgets are listening.
         if let Event::Window(window::Event::RedrawRequested(now)) = event {
-            advance_pie_animations(tree, *now, self.animate, shell);
+            advance_mark_animations(tree, *now, self.animate, shell);
         }
 
         if shell.is_event_captured() {
