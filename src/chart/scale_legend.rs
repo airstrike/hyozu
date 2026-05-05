@@ -23,14 +23,30 @@ use crate::palette;
 use crate::widget::canvas::{Frame, Path, Stroke, Text as CanvasText};
 use crate::widget::renderer::geometry;
 
+/// One labeled tick along the gradient legend.
+#[derive(Debug, Clone)]
+pub struct Tick {
+    /// Position along the gradient as a unit interval — `0.0` is the
+    /// "low" end (left for horizontal, bottom for vertical), `1.0` is
+    /// the "high" end. Pre-computed so `draw` doesn't re-divide on
+    /// every frame.
+    pub t: f32,
+    /// Pre-formatted label rendered next to the tick line.
+    pub label: String,
+}
+
 /// Theme-free plan for the scale legend, materialized in `layout` so
 /// `draw` doesn't reformat labels or re-walk the value range.
+///
+/// `ticks` is sorted from low to high. The first and last entries are
+/// always the domain endpoints (`t = 0.0` and `t = 1.0`); interior
+/// entries are placed at "nice" round values picked by the same
+/// Heckbert step the axis ticks use, so the gradient gets the same
+/// 3-7 reading anchors a D3 / Vega-Lite / ggplot continuous legend
+/// shows.
 #[derive(Debug, Clone, Default)]
 pub struct Plan {
-    /// Formatted min label (end of gradient nearest the "low" side).
-    pub min_label: String,
-    /// Formatted max label.
-    pub max_label: String,
+    pub ticks: Vec<Tick>,
 }
 
 /// Pixel margin from the plot-area edge for overlaid scale legends.
@@ -131,14 +147,25 @@ fn panel_for_overlay(legend: &Config, title: Option<&str>, plot_bounds: Rectangl
             } else {
                 VERTICAL_BAR_LENGTH
             };
-            let content_w = BAR_THICKNESS + TICK_LENGTH + label_column_width(title);
+            // Panel width fits the wider of (a) the title or (b) the
+            // bar + numeric-label cluster. The title typically wins
+            // (e.g. "July 2025 revenue ($K)" is much wider than
+            // "$500K"), so the cluster gets centered horizontally
+            // beneath the centered title — matching D3 / Vega-Lite
+            // / ggplot vertical legend layout.
+            const NUMERIC_LABEL_CHARS: f32 = 6.0;
+            let numeric_label_w = NUMERIC_LABEL_CHARS * GLYPH_WIDTH_ESTIMATE;
+            let cluster_w = BAR_THICKNESS + TICK_LENGTH + 2.0 + numeric_label_w;
+            let title_w = label_column_width(title);
+            let content_w = cluster_w.max(title_w);
             let content_h = title_line_height + bar_length;
             let panel_w = content_w + PANEL_PADDING * 2.0;
             let panel_h = content_h + PANEL_PADDING * 2.0;
             let bar_offset_y = PANEL_PADDING + title_line_height;
+            let bar_offset_x = PANEL_PADDING + (content_w - cluster_w) / 2.0;
             (
                 Size::new(panel_w, panel_h),
-                Vector::new(PANEL_PADDING, bar_offset_y),
+                Vector::new(bar_offset_x, bar_offset_y),
                 Size::new(BAR_THICKNESS, bar_length),
             )
         }
@@ -333,84 +360,77 @@ pub fn draw<Theme, Renderer>(
         Orientation::Horizontal => {
             let tick_y_top = bar_origin.y + bar_size.height;
             let tick_y_bot = tick_y_top + TICK_LENGTH;
-            let left_tick = Path::new(|builder| {
-                builder.move_to(Point::new(bar_origin.x, tick_y_top));
-                builder.line_to(Point::new(bar_origin.x, tick_y_bot));
-            });
-            frame.stroke(&left_tick, Stroke::default().with_color(border_color).with_width(0.5));
-            let right_tick = Path::new(|builder| {
-                builder.move_to(Point::new(bar_origin.x + bar_size.width, tick_y_top));
-                builder.line_to(Point::new(bar_origin.x + bar_size.width, tick_y_bot));
-            });
-            frame.stroke(&right_tick, Stroke::default().with_color(border_color).with_width(0.5));
-
             let labels_y = tick_y_bot + 1.0;
-            frame.fill_text(CanvasText {
-                content: plan.min_label.clone(),
-                position: Point::new(bar_origin.x, labels_y),
-                color: label_color,
-                size: crate::core::Pixels(FONT_SIZE),
-                font: theme.font(),
-                align_x: alignment::Horizontal::Left.into(),
-                align_y: alignment::Vertical::Top,
-                line_height: crate::core::text::LineHeight::default(),
-                shaping: crate::core::text::Shaping::Basic,
-                ..CanvasText::default()
-            });
-            frame.fill_text(CanvasText {
-                content: plan.max_label.clone(),
-                position: Point::new(bar_origin.x + bar_size.width, labels_y),
-                color: label_color,
-                size: crate::core::Pixels(FONT_SIZE),
-                font: theme.font(),
-                align_x: alignment::Horizontal::Right.into(),
-                align_y: alignment::Vertical::Top,
-                line_height: crate::core::text::LineHeight::default(),
-                shaping: crate::core::text::Shaping::Basic,
-                ..CanvasText::default()
-            });
+            for (i, tick) in plan.ticks.iter().enumerate() {
+                let x = bar_origin.x + bar_size.width * tick.t;
+                let line = Path::new(|builder| {
+                    builder.move_to(Point::new(x, tick_y_top));
+                    builder.line_to(Point::new(x, tick_y_bot));
+                });
+                frame.stroke(&line, Stroke::default().with_color(border_color).with_width(0.5));
+                // Endpoints align to their corner (the bar's outer
+                // edge); interior ticks center their label on the
+                // tick line.
+                let align = if i == 0 {
+                    alignment::Horizontal::Left
+                } else if i == plan.ticks.len() - 1 {
+                    alignment::Horizontal::Right
+                } else {
+                    alignment::Horizontal::Center
+                };
+                frame.fill_text(CanvasText {
+                    content: tick.label.clone(),
+                    position: Point::new(x, labels_y),
+                    color: label_color,
+                    size: crate::core::Pixels(FONT_SIZE),
+                    font: theme.font(),
+                    align_x: align.into(),
+                    align_y: alignment::Vertical::Top,
+                    line_height: crate::core::text::LineHeight::default(),
+                    shaping: crate::core::text::Shaping::Basic,
+                    ..CanvasText::default()
+                });
+            }
         }
         Orientation::Vertical => {
             // Labels go to the right of the bar; tick marks on the bar edge.
             let tick_x_left = bar_origin.x + bar_size.width;
             let tick_x_right = tick_x_left + TICK_LENGTH;
-            let top_tick = Path::new(|builder| {
-                builder.move_to(Point::new(tick_x_left, bar_origin.y));
-                builder.line_to(Point::new(tick_x_right, bar_origin.y));
-            });
-            frame.stroke(&top_tick, Stroke::default().with_color(border_color).with_width(0.5));
-            let bot_tick = Path::new(|builder| {
-                builder.move_to(Point::new(tick_x_left, bar_origin.y + bar_size.height));
-                builder.line_to(Point::new(tick_x_right, bar_origin.y + bar_size.height));
-            });
-            frame.stroke(&bot_tick, Stroke::default().with_color(border_color).with_width(0.5));
-
             let labels_x = tick_x_right + 2.0;
-            // Max at the top (gradient's high end), min at the bottom.
-            frame.fill_text(CanvasText {
-                content: plan.max_label.clone(),
-                position: Point::new(labels_x, bar_origin.y),
-                color: label_color,
-                size: crate::core::Pixels(FONT_SIZE),
-                font: theme.font(),
-                align_x: alignment::Horizontal::Left.into(),
-                align_y: alignment::Vertical::Top,
-                line_height: crate::core::text::LineHeight::default(),
-                shaping: crate::core::text::Shaping::Basic,
-                ..CanvasText::default()
-            });
-            frame.fill_text(CanvasText {
-                content: plan.min_label.clone(),
-                position: Point::new(labels_x, bar_origin.y + bar_size.height),
-                color: label_color,
-                size: crate::core::Pixels(FONT_SIZE),
-                font: theme.font(),
-                align_x: alignment::Horizontal::Left.into(),
-                align_y: alignment::Vertical::Bottom,
-                line_height: crate::core::text::LineHeight::default(),
-                shaping: crate::core::text::Shaping::Basic,
-                ..CanvasText::default()
-            });
+            for (i, tick) in plan.ticks.iter().enumerate() {
+                // Vertical legends paint `t = 1.0` (high end) at the
+                // top and `t = 0.0` at the bottom — invert here so the
+                // y position grows downward as the value drops.
+                let y = bar_origin.y + bar_size.height * (1.0 - tick.t);
+                let line = Path::new(|builder| {
+                    builder.move_to(Point::new(tick_x_left, y));
+                    builder.line_to(Point::new(tick_x_right, y));
+                });
+                frame.stroke(&line, Stroke::default().with_color(border_color).with_width(0.5));
+                // Top endpoint anchors its baseline at the tick (Top
+                // align); bottom endpoint hangs from the tick (Bottom
+                // align); interior ticks center their label vertically
+                // on the tick line.
+                let align_y = if i == plan.ticks.len() - 1 {
+                    alignment::Vertical::Top
+                } else if i == 0 {
+                    alignment::Vertical::Bottom
+                } else {
+                    alignment::Vertical::Center
+                };
+                frame.fill_text(CanvasText {
+                    content: tick.label.clone(),
+                    position: Point::new(labels_x, y),
+                    color: label_color,
+                    size: crate::core::Pixels(FONT_SIZE),
+                    font: theme.font(),
+                    align_x: alignment::Horizontal::Left.into(),
+                    align_y,
+                    line_height: crate::core::text::LineHeight::default(),
+                    shaping: crate::core::text::Shaping::Basic,
+                    ..CanvasText::default()
+                });
+            }
         }
     }
 }

@@ -85,6 +85,52 @@ where
     _marker: std::marker::PhantomData<(Message, Renderer)>,
 }
 
+/// Build the legend's tick list across `[lo, hi]`. Endpoints are
+/// always present at `t = 0.0` / `t = 1.0`; interior ticks sit at
+/// nice round values picked by the same Heckbert step the axis tick
+/// generator uses (target ~5 ticks across the span). Ticks too close
+/// to an endpoint are dropped so labels don't overprint.
+fn build_legend_ticks(lo: f64, hi: f64, target: usize, format: &dyn Fn(f64) -> String) -> Vec<scale_legend::Tick> {
+    // Degenerate span: collapse to a single tick at lo.
+    if !(lo.is_finite() && hi.is_finite()) || hi <= lo {
+        return vec![scale_legend::Tick {
+            t: 0.0,
+            label: format(lo),
+        }];
+    }
+    let span = hi - lo;
+    let step = crate::scale::transform::nice_step(span, target);
+    let mut ticks = Vec::with_capacity(target + 2);
+
+    // Always include the endpoints — the user reads min/max off them
+    // and the bar's gradient runs from one to the other.
+    ticks.push(scale_legend::Tick {
+        t: 0.0,
+        label: format(lo),
+    });
+
+    // Interior ticks at multiples of `step` strictly inside (lo, hi).
+    // Start from the first multiple `> lo` and stop at the last one
+    // `< hi`. The 0.0001-of-span guard rejects ticks within a fifth
+    // of a percent of an endpoint so their labels don't overprint
+    // the endpoint label.
+    let edge_guard = span * 0.05;
+    let mut v = (lo / step).ceil() * step;
+    while v < hi - edge_guard {
+        if v > lo + edge_guard {
+            let t = ((v - lo) / span) as f32;
+            ticks.push(scale_legend::Tick { t, label: format(v) });
+        }
+        v += step;
+    }
+
+    ticks.push(scale_legend::Tick {
+        t: 1.0,
+        label: format(hi),
+    });
+    ticks
+}
+
 /// Format a legend value with human-friendly abbreviations. Used as
 /// the built-in fallback when the choropleth's legend / ColorScale /
 /// Data chain doesn't supply a closure.
@@ -358,9 +404,14 @@ where
                 None => format_legend_value(v),
             }
         };
+        // Pick 3-7 nice tick values across [lo, hi] using the same
+        // Heckbert step the axis ticks use, so the gradient gets the
+        // same reading anchors a D3 / Vega-Lite continuous legend
+        // shows. Endpoints are always present; interior ticks sit at
+        // multiples of the step that fall inside `(lo, hi)`.
+        const LEGEND_TICK_TARGET: usize = 5;
         state.legend_plan = scale_legend::Plan {
-            min_label: format(lo),
-            max_label: format(hi),
+            ticks: build_legend_ticks(lo, hi, LEGEND_TICK_TARGET, &format),
         };
 
         Node::new(Size::ZERO)
