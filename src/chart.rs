@@ -460,6 +460,9 @@ fn animation_tick_mut(tree: &mut Tree) -> Option<&mut animation::Tick> {
     if tag == tree::Tag::of::<plot_area::boxplot::State>() {
         return Some(&mut tree.state.downcast_mut::<plot_area::boxplot::State>().tick);
     }
+    if tag == tree::Tag::of::<plot_area::violin::State>() {
+        return Some(&mut tree.state.downcast_mut::<plot_area::violin::State>().tick);
+    }
     None
 }
 
@@ -694,6 +697,22 @@ fn replant_boxplot(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
     }
 }
 
+/// Snapshots a Violin mark's pre-rebuild `entries` onto the
+/// post-rebuild tree's `previous_entries` and arms the next redraw to
+/// interpolate every component (silhouette outline, box stats) from
+/// there. The caller is responsible for confirming both nodes carry a
+/// `violin::State`.
+fn replant_violin(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
+    let old_state = old_mark.state.downcast_ref::<plot_area::violin::State>();
+    let new_state = new_mark.state.downcast_mut::<plot_area::violin::State>();
+    if animate {
+        new_state.previous_entries = old_state.entries.clone();
+        new_state.tick.pending_start = true;
+    } else {
+        new_state.tick.pending_start = false;
+    }
+}
+
 /// Walks old/new plot-area children pairwise and dispatches per-tag
 /// to the matching `replant_<mark>` snapshot helper. A no-op when
 /// either tree lacks a plot area.
@@ -711,6 +730,7 @@ fn replant_mark_animations(old_children: &[Tree], new_children: &mut [Tree], ani
     let gauge_tag = tree::Tag::of::<plot_area::gauge::State>();
     let band_tag = tree::Tag::of::<plot_area::band::State>();
     let boxplot_tag = tree::Tag::of::<plot_area::boxplot::State>();
+    let violin_tag = tree::Tag::of::<plot_area::violin::State>();
     let Some(old_scene) = old_children.first() else {
         return;
     };
@@ -775,6 +795,10 @@ fn replant_mark_animations(old_children: &[Tree], new_children: &mut [Tree], ani
         }
         if old_mark.tag == boxplot_tag && new_mark.tag == boxplot_tag {
             replant_boxplot(old_mark, new_mark, animate);
+            continue;
+        }
+        if old_mark.tag == violin_tag && new_mark.tag == violin_tag {
+            replant_violin(old_mark, new_mark, animate);
             continue;
         }
     }

@@ -1,4 +1,5 @@
 use super::Plane;
+use crate::animation;
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
 use crate::core::{Point, Size};
@@ -9,6 +10,7 @@ use crate::core::text;
 use crate::widget::renderer::geometry;
 
 /// Box plot layout in pixel coordinates
+#[derive(Clone)]
 pub struct BoxLayout {
     pub min_y: f32,
     pub q1_y: f32,
@@ -18,6 +20,7 @@ pub struct BoxLayout {
 }
 
 /// Layout for a single violin entry
+#[derive(Clone)]
 pub struct EntryLayout {
     /// Right (or top) edge points of the mirrored shape
     pub right_points: Vec<Point>,
@@ -32,6 +35,16 @@ pub struct EntryLayout {
 /// State for Violin -- stores pre-calculated entry layouts
 pub struct State {
     pub entries: Vec<EntryLayout>,
+    /// Per-entry layout snapshot from the most recent layout before the
+    /// current one, captured by [`crate::chart::Chart::diff`] when data
+    /// changes so the next sweep can interpolate every component
+    /// (silhouette outline, box stats) from previous to current.
+    /// Empty on a fresh mount, in which case the animation collapses to
+    /// a center-axis-anchored grow-out.
+    pub previous_entries: Vec<EntryLayout>,
+    /// Per-frame entrance/transition lifecycle (progress, pending-start
+    /// flag, latest captured `Instant`) advanced by the chart widget.
+    pub tick: animation::Tick,
 }
 
 /// A Violin series that renders violin charts.
@@ -41,6 +54,10 @@ where
     Renderer: text::Renderer + geometry::Renderer,
 {
     pub(super) data: &'a crate::mark::violin::Violin,
+    /// Whether the mount/data-change sweep runs. Mirrors
+    /// [`crate::Data::animate`] (the chart-level toggle); `false` makes
+    /// `draw` snap to the laid-out geometry.
+    pub(crate) animate: bool,
     _marker: std::marker::PhantomData<(Message, Renderer)>,
 }
 
@@ -53,15 +70,26 @@ where
     pub fn new(data: &'a crate::mark::violin::Violin) -> Self {
         Self {
             data,
+            animate: true,
             _marker: std::marker::PhantomData,
         }
+    }
+
+    /// Sets whether the mount/data-change sweep should run. Wired by
+    /// [`super::PlotArea::with_animate`] from [`crate::Data::animate`].
+    pub(crate) fn set_animate(&mut self, animate: bool) {
+        self.animate = animate;
     }
 
     /// Returns the initial tree state for this Violin
     pub(super) fn state(&self) -> Tree {
         Tree {
             tag: tree::Tag::of::<State>(),
-            state: tree::State::new(State { entries: Vec::new() }),
+            state: tree::State::new(State {
+                entries: Vec::new(),
+                previous_entries: Vec::new(),
+                tick: animation::Tick::new(),
+            }),
             children: Vec::new(),
         }
     }
@@ -179,7 +207,24 @@ where
         let mut fill_frame = Frame::new(renderer, layout_bounds.size());
         let mut stroke_frame = Frame::new(renderer, layout_bounds.size());
 
-        for (entry_idx, (entry_data, entry_layout)) in self.data.entries.iter().zip(state.entries.iter()).enumerate() {
+        // Sweep: every entry's silhouette outline (left + right outline
+        // points) and box overlay stats interpolate from their
+        // previous-layout values toward their current values. With no
+        // previous (fresh mount), every outline point collapses to the
+        // entry's vertical center axis at progress 0 and reaches its
+        // laid-out half-width at progress 1; box stats collapse to the
+        // entry's median axis. When animation is opted out, progress
+        // pins to `1.0` and the result equals the laid-out geometry
+        // exactly.
+        let progress = if !self.animate { 1.0 } else { state.tick.progress() };
+        let animated: Vec<EntryLayout> = state
+            .entries
+            .iter()
+            .enumerate()
+            .map(|(i, cur)| animate_entry(cur, state.previous_entries.get(i), progress))
+            .collect();
+
+        for (entry_idx, (entry_data, entry_layout)) in self.data.entries.iter().zip(animated.iter()).enumerate() {
             if entry_layout.right_points.is_empty() {
                 continue;
             }
@@ -256,5 +301,96 @@ where
         renderer.with_translation(translation, |renderer| {
             renderer.draw_geometry(stroke_geometry);
         });
+    }
+}
+
+/// Computes the on-screen entry layout at the current sweep progress.
+/// With a `prev` layout (data change), every outline point and box
+/// stat lerps linearly from `prev` to `cur`; outline points without a
+/// `prev` counterpart (cur has more samples than prev) grow from
+/// `cur.center_x` mirroring the mount path. Without a `prev` layout
+/// (fresh mount), every outline point's x collapses to `cur.center_x`
+/// at progress 0 and reaches its laid-out x at progress 1; box stats
+/// collapse to the entry's median axis.
+///
+/// At `progress == 1.0` the result equals `cur` exactly in every
+/// branch, so disabling animation reproduces today's geometry.
+fn animate_entry(cur: &EntryLayout, prev: Option<&EntryLayout>, progress: f32) -> EntryLayout {
+    let cx = cur.center_x;
+    let lerp = |a: f32, b: f32| a + (b - a) * progress;
+
+    let collapse_outline_to_center = |pts: &[Point]| -> Vec<Point> {
+        pts.iter()
+            .map(|p| Point::new(cx + (p.x - cx) * progress, p.y))
+            .collect()
+    };
+
+    let lerp_outline = |prev_pts: &[Point], cur_pts: &[Point]| -> Vec<Point> {
+        cur_pts
+            .iter()
+            .enumerate()
+            .map(|(i, &cp)| {
+                if let Some(pp) = prev_pts.get(i) {
+                    Point::new(lerp(pp.x, cp.x), lerp(pp.y, cp.y))
+                } else {
+                    // Cur has more samples than prev: grow extras from
+                    // the entry's center axis, matching the mount path.
+                    Point::new(cx + (cp.x - cx) * progress, cp.y)
+                }
+            })
+            .collect()
+    };
+
+    let (right_points, left_points, box_layout) = match prev {
+        Some(prev) => {
+            let right_points = lerp_outline(&prev.right_points, &cur.right_points);
+            let left_points = lerp_outline(&prev.left_points, &cur.left_points);
+            let box_layout = match (&prev.box_layout, &cur.box_layout) {
+                (Some(prev_box), Some(cur_box)) => Some(BoxLayout {
+                    min_y: lerp(prev_box.min_y, cur_box.min_y),
+                    q1_y: lerp(prev_box.q1_y, cur_box.q1_y),
+                    median_y: lerp(prev_box.median_y, cur_box.median_y),
+                    q3_y: lerp(prev_box.q3_y, cur_box.q3_y),
+                    max_y: lerp(prev_box.max_y, cur_box.max_y),
+                }),
+                (None, Some(cur_box)) => {
+                    let m = cur_box.median_y;
+                    let collapse = |v: f32| m + (v - m) * progress;
+                    Some(BoxLayout {
+                        min_y: collapse(cur_box.min_y),
+                        q1_y: collapse(cur_box.q1_y),
+                        median_y: cur_box.median_y,
+                        q3_y: collapse(cur_box.q3_y),
+                        max_y: collapse(cur_box.max_y),
+                    })
+                }
+                (Some(_), None) => None,
+                (None, None) => None,
+            };
+            (right_points, left_points, box_layout)
+        }
+        None => {
+            let right_points = collapse_outline_to_center(&cur.right_points);
+            let left_points = collapse_outline_to_center(&cur.left_points);
+            let box_layout = cur.box_layout.as_ref().map(|cur_box| {
+                let m = cur_box.median_y;
+                let collapse = |v: f32| m + (v - m) * progress;
+                BoxLayout {
+                    min_y: collapse(cur_box.min_y),
+                    q1_y: collapse(cur_box.q1_y),
+                    median_y: cur_box.median_y,
+                    q3_y: collapse(cur_box.q3_y),
+                    max_y: collapse(cur_box.max_y),
+                }
+            });
+            (right_points, left_points, box_layout)
+        }
+    };
+
+    EntryLayout {
+        right_points,
+        left_points,
+        center_x: cur.center_x,
+        box_layout,
     }
 }

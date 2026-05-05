@@ -245,6 +245,9 @@ where
             if let Series::BoxPlot(bp) = series {
                 bp.set_animate(animate);
             }
+            if let Series::Violin(v) = series {
+                v.set_animate(animate);
+            }
         }
         self
     }
