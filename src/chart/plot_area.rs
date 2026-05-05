@@ -871,10 +871,10 @@ where
         // geo-aware mark is in the series list. The plane's bounds are
         // the full plot-area limits-max with origin (0, 0); per-mark
         // renderers translate by `layout_bounds.{x, y}` when drawing.
-        let needs_geo_plane = self
-            .series
-            .iter()
-            .any(|s| matches!(s, Series::Choropleth(_) | Series::BubbleMap(_)));
+        let needs_geo_plane = self.series.iter().any(|s| {
+            matches!(s, Series::Choropleth(_) | Series::BubbleMap(_))
+                || matches!(s, Series::Xy(xy) if xy.data.coord_kind == crate::mark::xy::CoordKind::Geo)
+        });
         if needs_geo_plane {
             let geo_bounds = Rectangle {
                 x: 0.0,
@@ -934,7 +934,7 @@ where
                     wf.layout(series_tree, renderer, limits, use_plane);
                 }
                 Series::Xy(xy) => {
-                    xy.layout(series_tree, renderer, limits, use_plane);
+                    xy.layout(series_tree, renderer, limits, use_plane, geo_plane_ref);
                 }
                 Series::Rule(rule) => {
                     rule.layout(series_tree, renderer, limits, use_plane);

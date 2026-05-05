@@ -6,6 +6,24 @@ use crate::encoding::{Encoding, channel};
 
 pub use marker::Marker;
 
+/// How each [`Datum`]'s `(x, y)` coordinate is interpreted by the renderer.
+///
+/// `Cartesian` (the default) routes points through the chart's primary
+/// axes plane: `x` and `y` are values on whatever scales the axes carry.
+///
+/// `Geo` interprets `(x, y)` as `(longitude, latitude)` in degrees and
+/// projects through the chart's geo plane (configured via
+/// [`crate::Data::geo`] / [`crate::Data::geo_data`]). When no geo data
+/// is configured, points project to the plot-area origin — the renderer
+/// gates draw on `state.geo_plane.is_some()` so a misconfigured chart
+/// shows no points rather than a NaN.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CoordKind {
+    #[default]
+    Cartesian,
+    Geo,
+}
+
 /// XY scatter chart specification.
 ///
 /// Plots points on a two-dimensional coordinate system without connecting lines.
@@ -21,6 +39,8 @@ pub struct Xy {
     /// the renderer uses the resolved per-point diameter instead of
     /// `marker.size`. This turns the scatter into a bubble chart.
     pub(crate) size_by: Option<Encoding<channel::Size>>,
+    /// How `(x, y)` coordinates are interpreted. See [`CoordKind`].
+    pub(crate) coord_kind: CoordKind,
 }
 
 /// Creates an XY scatter chart from point data.
@@ -43,6 +63,7 @@ pub fn xy(data: impl IntoDatums) -> Xy {
         marker: marker::Marker::default(),
         name: None,
         size_by: None,
+        coord_kind: CoordKind::Cartesian,
     }
 }
 
@@ -76,6 +97,18 @@ impl Xy {
     /// ```
     pub fn size_by(mut self, encoding: Encoding<channel::Size>) -> Self {
         self.size_by = Some(encoding);
+        self
+    }
+
+    /// Sets `(x, y)` interpretation to `(longitude, latitude)`. Renders
+    /// via the chart's geo plane (configured via [`crate::Data::geo`]).
+    /// When no geo data is configured, points project to the plot-area
+    /// origin `(0, 0)` — the renderer is gated on `state.geo_plane`, so
+    /// a misconfigured chart shows no points rather than a NaN.
+    ///
+    /// Pairs with [`Xy::size_by`] for bubble-sized geographic scatter.
+    pub fn on_geo(mut self) -> Self {
+        self.coord_kind = CoordKind::Geo;
         self
     }
 
@@ -194,5 +227,22 @@ impl From<Xy> for crate::Data {
     fn from(xy: Xy) -> Self {
         use crate::data::IntoData;
         xy.into_data()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn xy_defaults_to_cartesian() {
+        let mark = xy([(1.0, 2.0)]);
+        assert_eq!(mark.coord_kind, CoordKind::Cartesian);
+    }
+
+    #[test]
+    fn on_geo_flips_coord_kind() {
+        let mark = xy([(1.0, 2.0)]).on_geo();
+        assert_eq!(mark.coord_kind, CoordKind::Geo);
     }
 }

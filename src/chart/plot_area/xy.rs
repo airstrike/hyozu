@@ -1,9 +1,10 @@
-use super::Plane;
+use super::{Plane, geo};
 use crate::animation;
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
 use crate::core::{Point, Size};
 use crate::line::marker::Shape;
+use crate::mark::xy::CoordKind;
 use crate::widget::canvas::{Frame, Path, Stroke};
 
 use crate::core::text;
@@ -92,10 +93,32 @@ where
     /// Layout the scatter — transform data to pixel coordinates and resolve
     /// per-point marker diameters from the `size_by` encoding (if any).
     /// Both vectors are stored on `State` so `draw` is a pure read.
-    pub fn layout(&self, tree: &mut Tree, _renderer: &Renderer, _limits: &Limits, plane: &Plane) -> Node {
+    ///
+    /// `geo_plane` is consulted only when `self.data.coord_kind ==
+    /// CoordKind::Geo`. Geo-coord Xy with no geo plane (misconfiguration)
+    /// emits an empty `pixel_points`, which makes `draw` short-circuit.
+    pub fn layout(
+        &self,
+        tree: &mut Tree,
+        _renderer: &Renderer,
+        _limits: &Limits,
+        plane: &Plane,
+        geo_plane: Option<&geo::Plane>,
+    ) -> Node {
         let state = tree.state.downcast_mut::<State>();
 
-        state.pixel_points = self.data.points.iter().map(|p| plane.to_pixel(*p)).collect();
+        state.pixel_points = match self.data.coord_kind {
+            CoordKind::Cartesian => self.data.points.iter().map(|p| plane.to_pixel(*p)).collect(),
+            CoordKind::Geo => match geo_plane {
+                Some(plane) => self
+                    .data
+                    .points
+                    .iter()
+                    .map(|p| plane.project_point(p.x as f32, p.y as f32))
+                    .collect(),
+                None => Vec::new(),
+            },
+        };
 
         // Resolve per-point sizes once per layout. Encoding misses (None)
         // and the no-encoding case both fall back to `marker.size`, so the
