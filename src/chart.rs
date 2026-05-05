@@ -457,6 +457,9 @@ fn animation_tick_mut(tree: &mut Tree) -> Option<&mut animation::Tick> {
     if tag == tree::Tag::of::<plot_area::band::State>() {
         return Some(&mut tree.state.downcast_mut::<plot_area::band::State>().tick);
     }
+    if tag == tree::Tag::of::<plot_area::boxplot::State>() {
+        return Some(&mut tree.state.downcast_mut::<plot_area::boxplot::State>().tick);
+    }
     None
 }
 
@@ -675,6 +678,22 @@ fn replant_band(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
     }
 }
 
+/// Snapshots a BoxPlot mark's pre-rebuild `entries_layout` onto the
+/// post-rebuild tree's `previous_entries` and arms the next redraw to
+/// interpolate every component (box, whiskers, median, outliers) from
+/// there. The caller is responsible for confirming both nodes carry a
+/// `boxplot::State`.
+fn replant_boxplot(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
+    let old_state = old_mark.state.downcast_ref::<plot_area::boxplot::State>();
+    let new_state = new_mark.state.downcast_mut::<plot_area::boxplot::State>();
+    if animate {
+        new_state.previous_entries = old_state.entries_layout.clone();
+        new_state.tick.pending_start = true;
+    } else {
+        new_state.tick.pending_start = false;
+    }
+}
+
 /// Walks old/new plot-area children pairwise and dispatches per-tag
 /// to the matching `replant_<mark>` snapshot helper. A no-op when
 /// either tree lacks a plot area.
@@ -691,6 +710,7 @@ fn replant_mark_animations(old_children: &[Tree], new_children: &mut [Tree], ani
     let choropleth_tag = tree::Tag::of::<plot_area::choropleth::State>();
     let gauge_tag = tree::Tag::of::<plot_area::gauge::State>();
     let band_tag = tree::Tag::of::<plot_area::band::State>();
+    let boxplot_tag = tree::Tag::of::<plot_area::boxplot::State>();
     let Some(old_scene) = old_children.first() else {
         return;
     };
@@ -751,6 +771,10 @@ fn replant_mark_animations(old_children: &[Tree], new_children: &mut [Tree], ani
         }
         if old_mark.tag == band_tag && new_mark.tag == band_tag {
             replant_band(old_mark, new_mark, animate);
+            continue;
+        }
+        if old_mark.tag == boxplot_tag && new_mark.tag == boxplot_tag {
+            replant_boxplot(old_mark, new_mark, animate);
             continue;
         }
     }

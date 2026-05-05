@@ -242,6 +242,9 @@ where
             if let Series::Band(band) = series {
                 band.set_animate(animate);
             }
+            if let Series::BoxPlot(bp) = series {
+                bp.set_animate(animate);
+            }
         }
         self
     }
