@@ -1,6 +1,8 @@
 use crate::color::Color;
 use crate::data::Datum;
+use crate::data::mark::Mark;
 use crate::data::mark::line::marker;
+use crate::data::mark::text::{self, TextItem};
 use crate::data::mark::xy::{CoordKind, Xy};
 use crate::encoding;
 
@@ -168,6 +170,47 @@ pub fn bubble_map(points: impl IntoIterator<Item = MapPoint>) -> Xy {
         coord_kind: CoordKind::Geo,
         opacity: 0.7,
     }
+}
+
+/// Creates a bubble map plus a label overlay in one call.
+///
+/// Returns `[Mark::Xy(bubbles), Mark::Text(labels)]` — the bubbles
+/// projected through the chart's geo plane and sized by value, the
+/// labels projected through the same plane and offset 16 px above each
+/// marker. Points without a `label` contribute a bubble but no label.
+///
+/// Compose the result via `IntoData for Vec<Mark>` (already in scope):
+///
+/// ```
+/// use hyozu::{bubble_map_with_labels, map_point, Mark, Choropleth, choropleth};
+///
+/// let mut marks = vec![Mark::Choropleth(choropleth([("CA", 1.0)]))];
+/// marks.extend(bubble_map_with_labels([
+///     map_point(34.0, -118.2, 1.0).label("LA"),
+/// ]));
+/// let data = hyozu::data(marks);
+/// ```
+pub fn bubble_map_with_labels(points: impl IntoIterator<Item = MapPoint>) -> Vec<Mark> {
+    let entries: Vec<MapPoint> = points.into_iter().collect();
+    // Pull labels off the entries before they move into `bubble_map`. The
+    // label set is sparse — only entries with `label.is_some()` produce a
+    // `TextItem` — so the layer renders nothing for unlabeled bubbles.
+    let label_items: Vec<TextItem> = entries
+        .iter()
+        .filter_map(|p| {
+            p.label.as_ref().map(|l| TextItem {
+                datum: Datum::new(p.lon, p.lat),
+                label: l.clone(),
+            })
+        })
+        .collect();
+    let bubbles = bubble_map(entries);
+    let labels = text::text(label_items)
+        .on_geo()
+        .offset(0.0, -16.0)
+        .align(text::TextAlign::Center)
+        .size(11.0);
+    vec![Mark::Xy(bubbles), Mark::Text(labels)]
 }
 
 /// Compute the value-magnitude range over a slice of map points.

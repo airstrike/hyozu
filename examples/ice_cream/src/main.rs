@@ -260,9 +260,10 @@ impl App {
             .map(|s| hyozu::map_point(s.lat, s.lon, s.revenue_k as f32).label(s.label))
             .collect();
 
-        let bubbles = hyozu::bubble_map(shop_points).with_name("Flagship store revenue ($K)");
+        let mut marks = vec![hyozu::Mark::Choropleth(choropleth)];
+        marks.extend(hyozu::bubble_map_with_labels(shop_points));
 
-        hyozu::data(vec![hyozu::Mark::Choropleth(choropleth), hyozu::Mark::Xy(bubbles)])
+        hyozu::data(marks)
             .geo(states.clone(), MapScope::UnitedStates, ProjectionKind::Mercator)
             .title("Sundae Drive — Monthly Performance, CONUS")
     }

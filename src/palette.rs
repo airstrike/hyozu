@@ -204,6 +204,12 @@ impl Palette {
                 Mark::Tick(_) => Palette::SEQUENTIAL,
                 Mark::Rule(_) => Palette::SEQUENTIAL,
                 Mark::Band(_) => Palette::SEQUENTIAL,
+                // Text is a passive label layer with no inherent palette
+                // role. The single-mark inference here is academic for
+                // Text alone (you'd see no marks under the labels), but
+                // sequential keeps the fallback palette consistent with
+                // Line/Xy if a future caller did render text solo.
+                Mark::Text(_) => Palette::SEQUENTIAL,
             };
         }
 
@@ -232,6 +238,9 @@ pub fn count_color_slots(marks: &[Mark]) -> usize {
             Mark::Tick(_) => 0,
             Mark::Rule(_) => 0,
             Mark::Band(_) => 0,
+            // Text uses its own resolved color (or the design's text
+            // color), so it never claims a palette slot.
+            Mark::Text(_) => 0,
         })
         .sum::<usize>()
         .max(1)

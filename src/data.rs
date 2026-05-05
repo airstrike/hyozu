@@ -10,9 +10,9 @@ pub use axis::{Axis, Orientation};
 pub use datum::{Datum, IntoDatums};
 pub use mark::{
     Band, Bars, BoxPlot, Choropleth, ChoroplethEntry, Gauge, Heatmap, LegendEntry, Line, MapPoint, Mark, Pie, Rule,
-    Treemap, Violin, Waterfall, Xy, areas, band, bar, bars, boxplot, bubble_map, choropleth, choropleth_entry, entry,
-    entry_from_data, gauge, heatmap, line, map_point, pie, rule, treemap, violin, violin_entry, violin_from_data,
-    waterfall, xy,
+    Text, TextAlign, TextItem, Treemap, Violin, Waterfall, Xy, areas, band, bar, bars, boxplot, bubble_map,
+    bubble_map_with_labels, choropleth, choropleth_entry, entry, entry_from_data, gauge, heatmap, line, map_point, pie,
+    rule, treemap, violin, violin_entry, violin_from_data, waterfall, xy,
 };
 
 /// Trait for types that can be converted into chart Data.
@@ -157,6 +157,11 @@ fn axes_for_mark(mark: &Mark) -> (Option<Axis>, Option<Axis>) {
         Mark::Band(_) => (mark::band::Band::x_axis(), mark::band::Band::y_axis()),
         Mark::Tick(_) => (mark::tick::Tick::x_axis(), mark::tick::Tick::y_axis()),
         Mark::Heatmap(hm) => (Some(hm.x_axis()), Some(hm.y_axis())),
+        // Text is a passive label layer — it doesn't drive axis ranges
+        // or own a default axis pair. Composed alongside a primary mark
+        // (e.g. via `bubble_map_with_labels`), the primary mark's axes
+        // win during the `Vec<Mark>` axis inference in `Area::from`.
+        Mark::Text(_) => (None, None),
     }
 }
 
@@ -178,10 +183,12 @@ impl From<Vec<Mark>> for Area {
             return Self::empty();
         }
 
-        // Configure axes based on first non-Rule mark (rules inherit axes)
+        // Configure axes based on the first mark that owns one. Rule/Band/Tick
+        // are decorations that piggyback on whatever axes the data marks set;
+        // Text is a passive label layer that doesn't own axes.
         let (x_axis, y_axis) = marks
             .iter()
-            .find(|m| !matches!(m, Mark::Rule(_) | Mark::Band(_) | Mark::Tick(_)))
+            .find(|m| !matches!(m, Mark::Rule(_) | Mark::Band(_) | Mark::Tick(_) | Mark::Text(_)))
             .or(marks.first())
             .map(axes_for_mark)
             .unwrap_or((None, None));
@@ -266,6 +273,12 @@ impl IntoData for Violin {
 }
 
 impl IntoData for Choropleth {
+    fn into_data(self) -> Data {
+        Mark::from(self).into_data()
+    }
+}
+
+impl IntoData for Text {
     fn into_data(self) -> Data {
         Mark::from(self).into_data()
     }
@@ -677,7 +690,7 @@ impl Data {
         if self.secondary.y_axis.is_none() {
             let (_, auto_y) = new_marks
                 .iter()
-                .find(|m| !matches!(m, Mark::Rule(_) | Mark::Band(_) | Mark::Tick(_)))
+                .find(|m| !matches!(m, Mark::Rule(_) | Mark::Band(_) | Mark::Tick(_) | Mark::Text(_)))
                 .or(new_marks.first())
                 .map(axes_for_mark)
                 .unwrap_or((None, None));

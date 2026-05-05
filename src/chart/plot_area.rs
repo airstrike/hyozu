@@ -3,7 +3,6 @@ use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
 use crate::data::Datum;
 
-use crate::core::text;
 use crate::widget::renderer::geometry;
 
 pub mod area;
@@ -17,6 +16,7 @@ pub mod heatmap;
 pub mod line;
 pub mod pie;
 pub mod rule;
+pub mod text;
 pub mod tick;
 pub mod treemap;
 pub mod violin;
@@ -32,6 +32,7 @@ pub use heatmap::Heatmap;
 pub use line::Line;
 pub use pie::Pie;
 pub use rule::Rule;
+pub use text::Text;
 pub use tick::Tick;
 pub use treemap::Treemap;
 pub use violin::Violin;
@@ -137,7 +138,7 @@ impl Plane {
 pub enum Series<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: text::Renderer + geometry::Renderer,
+    Renderer: crate::core::text::Renderer + geometry::Renderer,
 {
     Area(area::Area<'a, Message, Renderer>),
     Line(Line<'a, Message, Renderer>),
@@ -154,6 +155,7 @@ where
     Heatmap(Heatmap<'a, Message, Renderer>),
     Treemap(Treemap<'a, Message, Renderer>),
     Violin(Violin<'a, Message, Renderer>),
+    Text(Text<'a, Message, Renderer>),
 }
 
 /// Which axis pair a mark is plotted against.
@@ -189,7 +191,7 @@ pub struct State {
 pub struct PlotArea<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: text::Renderer + geometry::Renderer,
+    Renderer: crate::core::text::Renderer + geometry::Renderer,
 {
     pub(crate) series: Vec<Series<'a, Message, Renderer>>,
     /// Which axis pair each series in `series` is plotted against.
@@ -199,7 +201,7 @@ where
 impl<'a, Message, Renderer> PlotArea<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: text::Renderer + geometry::Renderer,
+    Renderer: crate::core::text::Renderer + geometry::Renderer,
 {
     /// Create a new PlotArea from mark data (primary axis).
     pub fn new(marks: &'a [crate::Mark]) -> Self {
@@ -296,6 +298,7 @@ where
             crate::Mark::Heatmap(hm) => Series::Heatmap(Heatmap::new(hm)),
             crate::Mark::Treemap(tm) => Series::Treemap(Treemap::new(tm)),
             crate::Mark::Violin(v) => Series::Violin(Violin::new(v)),
+            crate::Mark::Text(t) => Series::Text(Text::new(t)),
         }
     }
 
@@ -321,6 +324,7 @@ where
                 Series::Tick(_) => 0,
                 Series::Rule(_) => 0,
                 Series::Band(_) => 0,
+                Series::Text(_) => 0,
             };
         }
         offset + series_idx
@@ -348,6 +352,7 @@ where
                 Series::Heatmap(hm) => hm.state(),
                 Series::Treemap(tm) => tm.state(),
                 Series::Violin(v) => v.state(),
+                Series::Text(t) => t.state(),
             })
             .collect();
 
@@ -387,6 +392,7 @@ where
                     Series::Heatmap(_) => tree::Tag::of::<heatmap::State>(),
                     Series::Treemap(_) => tree::Tag::of::<treemap::State>(),
                     Series::Violin(_) => tree::Tag::of::<violin::State>(),
+                    Series::Text(_) => tree::Tag::of::<text::State>(),
                 };
 
                 if tree.tag != expected_tag {
@@ -406,6 +412,7 @@ where
                         Series::Heatmap(hm) => hm.state(),
                         Series::Treemap(tm) => tm.state(),
                         Series::Violin(v) => v.state(),
+                        Series::Text(t) => t.state(),
                     };
                 } else {
                     match series {
@@ -424,6 +431,7 @@ where
                         Series::Heatmap(hm) => hm.diff(tree),
                         Series::Treemap(tm) => tm.diff(tree),
                         Series::Violin(v) => v.diff(tree),
+                        Series::Text(t) => t.diff(tree),
                     }
                 }
             },
@@ -443,6 +451,7 @@ where
                 Series::Heatmap(hm) => hm.state(),
                 Series::Treemap(tm) => tm.state(),
                 Series::Violin(v) => v.state(),
+                Series::Text(t) => t.state(),
             },
         );
     }
@@ -673,8 +682,11 @@ where
                         }
                     }
                 },
-                // Non-Cartesian marks don't use Cartesian bounds
-                Series::Pie(_) | Series::Gauge(_) | Series::Treemap(_) | Series::Choropleth(_) => {}
+                // Non-Cartesian marks don't use Cartesian bounds. Text is
+                // a passive label layer that projects through whatever
+                // plane the underlying point mark uses; its items don't
+                // extend the chart's data range.
+                Series::Pie(_) | Series::Gauge(_) | Series::Treemap(_) | Series::Choropleth(_) | Series::Text(_) => {}
             }
         }
 
@@ -857,6 +869,7 @@ where
         let needs_geo_plane = self.series.iter().any(|s| {
             matches!(s, Series::Choropleth(_))
                 || matches!(s, Series::Xy(xy) if xy.data.coord_kind == crate::mark::xy::CoordKind::Geo)
+                || matches!(s, Series::Text(t) if t.data.coord_kind == crate::mark::xy::CoordKind::Geo)
         });
         if needs_geo_plane {
             let geo_bounds = Rectangle {
@@ -933,6 +946,9 @@ where
                 }
                 Series::Violin(v) => {
                     v.layout(series_tree, renderer, limits, use_plane);
+                }
+                Series::Text(t) => {
+                    t.layout(series_tree, renderer, limits, use_plane, geo_plane_ref);
                 }
             }
         }
@@ -1480,6 +1496,10 @@ where
                         palette,
                     );
                     color_offset += v.data.entries.len();
+                }
+                Series::Text(t) => {
+                    t.draw(series_tree, renderer, design, style, layout, cursor, viewport);
+                    // Text labels don't claim a palette slot.
                 }
             }
         }

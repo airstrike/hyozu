@@ -369,8 +369,11 @@ impl Area {
                         }
                     }
                 },
-                // Non-Cartesian marks don't contribute bounds
-                Mark::Pie(_) | Mark::Gauge(_) | Mark::Treemap(_) | Mark::Choropleth(_) => {}
+                // Non-Cartesian marks don't contribute bounds. Text is a
+                // label overlay that projects through the same plane as
+                // an underlying mark (cartesian or geo) — its items'
+                // datums never extend the chart's data range.
+                Mark::Pie(_) | Mark::Gauge(_) | Mark::Treemap(_) | Mark::Choropleth(_) | Mark::Text(_) => {}
             }
         }
 

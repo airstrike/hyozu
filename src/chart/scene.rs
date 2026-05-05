@@ -31,7 +31,8 @@ fn mark_value_format(mark: &Mark) -> Option<crate::scale::Format<f64>> {
         | Mark::Rule(_)
         | Mark::Tick(_)
         | Mark::Heatmap(_)
-        | Mark::Violin(_) => None,
+        | Mark::Violin(_)
+        | Mark::Text(_) => None,
     }
 }
 

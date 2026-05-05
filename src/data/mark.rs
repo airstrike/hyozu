@@ -10,6 +10,7 @@ pub mod heatmap;
 pub mod line;
 pub mod pie;
 pub mod rule;
+pub mod text;
 pub mod tick;
 pub mod treemap;
 pub mod violin;
@@ -20,7 +21,7 @@ pub use area::{Area, IntoAreas, area, areas};
 pub use band::{Band, BandOrientation, band};
 pub use bar::{Bars, IntoBars, bar, bars};
 pub use boxplot::{BoxPlot, boxplot, entry, entry_from_data};
-pub use bubble_map::{MapPoint, bubble_map, map_point};
+pub use bubble_map::{MapPoint, bubble_map, bubble_map_with_labels, map_point};
 pub use choropleth::{
     Choropleth, ChoroplethEntry, IntoChoropleth, choropleth, choropleth_entry, choropleth_entry_available,
 };
@@ -29,6 +30,7 @@ pub use heatmap::{Heatmap, heatmap};
 pub use line::{IntoLines, Line, LineStyle, line};
 pub use pie::{Pie, pie};
 pub use rule::{Rule, rule};
+pub use text::{Text, TextAlign, TextItem};
 pub use tick::{Tick, tick};
 pub use treemap::{Treemap, treemap};
 pub use violin::{Violin, violin, violin_entry, violin_from_data};
@@ -84,6 +86,7 @@ pub enum Mark {
     Tick(Tick),
     Heatmap(Heatmap),
     Violin(Violin),
+    Text(Text),
 }
 
 impl Mark {
@@ -193,14 +196,17 @@ impl Mark {
                     value: None,
                 })
                 .collect(),
-            // Rule, Band, Tick, Gauge, Heatmap, Choropleth don't contribute to legend
+            // Rule, Band, Tick, Gauge, Heatmap, Choropleth, Text don't
+            // contribute to legend. Text is a label layer composed atop
+            // another mark; it doesn't claim its own legend entry.
             Mark::Rule(_)
             | Mark::Band(_)
             | Mark::Tick(_)
             | Mark::Gauge(_)
             | Mark::Waterfall(_)
             | Mark::Heatmap(_)
-            | Mark::Choropleth(_) => Vec::new(),
+            | Mark::Choropleth(_)
+            | Mark::Text(_) => Vec::new(),
         }
     }
 
@@ -211,7 +217,25 @@ impl Mark {
     pub fn scale_legend_config(&self) -> Option<(&crate::data::legend::Config, Option<&str>)> {
         match self {
             Mark::Choropleth(c) => c.legend_config().map(|l| (l, c.legend_title_value())),
-            _ => None,
+            // Every other mark contributes nothing to the scale-legend
+            // surface. Listed explicitly so adding a future variant
+            // forces a deliberate decision rather than silently
+            // defaulting to None.
+            Mark::Area(_)
+            | Mark::Band(_)
+            | Mark::Bars(_)
+            | Mark::BoxPlot(_)
+            | Mark::Gauge(_)
+            | Mark::Heatmap(_)
+            | Mark::Line(_)
+            | Mark::Pie(_)
+            | Mark::Rule(_)
+            | Mark::Text(_)
+            | Mark::Tick(_)
+            | Mark::Treemap(_)
+            | Mark::Violin(_)
+            | Mark::Waterfall(_)
+            | Mark::Xy(_) => None,
         }
     }
 }
@@ -303,5 +327,11 @@ impl From<Violin> for Mark {
 impl From<Choropleth> for Mark {
     fn from(c: Choropleth) -> Self {
         Mark::Choropleth(c)
+    }
+}
+
+impl From<Text> for Mark {
+    fn from(t: Text) -> Self {
+        Mark::Text(t)
     }
 }
