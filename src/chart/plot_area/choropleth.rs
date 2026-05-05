@@ -401,27 +401,11 @@ where
         // ── Draw ocean background ────────────────────────────────
         let mut frame = Frame::new(renderer, layout_bounds.size());
 
-        let bg_oklch = crate::palette::to_oklch(background);
-        let is_dark = bg_oklch.l < 0.5;
-        let ocean_color = if is_dark {
-            // Dark mode: deep navy
-            crate::core::Color {
-                r: 0.10,
-                g: 0.14,
-                b: 0.20,
-                a: 1.0,
-            }
-        } else {
-            // Light mode: near-white with a faint cool tint, so the map
-            // sits cleanly against neutral page chrome and a host
-            // container can match this fill to blend the chart edge.
-            crate::core::Color {
-                r: 0.95,
-                g: 0.97,
-                b: 0.98,
-                a: 1.0,
-            }
-        };
+        // Ocean color comes from the theme so a host wrapper can match
+        // the choropleth's painted background via `theme.ocean_fill()`
+        // without hardcoding an RGB constant that drifts when the theme
+        // changes.
+        let ocean_color = theme.ocean_fill();
 
         let ocean = Path::new(|builder| {
             builder.rectangle(

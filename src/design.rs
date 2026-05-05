@@ -85,6 +85,27 @@ pub trait Design {
         }
     }
 
+    /// Returns the fill color used for the "ocean" — the decorative
+    /// background painted under choropleth maps in regions that are
+    /// outside any feature's polygon.
+    ///
+    /// Exposed on the trait so callers wrapping a choropleth chart can
+    /// match this color in their own surrounding chrome (e.g. an iced
+    /// `container` background, or the chart widget's own
+    /// [`crate::chart::Style::background`]) without hardcoding an RGB
+    /// constant that drifts when the theme changes.
+    ///
+    /// The default is theme-aware: a faint cool-tinted near-white
+    /// (`0xF2F7FA`) on light backgrounds, and a deep navy
+    /// (`0x1A2333`) on dark backgrounds.
+    fn ocean_fill(&self) -> crate::core::Color {
+        if crate::palette::is_dark_background(self.background_color()) {
+            color!(0x1A2333)
+        } else {
+            color!(0xF2F7FA)
+        }
+    }
+
     /// Returns the color for major gridlines inside the plot area.
     ///
     /// Gridlines should sit visually *beneath* the axis frame, so the
@@ -206,6 +227,10 @@ impl<T: Design> Design for &T {
 
     fn missing_fill(&self) -> crate::core::Color {
         (*self).missing_fill()
+    }
+
+    fn ocean_fill(&self) -> crate::core::Color {
+        (*self).ocean_fill()
     }
 
     fn grid_color(&self) -> Color {
