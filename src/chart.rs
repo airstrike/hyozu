@@ -433,6 +433,9 @@ fn animation_tick_mut(tree: &mut Tree) -> Option<&mut animation::Tick> {
     if tag == tree::Tag::of::<plot_area::line::State>() {
         return Some(&mut tree.state.downcast_mut::<plot_area::line::State>().tick);
     }
+    if tag == tree::Tag::of::<plot_area::area::State>() {
+        return Some(&mut tree.state.downcast_mut::<plot_area::area::State>().tick);
+    }
     None
 }
 
@@ -497,6 +500,23 @@ fn replant_line(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
     }
 }
 
+/// Snapshots an Area mark's pre-rebuild `series_points` and
+/// `series_baselines` onto the post-rebuild tree's
+/// `previous_series_points` and `previous_series_baselines` and arms
+/// the next redraw to interpolate from there. The caller is
+/// responsible for confirming both nodes carry an `area::State`.
+fn replant_area(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
+    let old_state = old_mark.state.downcast_ref::<plot_area::area::State>();
+    let new_state = new_mark.state.downcast_mut::<plot_area::area::State>();
+    if animate {
+        new_state.previous_series_points = old_state.series_points.clone();
+        new_state.previous_series_baselines = old_state.series_baselines.clone();
+        new_state.tick.pending_start = true;
+    } else {
+        new_state.tick.pending_start = false;
+    }
+}
+
 /// Walks old/new plot-area children pairwise and dispatches per-tag
 /// to the matching `replant_<mark>` snapshot helper. A no-op when
 /// either tree lacks a plot area.
@@ -505,6 +525,7 @@ fn replant_mark_animations(old_children: &[Tree], new_children: &mut [Tree], ani
     let bars_tag = tree::Tag::of::<plot_area::bars::State>();
     let waterfall_tag = tree::Tag::of::<plot_area::waterfall::State>();
     let line_tag = tree::Tag::of::<plot_area::line::State>();
+    let area_tag = tree::Tag::of::<plot_area::area::State>();
     let Some(old_scene) = old_children.first() else {
         return;
     };
@@ -533,6 +554,10 @@ fn replant_mark_animations(old_children: &[Tree], new_children: &mut [Tree], ani
         }
         if old_mark.tag == line_tag && new_mark.tag == line_tag {
             replant_line(old_mark, new_mark, animate);
+            continue;
+        }
+        if old_mark.tag == area_tag && new_mark.tag == area_tag {
+            replant_area(old_mark, new_mark, animate);
             continue;
         }
     }

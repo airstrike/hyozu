@@ -2,6 +2,7 @@ use super::Plane;
 use super::line::{
     alignment_for_position, clamp_to_bounds, compute_label_rect, dash_segments, draw_markers, place_label,
 };
+use crate::animation;
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
 use crate::core::{Point, Rectangle, Size};
@@ -27,6 +28,19 @@ pub struct State {
     /// transparent end of vertical fill gradients so they respect the
     /// axis scale even when 0 is outside it.
     pub axis_floor_y: f32,
+    /// Upper envelope points from the most recent layout before the current
+    /// one, captured by [`crate::chart::Chart::diff`] when data changes so
+    /// the next sweep can interpolate from previous positions to current
+    /// positions. Empty on a fresh mount, in which case the animation
+    /// collapses to a left-to-right envelope sweep.
+    pub previous_series_points: Vec<Vec<Point>>,
+    /// Baseline points from the most recent layout before the current one,
+    /// kept in lockstep with `previous_series_points` so the closed
+    /// envelope path stays well-formed at every interpolation step.
+    pub previous_series_baselines: Vec<Vec<Point>>,
+    /// Per-frame entrance/transition lifecycle (progress, pending-start
+    /// flag, latest captured `Instant`) advanced by the chart widget.
+    pub tick: animation::Tick,
 }
 
 pub struct Area<'a, Message, Renderer>
@@ -35,6 +49,10 @@ where
     Renderer: crate::core::text::Renderer + geometry::Renderer,
 {
     pub(crate) data: &'a crate::mark::area::Area,
+    /// Whether the mount/data-change sweep runs. Mirrors
+    /// [`crate::Data::animate`] (the chart-level toggle); `false` makes
+    /// `draw` snap to the laid-out geometry.
+    pub(crate) animate: bool,
     _marker: std::marker::PhantomData<(Message, Renderer)>,
 }
 
@@ -46,8 +64,15 @@ where
     pub fn new(data: &'a crate::mark::area::Area) -> Self {
         Self {
             data,
+            animate: true,
             _marker: std::marker::PhantomData,
         }
+    }
+
+    /// Sets whether the mount/data-change sweep should run. Wired by
+    /// [`super::PlotArea::with_animate`] from [`crate::Data::animate`].
+    pub(crate) fn set_animate(&mut self, animate: bool) {
+        self.animate = animate;
     }
 
     pub(super) fn state(&self) -> Tree {
@@ -60,6 +85,9 @@ where
                 series_label_positions: Vec::new(),
                 series_label_rects: Vec::new(),
                 axis_floor_y: 0.0,
+                previous_series_points: Vec::new(),
+                previous_series_baselines: Vec::new(),
+                tick: animation::Tick::new(),
             }),
             children: Vec::new(),
         }
@@ -290,9 +318,41 @@ where
         let mut fill_frame = Frame::new(renderer, layout_bounds.size());
         let mut stroke_frame = Frame::new(renderer, layout_bounds.size());
 
+        // Sweep: each series' envelope (upper + baseline) interpolates from
+        // its previous-layout envelope toward its current envelope. Without
+        // a snapshot (fresh mount), upper and baseline are truncated in
+        // lockstep at `floor(progress * len)` plus a partial endpoint, so
+        // the closed `upper ++ reversed(baseline)` path stays well-formed
+        // at every step. With `animate = false` progress pins to `1.0`,
+        // collapsing the helper to identity returns of the laid-out
+        // points and reproducing today's geometry exactly.
+        let progress = if !self.animate { 1.0 } else { state.tick.progress() };
+        let animating = progress < 1.0 - f32::EPSILON;
+        let animated_series_points: Vec<Vec<Point>>;
+        let animated_series_baselines: Vec<Vec<Point>>;
+        {
+            let mut points_out = Vec::with_capacity(state.series_points.len());
+            let mut baselines_out = Vec::with_capacity(state.series_baselines.len());
+            for (s, (cur_upper, cur_baseline)) in state
+                .series_points
+                .iter()
+                .zip(state.series_baselines.iter())
+                .enumerate()
+            {
+                let prev_upper = state.previous_series_points.get(s).map(Vec::as_slice).unwrap_or(&[]);
+                let prev_baseline = state.previous_series_baselines.get(s).map(Vec::as_slice).unwrap_or(&[]);
+                let (upper_anim, baseline_anim) =
+                    animate_envelope(cur_upper, prev_upper, cur_baseline, prev_baseline, progress);
+                points_out.push(upper_anim);
+                baselines_out.push(baseline_anim);
+            }
+            animated_series_points = points_out;
+            animated_series_baselines = baselines_out;
+        }
+
         for (series_idx, series) in self.data.series.iter().enumerate() {
-            let upper = &state.series_points[series_idx];
-            let baseline = &state.series_baselines[series_idx];
+            let upper = &animated_series_points[series_idx];
+            let baseline = &animated_series_baselines[series_idx];
 
             if upper.len() < 2 {
                 continue;
@@ -373,7 +433,10 @@ where
             renderer.draw_geometry(stroke_geometry);
         });
 
-        let needs_marker_frame = self.data.series.iter().any(|s| s.marker.is_some());
+        // Markers anchor at vertices the envelope might not have grown to
+        // yet; suppress them until the sweep settles, matching the line
+        // renderer.
+        let needs_marker_frame = !animating && self.data.series.iter().any(|s| s.marker.is_some());
         if needs_marker_frame {
             let mut marker_frame = Frame::new(renderer, layout_bounds.size());
             for (series_idx, series) in self.data.series.iter().enumerate() {
@@ -410,79 +473,82 @@ where
 
         // Draw data labels per series. All series share one frame so that
         // we only emit a single `draw_geometry` for labels regardless of
-        // how many series have labels configured.
+        // how many series have labels configured. Suppressed mid-sweep so
+        // labels don't pop in over an envelope still growing into place.
         let mut label_frame = Frame::new(renderer, layout_bounds.size());
         let mut any_label = false;
 
-        for (series_idx, series) in self.data.series.iter().enumerate() {
-            let Some(label_config) = &series.label else {
-                continue;
-            };
-
-            let label_size = label_config.text.size.map(|p| p.0).unwrap_or(12.0);
-
-            let base_color = if let Some(c) = series.color {
-                c.resolve(background, text_pair, &seed, None)
-            } else {
-                palette
-                    .get(color_offset + series_idx)
-                    .resolve(background, text_pair, &seed, None)
-            };
-
-            let label_color = if let Some(label_color_spec) = label_config.color {
-                label_color_spec.resolve(background, text_pair, &seed, None)
-            } else {
-                base_color
-            };
-
-            let label_font = label_config
-                .text
-                .resolved_font(theme.data_label_text().resolved_font(theme.font()));
-
-            let label_fill_color = label_config
-                .fill
-                .map(|spec| spec.resolve(background, text_pair, &seed, None));
-
-            let texts = &state.series_label_texts[series_idx];
-            let positions = &state.series_label_positions[series_idx];
-            let rects = &state.series_label_rects[series_idx];
-
-            for ((label_rect, label_text), resolved_pos) in rects.iter().zip(texts.iter()).zip(positions.iter()) {
-                any_label = true;
-
-                if let Some(fill_color) = label_fill_color {
-                    let fill_path = Path::new(|b| {
-                        b.rectangle(
-                            Point::new(label_rect.x, label_rect.y),
-                            crate::core::Size::new(label_rect.width, label_rect.height),
-                        );
-                    });
-                    label_frame.fill(&fill_path, fill_color);
-                }
-
-                let (align_x, align_y) = alignment_for_position(*resolved_pos);
-
-                let (anchor_x, anchor_y) = match resolved_pos {
-                    Position::Auto | Position::Above => {
-                        (label_rect.x + label_rect.width / 2.0, label_rect.y + label_rect.height)
-                    }
-                    Position::Below => (label_rect.x + label_rect.width / 2.0, label_rect.y),
-                    Position::Left => (label_rect.x + label_rect.width, label_rect.y + label_rect.height / 2.0),
-                    Position::Right => (label_rect.x, label_rect.y + label_rect.height / 2.0),
+        if !animating {
+            for (series_idx, series) in self.data.series.iter().enumerate() {
+                let Some(label_config) = &series.label else {
+                    continue;
                 };
 
-                label_frame.fill_text(CanvasText {
-                    content: label_text.clone(),
-                    position: Point::new(anchor_x, anchor_y),
-                    color: label_color,
-                    size: label_size.into(),
-                    font: label_font,
-                    align_x: align_x.into(),
-                    align_y,
-                    line_height: crate::core::text::LineHeight::default(),
-                    shaping: crate::core::text::Shaping::Basic,
-                    ..CanvasText::default()
-                });
+                let label_size = label_config.text.size.map(|p| p.0).unwrap_or(12.0);
+
+                let base_color = if let Some(c) = series.color {
+                    c.resolve(background, text_pair, &seed, None)
+                } else {
+                    palette
+                        .get(color_offset + series_idx)
+                        .resolve(background, text_pair, &seed, None)
+                };
+
+                let label_color = if let Some(label_color_spec) = label_config.color {
+                    label_color_spec.resolve(background, text_pair, &seed, None)
+                } else {
+                    base_color
+                };
+
+                let label_font = label_config
+                    .text
+                    .resolved_font(theme.data_label_text().resolved_font(theme.font()));
+
+                let label_fill_color = label_config
+                    .fill
+                    .map(|spec| spec.resolve(background, text_pair, &seed, None));
+
+                let texts = &state.series_label_texts[series_idx];
+                let positions = &state.series_label_positions[series_idx];
+                let rects = &state.series_label_rects[series_idx];
+
+                for ((label_rect, label_text), resolved_pos) in rects.iter().zip(texts.iter()).zip(positions.iter()) {
+                    any_label = true;
+
+                    if let Some(fill_color) = label_fill_color {
+                        let fill_path = Path::new(|b| {
+                            b.rectangle(
+                                Point::new(label_rect.x, label_rect.y),
+                                crate::core::Size::new(label_rect.width, label_rect.height),
+                            );
+                        });
+                        label_frame.fill(&fill_path, fill_color);
+                    }
+
+                    let (align_x, align_y) = alignment_for_position(*resolved_pos);
+
+                    let (anchor_x, anchor_y) = match resolved_pos {
+                        Position::Auto | Position::Above => {
+                            (label_rect.x + label_rect.width / 2.0, label_rect.y + label_rect.height)
+                        }
+                        Position::Below => (label_rect.x + label_rect.width / 2.0, label_rect.y),
+                        Position::Left => (label_rect.x + label_rect.width, label_rect.y + label_rect.height / 2.0),
+                        Position::Right => (label_rect.x, label_rect.y + label_rect.height / 2.0),
+                    };
+
+                    label_frame.fill_text(CanvasText {
+                        content: label_text.clone(),
+                        position: Point::new(anchor_x, anchor_y),
+                        color: label_color,
+                        size: label_size.into(),
+                        font: label_font,
+                        align_x: align_x.into(),
+                        align_y,
+                        line_height: crate::core::text::LineHeight::default(),
+                        shaping: crate::core::text::Shaping::Basic,
+                        ..CanvasText::default()
+                    });
+                }
             }
         }
 
@@ -493,4 +559,98 @@ where
             });
         }
     }
+}
+
+/// Returns the upper and baseline polylines for one series at the
+/// current sweep progress.
+///
+/// With `prev_*` snapshots (data change), every vertex lerps
+/// component-wise from `prev[i]` to `cur[i]`. Vertices appended past
+/// the prev length anchor at the cur arrays' leading edges so they
+/// emerge from the envelope's left edge as `progress` advances. Both
+/// arrays iterate the same index range so the closed
+/// `upper ++ reversed(baseline)` path keeps matching upper/baseline
+/// vertex counts at every step.
+///
+/// Without one (fresh mount), upper and baseline are truncated in
+/// lockstep at `floor(progress * len)` full vertices plus one partial
+/// segment endpoint appended to each, producing a left-to-right
+/// envelope sweep. Stacked layouts rely on this lockstep: each
+/// series' baseline is the previous series' upper, and pointwise
+/// lerping (or pointwise truncation) on both keeps the segments
+/// aligned without extra bookkeeping.
+///
+/// At `progress >= 1.0 - EPSILON` (or empty input) the result equals
+/// `(cur_upper, cur_baseline)` exactly, so disabling animation
+/// reproduces today's geometry.
+fn animate_envelope(
+    cur_upper: &[Point],
+    prev_upper: &[Point],
+    cur_baseline: &[Point],
+    prev_baseline: &[Point],
+    progress: f32,
+) -> (Vec<Point>, Vec<Point>) {
+    debug_assert_eq!(
+        cur_upper.len(),
+        cur_baseline.len(),
+        "area envelope upper and baseline must have matching length"
+    );
+
+    if cur_upper.is_empty() || progress >= 1.0 - f32::EPSILON {
+        return (cur_upper.to_vec(), cur_baseline.to_vec());
+    }
+
+    if !prev_upper.is_empty() || !prev_baseline.is_empty() {
+        let upper_anchor = cur_upper[0];
+        let baseline_anchor = cur_baseline[0];
+        let upper = cur_upper
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                let p = prev_upper.get(i).copied().unwrap_or(upper_anchor);
+                Point {
+                    x: p.x + (c.x - p.x) * progress,
+                    y: p.y + (c.y - p.y) * progress,
+                }
+            })
+            .collect();
+        let baseline = cur_baseline
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                let p = prev_baseline.get(i).copied().unwrap_or(baseline_anchor);
+                Point {
+                    x: p.x + (c.x - p.x) * progress,
+                    y: p.y + (c.y - p.y) * progress,
+                }
+            })
+            .collect();
+        return (upper, baseline);
+    }
+
+    let len = cur_upper.len();
+    let scaled = progress * len as f32;
+    let len_visible = (scaled.floor() as usize).min(len);
+    if len_visible >= len {
+        return (cur_upper.to_vec(), cur_baseline.to_vec());
+    }
+
+    let partial_t = scaled - len_visible as f32;
+    let partial_endpoint = |full: &[Point], next: Point| -> Point {
+        match len_visible.checked_sub(1).and_then(|i| full.get(i)).copied() {
+            Some(last_full) => Point {
+                x: last_full.x + (next.x - last_full.x) * partial_t,
+                y: last_full.y + (next.y - last_full.y) * partial_t,
+            },
+            None => next,
+        }
+    };
+
+    let mut upper_out: Vec<Point> = cur_upper[..len_visible].to_vec();
+    upper_out.push(partial_endpoint(cur_upper, cur_upper[len_visible]));
+
+    let mut baseline_out: Vec<Point> = cur_baseline[..len_visible].to_vec();
+    baseline_out.push(partial_endpoint(cur_baseline, cur_baseline[len_visible]));
+
+    (upper_out, baseline_out)
 }

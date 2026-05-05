@@ -218,6 +218,9 @@ where
             if let Series::Line(line) = series {
                 line.set_animate(animate);
             }
+            if let Series::Area(area) = series {
+                area.set_animate(animate);
+            }
         }
         self
     }
