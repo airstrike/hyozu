@@ -315,8 +315,11 @@ where
             frame.fill(&path, color);
         }
 
-        // Connector lines
-        if self.data.connector && animated_rects.len() > 1 {
+        // Connector lines — suppressed mid-sweep so the running-total
+        // interpretation doesn't read at intermediate bar heights, and
+        // so a long horizontal line doesn't sit at the baseline before
+        // the bars have grown into their final positions.
+        if self.data.connector && animated_rects.len() > 1 && !animating {
             let connector_color = crate::core::Color {
                 a: 0.4,
                 ..text_pair.on_light
