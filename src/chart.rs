@@ -442,6 +442,12 @@ fn animation_tick_mut(tree: &mut Tree) -> Option<&mut animation::Tick> {
     if tag == tree::Tag::of::<plot_area::bubble_map::State>() {
         return Some(&mut tree.state.downcast_mut::<plot_area::bubble_map::State>().tick);
     }
+    if tag == tree::Tag::of::<plot_area::heatmap::State>() {
+        return Some(&mut tree.state.downcast_mut::<plot_area::heatmap::State>().tick);
+    }
+    if tag == tree::Tag::of::<plot_area::treemap::State>() {
+        return Some(&mut tree.state.downcast_mut::<plot_area::treemap::State>().tick);
+    }
     None
 }
 
@@ -566,6 +572,36 @@ fn replant_bubble_map(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
     }
 }
 
+/// Snapshots a Heatmap mark's pre-rebuild `cell_colors` onto the
+/// post-rebuild tree's `previous_cell_colors` and arms the next redraw
+/// to interpolate from there. The caller is responsible for confirming
+/// both nodes carry a `heatmap::State`.
+fn replant_heatmap(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
+    let old_state = old_mark.state.downcast_ref::<plot_area::heatmap::State>();
+    let new_state = new_mark.state.downcast_mut::<plot_area::heatmap::State>();
+    if animate {
+        new_state.previous_cell_colors = old_state.cell_colors.clone();
+        new_state.tick.pending_start = true;
+    } else {
+        new_state.tick.pending_start = false;
+    }
+}
+
+/// Snapshots a Treemap mark's pre-rebuild `item_rects` onto the
+/// post-rebuild tree's `previous_item_rects` and arms the next redraw
+/// to interpolate from there. The caller is responsible for confirming
+/// both nodes carry a `treemap::State`.
+fn replant_treemap(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
+    let old_state = old_mark.state.downcast_ref::<plot_area::treemap::State>();
+    let new_state = new_mark.state.downcast_mut::<plot_area::treemap::State>();
+    if animate {
+        new_state.previous_item_rects = old_state.item_rects.clone();
+        new_state.tick.pending_start = true;
+    } else {
+        new_state.tick.pending_start = false;
+    }
+}
+
 /// Walks old/new plot-area children pairwise and dispatches per-tag
 /// to the matching `replant_<mark>` snapshot helper. A no-op when
 /// either tree lacks a plot area.
@@ -577,6 +613,8 @@ fn replant_mark_animations(old_children: &[Tree], new_children: &mut [Tree], ani
     let area_tag = tree::Tag::of::<plot_area::area::State>();
     let xy_tag = tree::Tag::of::<plot_area::xy::State>();
     let bubble_map_tag = tree::Tag::of::<plot_area::bubble_map::State>();
+    let heatmap_tag = tree::Tag::of::<plot_area::heatmap::State>();
+    let treemap_tag = tree::Tag::of::<plot_area::treemap::State>();
     let Some(old_scene) = old_children.first() else {
         return;
     };
@@ -617,6 +655,14 @@ fn replant_mark_animations(old_children: &[Tree], new_children: &mut [Tree], ani
         }
         if old_mark.tag == bubble_map_tag && new_mark.tag == bubble_map_tag {
             replant_bubble_map(old_mark, new_mark, animate);
+            continue;
+        }
+        if old_mark.tag == heatmap_tag && new_mark.tag == heatmap_tag {
+            replant_heatmap(old_mark, new_mark, animate);
+            continue;
+        }
+        if old_mark.tag == treemap_tag && new_mark.tag == treemap_tag {
+            replant_treemap(old_mark, new_mark, animate);
             continue;
         }
     }

@@ -227,6 +227,12 @@ where
             if let Series::BubbleMap(bm) = series {
                 bm.set_animate(animate);
             }
+            if let Series::Heatmap(hm) = series {
+                hm.set_animate(animate);
+            }
+            if let Series::Treemap(tm) = series {
+                tm.set_animate(animate);
+            }
         }
         self
     }

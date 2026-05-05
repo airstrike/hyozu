@@ -1,19 +1,46 @@
 use super::Plane;
+use crate::animation;
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
-use crate::core::{Point, Rectangle, Size};
+use crate::core::{Color, Point, Rectangle, Size};
 use crate::data::Datum;
 use crate::widget::canvas::{Frame, Path, Text as CanvasText};
 use crate::widget::renderer::geometry;
 
 /// Interpolate between color stops in OKLch at parameter `t` in 0..1.
-fn interpolate_stops(stops: &[crate::core::Color], t: f32) -> crate::core::Color {
+fn interpolate_stops(stops: &[Color], t: f32) -> Color {
     crate::palette::sample_gradient(stops, t)
 }
 
-/// State for Heatmap - stores positioned cell rectangles.
+/// Per-channel linear interpolation between `prev` and `cur`. At
+/// `progress == 0.0` returns `prev`; at `1.0` returns `cur` exactly.
+fn lerp_color(prev: Color, cur: Color, progress: f32) -> Color {
+    Color {
+        r: prev.r + (cur.r - prev.r) * progress,
+        g: prev.g + (cur.g - prev.g) * progress,
+        b: prev.b + (cur.b - prev.b) * progress,
+        a: prev.a + (cur.a - prev.a) * progress,
+    }
+}
+
+/// State for Heatmap - stores positioned cell rectangles and pre-computed
+/// per-cell fill colors (theme-independent: derived from the heatmap's
+/// own value range and color stops).
 pub struct State {
     pub cell_rects: Vec<Rectangle>,
+    /// Per-cell fill colors computed in [`Heatmap::layout`], paired 1:1
+    /// with [`Self::cell_rects`]. Cached so `draw` is a pure read and
+    /// the data-change interpolation has a stable target.
+    pub cell_colors: Vec<Color>,
+    /// Per-cell fill colors from the most recent layout before the
+    /// current one, captured by [`crate::chart::Chart::diff`] when data
+    /// changes so the next sweep can interpolate from previous fills to
+    /// current fills. Empty on a fresh mount, in which case the
+    /// animation collapses to an alpha fade-in at the final color.
+    pub previous_cell_colors: Vec<Color>,
+    /// Per-frame entrance/transition lifecycle (progress, pending-start
+    /// flag, latest captured `Instant`) advanced by the chart widget.
+    pub tick: animation::Tick,
 }
 
 /// A Heatmap series that renders 2D grid cells colored by value.
@@ -23,6 +50,10 @@ where
     Renderer: crate::core::text::Renderer + geometry::Renderer,
 {
     pub(super) data: &'a crate::mark::heatmap::Heatmap,
+    /// Whether the mount/data-change sweep runs. Mirrors
+    /// [`crate::Data::animate`] (the chart-level toggle); `false` makes
+    /// `draw` snap to the laid-out geometry.
+    pub(crate) animate: bool,
     _marker: std::marker::PhantomData<(Message, Renderer)>,
 }
 
@@ -35,15 +66,27 @@ where
     pub fn new(data: &'a crate::mark::heatmap::Heatmap) -> Self {
         Self {
             data,
+            animate: true,
             _marker: std::marker::PhantomData,
         }
+    }
+
+    /// Sets whether the mount/data-change sweep should run. Wired by
+    /// [`super::PlotArea::with_animate`] from [`crate::Data::animate`].
+    pub(crate) fn set_animate(&mut self, animate: bool) {
+        self.animate = animate;
     }
 
     /// Returns the initial tree state for this Heatmap.
     pub(super) fn state(&self) -> Tree {
         Tree {
             tag: tree::Tag::of::<State>(),
-            state: tree::State::new(State { cell_rects: Vec::new() }),
+            state: tree::State::new(State {
+                cell_rects: Vec::new(),
+                cell_colors: Vec::new(),
+                previous_cell_colors: Vec::new(),
+                tick: animation::Tick::new(),
+            }),
             children: Vec::new(),
         }
     }
@@ -57,6 +100,7 @@ where
     pub fn layout(&self, tree: &mut Tree, _renderer: &Renderer, _limits: &Limits, plane: &Plane) -> Node {
         let state = tree.state.downcast_mut::<State>();
         state.cell_rects.clear();
+        state.cell_colors.clear();
 
         let rows = self.data.rows();
         let cols = self.data.cols();
@@ -68,6 +112,8 @@ where
         let cell_width = plane.bounds.width / cols as f32;
         let cell_height = plane.bounds.height / rows as f32;
 
+        let (v_min, v_max) = self.data.compute_range();
+
         for row in 0..rows {
             for col in 0..cols {
                 let center = plane.to_pixel(Datum::new(col as f64, row as f64));
@@ -78,6 +124,14 @@ where
                     width: cell_width,
                     height: cell_height,
                 });
+
+                let value = self.data.get(row, col);
+                let t = if v_max > v_min {
+                    ((value - v_min) / (v_max - v_min)).clamp(0.0, 1.0) as f32
+                } else {
+                    0.5_f32
+                };
+                state.cell_colors.push(interpolate_stops(&self.data.color_stops, t));
             }
         }
 
@@ -106,41 +160,51 @@ where
         let text_pair = theme.text_pair();
         let seed = theme.seed();
 
-        let (v_min, v_max) = self.data.compute_range();
         let rows = self.data.rows();
         let cols = self.data.cols();
 
         let mut cell_frame = Frame::new(renderer, layout_bounds.size());
         let mut label_frame = Frame::new(renderer, layout_bounds.size());
 
+        // With a previous-layout snapshot (data change), each cell's
+        // fill lerps per-channel from prev to cur. Without one (fresh
+        // mount), the alpha component multiplies by progress so cells
+        // fade in from fully transparent to their final color. With
+        // `animate = false` progress pins to `1.0` and the rendered
+        // color equals `state.cell_colors[idx]` exactly.
+        let progress = if !self.animate { 1.0 } else { state.tick.progress() };
+        let animating = progress < 1.0 - f32::EPSILON;
+        let has_prev = !state.previous_cell_colors.is_empty();
+
         for row in 0..rows {
             for col in 0..cols {
                 let idx = row * cols + col;
                 let rect = &state.cell_rects[idx];
                 let value = self.data.get(row, col);
+                let cur_color = state.cell_colors[idx];
 
-                // Normalize to 0..1
-                let t = if v_max > v_min {
-                    ((value - v_min) / (v_max - v_min)).clamp(0.0, 1.0) as f32
+                let cell_color = if has_prev {
+                    let prev_color = state.previous_cell_colors.get(idx).copied().unwrap_or(cur_color);
+                    lerp_color(prev_color, cur_color, progress)
                 } else {
-                    0.5_f32
+                    Color {
+                        a: cur_color.a * progress,
+                        ..cur_color
+                    }
                 };
-
-                // Interpolate color from the heatmap's own color stops
-                let cell_color = interpolate_stops(&self.data.color_stops, t);
 
                 let path = Path::new(|builder| {
                     builder.rectangle(Point::new(rect.x, rect.y), Size::new(rect.width, rect.height));
                 });
                 cell_frame.fill(&path, cell_color);
 
-                // Draw label if configured
-                if self.data.show_labels {
+                // Labels suppressed mid-sweep so they don't pop in over
+                // cells that haven't reached their final color yet.
+                if self.data.show_labels && !animating {
                     let label_text = (self.data.label_format)(value);
 
-                    // Determine contrast color for label
                     let label_color =
-                        crate::color::Color::CONTRAST.resolve(cell_color, text_pair, &seed, Some(background));
+                        crate::color::Color::CONTRAST.resolve(cur_color, text_pair, &seed, Some(background));
 
                     label_frame.fill_text(CanvasText {
                         content: label_text,
@@ -165,7 +229,7 @@ where
             renderer.draw_geometry(cell_geometry);
         });
 
-        if self.data.show_labels {
+        if self.data.show_labels && !animating {
             let label_geometry = label_frame.into_geometry();
             renderer.with_translation(translation, |renderer| {
                 renderer.draw_geometry(label_geometry);

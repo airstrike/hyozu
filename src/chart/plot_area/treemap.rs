@@ -1,4 +1,5 @@
 use super::Plane;
+use crate::animation;
 use crate::core::Size;
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
@@ -34,6 +35,15 @@ pub struct State {
     /// over- or under-truncation that auto-corrects on the next layout
     /// (resize, data change).
     pub item_labels: Vec<String>,
+    /// Item rectangles from the most recent layout before the current
+    /// one, captured by [`crate::chart::Chart::diff`] when data changes
+    /// so the next sweep can interpolate from previous bounds to
+    /// current bounds. Empty on a fresh mount, in which case the
+    /// animation collapses to a center-anchored 0 → full scale.
+    pub previous_item_rects: Vec<crate::core::Rectangle>,
+    /// Per-frame entrance/transition lifecycle (progress, pending-start
+    /// flag, latest captured `Instant`) advanced by the chart widget.
+    pub tick: animation::Tick,
 }
 
 /// A Treemap series that renders treemap charts.
@@ -43,6 +53,10 @@ where
     Renderer: text::Renderer + geometry::Renderer,
 {
     pub(super) data: &'a crate::mark::treemap::Treemap,
+    /// Whether the mount/data-change sweep runs. Mirrors
+    /// [`crate::Data::animate`] (the chart-level toggle); `false` makes
+    /// `draw` snap to the laid-out geometry.
+    pub(crate) animate: bool,
     _marker: std::marker::PhantomData<(Message, Renderer)>,
 }
 
@@ -55,8 +69,15 @@ where
     pub fn new(data: &'a crate::mark::treemap::Treemap) -> Self {
         Self {
             data,
+            animate: true,
             _marker: std::marker::PhantomData,
         }
+    }
+
+    /// Sets whether the mount/data-change sweep should run. Wired by
+    /// [`super::PlotArea::with_animate`] from [`crate::Data::animate`].
+    pub(crate) fn set_animate(&mut self, animate: bool) {
+        self.animate = animate;
     }
 
     /// Returns the initial tree state for this Treemap.
@@ -66,6 +87,8 @@ where
             state: tree::State::new(State {
                 item_rects: Vec::new(),
                 item_labels: Vec::new(),
+                previous_item_rects: Vec::new(),
+                tick: animation::Tick::new(),
             }),
             children: Vec::new(),
         }
@@ -222,9 +245,45 @@ where
         let padding = 4.0;
         let font_size = theme.font_size();
 
+        // With a previous-layout snapshot (data change), each rect's
+        // bounds lerp x/y/width/height from prev to cur. Without one
+        // (fresh mount), the rect scales 0→full from its center so the
+        // grid materializes from inside out. Sub-pixel rects are skipped
+        // (collapsed at progress=0). With `animate = false` progress
+        // pins to `1.0` and the animated rect equals
+        // `state.item_rects[i]` exactly.
+        let progress = if !self.animate { 1.0 } else { state.tick.progress() };
+        let animating = progress < 1.0 - f32::EPSILON;
+        let has_prev = !state.previous_item_rects.is_empty();
+
         // Draw each rectangle
         for (i, (item, rect)) in self.data.items.iter().zip(state.item_rects.iter()).enumerate() {
             if rect.width <= 0.0 || rect.height <= 0.0 {
+                continue;
+            }
+
+            let animated_rect = if has_prev {
+                let prev = state.previous_item_rects.get(i).copied().unwrap_or(*rect);
+                crate::core::Rectangle {
+                    x: prev.x + (rect.x - prev.x) * progress,
+                    y: prev.y + (rect.y - prev.y) * progress,
+                    width: prev.width + (rect.width - prev.width) * progress,
+                    height: prev.height + (rect.height - prev.height) * progress,
+                }
+            } else {
+                let center_x = rect.x + rect.width / 2.0;
+                let center_y = rect.y + rect.height / 2.0;
+                let animated_width = rect.width * progress;
+                let animated_height = rect.height * progress;
+                crate::core::Rectangle {
+                    x: center_x - animated_width / 2.0,
+                    y: center_y - animated_height / 2.0,
+                    width: animated_width,
+                    height: animated_height,
+                }
+            };
+
+            if animated_rect.width <= 0.0 || animated_rect.height <= 0.0 {
                 continue;
             }
 
@@ -250,11 +309,17 @@ where
             // Draw filled rectangle
             let path = Path::new(|builder| {
                 builder.rectangle(
-                    crate::core::Point::new(rect.x, rect.y),
-                    crate::core::Size::new(rect.width, rect.height),
+                    crate::core::Point::new(animated_rect.x, animated_rect.y),
+                    crate::core::Size::new(animated_rect.width, animated_rect.height),
                 );
             });
             frame.fill(&path, color);
+
+            // Labels suppressed mid-sweep so they don't pop in over
+            // rectangles that haven't grown to their final size yet.
+            if animating {
+                continue;
+            }
 
             // Draw label — pre-truncated in layout. Empty string means
             // "rectangle too small to label".
