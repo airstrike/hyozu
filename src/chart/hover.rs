@@ -35,6 +35,7 @@ pub(crate) enum Annotation {
 /// Future readers should NOT try to make the variant set 1:1 with
 /// [`crate::Mark`]. Several marks legitimately share one variant.
 #[non_exhaustive]
+#[derive(PartialEq)]
 pub(crate) enum Geometry {
     /// Hover over a Cartesian mark snapped to `data_x`.
     Cartesian {

@@ -1163,28 +1163,11 @@ where
                         plane,
                     );
 
-                    let changed = match (&state.hover, &new_hover) {
-                        (
-                            Some(hover::Geometry::Cartesian { data_x: a, .. }),
-                            Some(hover::Geometry::Cartesian { data_x: b, .. }),
-                        ) => (a - b).abs() > f64::EPSILON,
-                        (
-                            Some(hover::Geometry::Pie { slice_idx: a, .. }),
-                            Some(hover::Geometry::Pie { slice_idx: b, .. }),
-                        ) => a != b,
-                        (
-                            Some(hover::Geometry::Geographic {
-                                mark_idx: ma,
-                                point_idx: pa,
-                            }),
-                            Some(hover::Geometry::Geographic {
-                                mark_idx: mb,
-                                point_idx: pb,
-                            }),
-                        ) => ma != mb || pa != pb,
-                        (None, None) => false,
-                        _ => true,
-                    };
+                    // `data_x` is snapped to a discrete pixel-x of an actual data
+                    // point and projected through a deterministic plane, so
+                    // identical hovered points produce identical f64 bits — exact
+                    // equality is sufficient (no need for an epsilon shim).
+                    let changed = state.hover != new_hover;
 
                     state.hover = new_hover;
                     if changed {
