@@ -488,8 +488,12 @@ impl Data {
     /// setter for x because the closure type varies per variant
     /// (`String`, `f64`, or `jiff::Zoned`); construct the matching
     /// [`crate::Scale`] explicitly.
+    ///
+    /// Bumps [`Self::generation`] so a chart rebuilt with the new
+    /// scale animates from its previous geometry.
     pub fn x_scale(mut self, scale: crate::scale::XScale) -> Self {
         self.x_scale = scale;
+        self.invalidate();
         self
     }
 
@@ -497,8 +501,13 @@ impl Data {
     /// numeric-axis marks (Bar, Line, Area, Xy); see
     /// [`crate::scale::Transform::Log`] for the clamp semantics on
     /// non-positive values. Sugar for `data.y_scale = data.y_scale.log()`.
+    ///
+    /// Bumps [`Self::generation`] so a chart rebuilt with this
+    /// transform animates between linear and log layouts (e.g. the
+    /// `examples/log_axis.rs` toggle).
     pub fn y_log(mut self) -> Self {
         self.y_scale = self.y_scale.log();
+        self.invalidate();
         self
     }
 
