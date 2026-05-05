@@ -261,7 +261,10 @@ impl App {
             .collect();
 
         let mut marks = vec![hyozu::Mark::Choropleth(choropleth)];
-        marks.extend(hyozu::bubble_map_with_labels(shop_points));
+        marks.extend(hyozu::bubble_map_with_labels(
+            shop_points,
+            "Flagship store revenue ($K)",
+        ));
 
         hyozu::data(marks)
             .geo(states.clone(), MapScope::UnitedStates, ProjectionKind::Mercator)

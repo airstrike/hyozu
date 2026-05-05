@@ -179,18 +179,22 @@ pub fn bubble_map(points: impl IntoIterator<Item = MapPoint>) -> Xy {
 /// labels projected through the same plane and offset 16 px above each
 /// marker. Points without a `label` contribute a bubble but no label.
 ///
+/// `name` is the bubble series' display name, used by the chart's
+/// tooltip and legend. Pass an empty string to suppress.
+///
 /// Compose the result via `IntoData for Vec<Mark>` (already in scope):
 ///
 /// ```
 /// use hyozu::{bubble_map_with_labels, map_point, Mark, Choropleth, choropleth};
 ///
 /// let mut marks = vec![Mark::Choropleth(choropleth([("CA", 1.0)]))];
-/// marks.extend(bubble_map_with_labels([
-///     map_point(34.0, -118.2, 1.0).label("LA"),
-/// ]));
+/// marks.extend(bubble_map_with_labels(
+///     [map_point(34.0, -118.2, 1.0).label("LA")],
+///     "Stores",
+/// ));
 /// let data = hyozu::data(marks);
 /// ```
-pub fn bubble_map_with_labels(points: impl IntoIterator<Item = MapPoint>) -> Vec<Mark> {
+pub fn bubble_map_with_labels(points: impl IntoIterator<Item = MapPoint>, name: impl Into<String>) -> Vec<Mark> {
     let entries: Vec<MapPoint> = points.into_iter().collect();
     // Pull labels off the entries before they move into `bubble_map`. The
     // label set is sparse — only entries with `label.is_some()` produce a
@@ -204,7 +208,11 @@ pub fn bubble_map_with_labels(points: impl IntoIterator<Item = MapPoint>) -> Vec
             })
         })
         .collect();
-    let bubbles = bubble_map(entries);
+    let name = name.into();
+    let mut bubbles = bubble_map(entries);
+    if !name.is_empty() {
+        bubbles = bubbles.with_name(name);
+    }
     let labels = text::text(label_items)
         .on_geo()
         .offset(0.0, -16.0)

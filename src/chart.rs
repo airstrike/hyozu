@@ -251,15 +251,21 @@ fn find_nearest_hover<Message>(
     if let Some(geo_hover) = find_geo_hover(local, plot_area_tree, plot_area) {
         return Some(geo_hover);
     }
-    find_nearest_cartesian_hover(local, plot_area_tree, plane)
+    find_nearest_cartesian_hover(local, plot_area_tree, plot_area, plane)
 }
 
 /// Scan Cartesian (line/area/xy/bars) marks for the nearest pixel x,
 /// then collect all entries at that x. Returns `None` if no hoverable
 /// points exist or the cursor is too far from any point.
-fn find_nearest_cartesian_hover(
+///
+/// Geo-coord Xy series are excluded — their `pixel_points` are projected
+/// `(lon, lat)` positions, not cartesian data, so snap-to-x against them
+/// would produce nonsensical hover state. Those bubbles get hit-tested
+/// by [`find_geo_hover`] before this function runs.
+fn find_nearest_cartesian_hover<Message>(
     local: Point,
     plot_area_tree: &Tree,
+    plot_area: &plot_area::PlotArea<'_, Message, Renderer>,
     plane: &plot_area::Plane,
 ) -> Option<hover::Geometry> {
     let line_tag = tree::Tag::of::<plot_area::line::State>();
@@ -267,11 +273,18 @@ fn find_nearest_cartesian_hover(
     let xy_tag = tree::Tag::of::<plot_area::xy::State>();
     let bars_tag = tree::Tag::of::<plot_area::bars::State>();
 
+    let is_geo_xy = |mark_idx: usize| {
+        matches!(
+            plot_area.series.get(mark_idx),
+            Some(plot_area::Series::Xy(xy)) if xy.data.coord_kind == crate::mark::xy::CoordKind::Geo
+        )
+    };
+
     let mut best_dist = f32::INFINITY;
     let mut best_pixel_x = 0.0f32;
 
     // Pass 1: find globally nearest pixel_x
-    for child in &plot_area_tree.children {
+    for (mark_idx, child) in plot_area_tree.children.iter().enumerate() {
         if child.tag == line_tag {
             let s = child.state.downcast_ref::<plot_area::line::State>();
             for pt in &s.pixel_points {
@@ -293,6 +306,9 @@ fn find_nearest_cartesian_hover(
                 }
             }
         } else if child.tag == xy_tag {
+            if is_geo_xy(mark_idx) {
+                continue;
+            }
             let s = child.state.downcast_ref::<plot_area::xy::State>();
             for pt in &s.pixel_points {
                 let d = (pt.x - local.x).abs();
@@ -353,6 +369,9 @@ fn find_nearest_cartesian_hover(
                 }
             }
         } else if child.tag == xy_tag {
+            if is_geo_xy(mark_idx) {
+                continue;
+            }
             let s = child.state.downcast_ref::<plot_area::xy::State>();
             for (pt_idx, pt) in s.pixel_points.iter().enumerate() {
                 if (pt.x - best_pixel_x).abs() <= tolerance {
@@ -2048,7 +2067,21 @@ fn draw_geo_tooltip_overlay<Message>(
         plot_bounds.x + pixel.x - plane.bounds.x,
         plot_bounds.y + pixel.y - plane.bounds.y,
     );
-    let flip_axis_x = anchor_abs.x;
+    // Place the box on the side of the bubble that points away from the
+    // closest chart edge, with its near edge sitting `radius + 8px` past
+    // the bubble's outline. `draw_tooltip_box` interprets `flip_axis_x`
+    // as: anchor < flip_axis_x → box extends rightward from anchor;
+    // anchor > flip_axis_x → box extends leftward. Anchoring at the
+    // bubble's edge (rather than its center) means the box's `box_gap`
+    // shim from `draw_tooltip_box` lands fully outside the bubble,
+    // not inside its disc.
+    let chart_center_x = chart_bounds.x + chart_bounds.width / 2.0;
+    let on_left_half = anchor_abs.x < chart_center_x;
+    let (box_anchor_x, flip_axis_x) = if on_left_half {
+        (anchor_abs.x + radius, chart_bounds.x + chart_bounds.width)
+    } else {
+        (anchor_abs.x - radius, chart_bounds.x)
+    };
 
     let entry = hover::Entry {
         tooltip: TooltipEntry {
@@ -2098,11 +2131,7 @@ fn draw_geo_tooltip_overlay<Message>(
             });
         }
 
-        // Side-anchored tooltip box: offset right of the bubble center
-        // by (radius + 8px). The flip-axis is the anchor itself so the
-        // box flips L/R only when it would overflow chart bounds; the
-        // existing clamp inside `draw_tooltip_box` keeps it on-screen.
-        let box_anchor = Point::new(anchor_abs.x + radius + 8.0, anchor_abs.y);
+        let box_anchor = Point::new(box_anchor_x, anchor_abs.y);
         draw_tooltip_box(
             renderer,
             design,
