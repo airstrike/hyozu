@@ -1,4 +1,5 @@
 use super::Plane;
+use crate::animation;
 use crate::core::Size;
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
@@ -22,6 +23,15 @@ pub struct State {
     pub label_positions: Vec<Position>,
     /// Pixel rectangles for each label (for drawing)
     pub label_rects: Vec<Rectangle>,
+    /// Pixel points from the most recent layout before the current one,
+    /// captured by [`crate::chart::Chart::diff`] when data changes so the
+    /// next sweep can interpolate from previous positions to current
+    /// positions. Empty on a fresh mount, in which case the animation
+    /// collapses to a left-to-right path sweep.
+    pub previous_pixel_points: Vec<Point>,
+    /// Per-frame entrance/transition lifecycle (progress, pending-start
+    /// flag, latest captured `Instant`) advanced by the chart widget.
+    pub tick: animation::Tick,
 }
 
 /// A Line series that renders connected line segments.
@@ -33,6 +43,10 @@ where
     Renderer: text::Renderer + geometry::Renderer,
 {
     pub(crate) data: &'a crate::line::Line,
+    /// Whether the mount/data-change sweep runs. Mirrors
+    /// [`crate::Data::animate`] (the chart-level toggle); `false` makes
+    /// `draw` snap to the laid-out geometry.
+    pub(crate) animate: bool,
     _marker: std::marker::PhantomData<(Message, Renderer)>,
 }
 
@@ -45,8 +59,15 @@ where
     pub fn new(data: &'a crate::line::Line) -> Self {
         Self {
             data,
+            animate: true,
             _marker: std::marker::PhantomData,
         }
+    }
+
+    /// Sets whether the mount/data-change sweep should run. Wired by
+    /// [`super::PlotArea::with_animate`] from [`crate::Data::animate`].
+    pub(crate) fn set_animate(&mut self, animate: bool) {
+        self.animate = animate;
     }
 
     /// Returns the initial tree state for this Line
@@ -58,6 +79,8 @@ where
                 label_texts: Vec::new(),
                 label_positions: Vec::new(),
                 label_rects: Vec::new(),
+                previous_pixel_points: Vec::new(),
+                tick: animation::Tick::new(),
             }),
             children: Vec::new(),
         }
@@ -220,6 +243,24 @@ where
             palette.get(color_offset).resolve(background, text_pair, &seed, None)
         };
 
+        // Sweep: with a previous-layout snapshot (data change), each
+        // vertex lerps component-wise from its prev position to its cur
+        // position; vertices appended past the prev length anchor at
+        // the path's leading edge (`cur[0]`) so they emerge from the
+        // start. Without one (fresh mount), the polyline terminates at
+        // `floor(progress * len)` full vertices plus a partial segment
+        // toward the next vertex, producing a left-to-right path
+        // sweep. With `animate = false` progress pins to `1.0` and the
+        // animated points equal `state.pixel_points` exactly,
+        // reproducing today's geometry.
+        let progress = if !self.animate { 1.0 } else { state.tick.progress() };
+        let animating = progress < 1.0 - f32::EPSILON;
+        let animated_pixel_points = animate_pixel_points(&state.pixel_points, &state.previous_pixel_points, progress);
+
+        if animated_pixel_points.len() < 2 {
+            return;
+        }
+
         let mut frame = Frame::new(renderer, layout_bounds.size());
 
         // Build a path from all points, breaking the line at any non-finite
@@ -229,7 +270,7 @@ where
         // one.
         let path = Path::new(|builder| {
             let mut in_segment = false;
-            for point in &state.pixel_points {
+            for point in &animated_pixel_points {
                 let finite = point.x.is_finite() && point.y.is_finite();
                 if !finite {
                     in_segment = false;
@@ -247,12 +288,16 @@ where
 
         let dash_stack = dash_segments(&self.data.style);
         let mut stroke = Stroke::default().with_width(self.data.width).with_color(color);
-        stroke.line_dash = LineDash {
-            segments: dash_stack,
-            offset: 0,
-        };
-        if matches!(self.data.style, LineStyle::Dotted) {
-            stroke = stroke.with_line_cap(LineCap::Round);
+        // Dash overlays suppressed mid-sweep so dashes don't crawl
+        // along a line that's still extending into place.
+        if !animating {
+            stroke.line_dash = LineDash {
+                segments: dash_stack,
+                offset: 0,
+            };
+            if matches!(self.data.style, LineStyle::Dotted) {
+                stroke = stroke.with_line_cap(LineCap::Round);
+            }
         }
 
         frame.stroke(&path, stroke);
@@ -263,7 +308,9 @@ where
             renderer.draw_geometry(geometry);
         });
 
-        if let Some(marker_config) = &self.data.marker {
+        if let Some(marker_config) = &self.data.marker
+            && !animating
+        {
             let mut marker_frame = Frame::new(renderer, layout_bounds.size());
             draw_markers(
                 &mut marker_frame,
@@ -281,8 +328,11 @@ where
             });
         }
 
-        // Draw data labels from state
-        if let Some(label_config) = &self.data.label {
+        // Draw data labels from state — suppressed mid-sweep so they
+        // don't pop in over points the path hasn't grown to yet.
+        if let Some(label_config) = &self.data.label
+            && !animating
+        {
             let label_size = label_config
                 .text
                 .resolved_size(theme.data_label_text().resolved_size(12.0));
@@ -748,6 +798,61 @@ pub(super) fn place_label(
     };
 
     (pos, rect)
+}
+
+/// Returns the polyline's vertices at the current sweep progress.
+///
+/// With a `prev` snapshot (data change), each vertex lerps
+/// component-wise from `prev[i]` to `cur[i]`. Vertices appended past
+/// `prev.len()` (newly-added points) anchor at `cur[0]` so they emerge
+/// from the path's leading edge as `progress` advances.
+///
+/// Without one (fresh mount), the polyline terminates at
+/// `floor(progress * len)` full vertices plus a partial segment toward
+/// the next vertex, producing a left-to-right path sweep.
+///
+/// At `progress == 1.0` (or `prev.len() >= cur.len()` and equal) the
+/// result equals `cur` exactly, so disabling animation reproduces
+/// today's geometry.
+fn animate_pixel_points(cur: &[Point], prev: &[Point], progress: f32) -> Vec<Point> {
+    if cur.is_empty() || progress >= 1.0 - f32::EPSILON {
+        return cur.to_vec();
+    }
+
+    if !prev.is_empty() {
+        let anchor = cur[0];
+        return cur
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                let p = prev.get(i).copied().unwrap_or(anchor);
+                Point {
+                    x: p.x + (c.x - p.x) * progress,
+                    y: p.y + (c.y - p.y) * progress,
+                }
+            })
+            .collect();
+    }
+
+    let len = cur.len();
+    let scaled = progress * len as f32;
+    let len_visible = (scaled.floor() as usize).min(len);
+    if len_visible >= len {
+        return cur.to_vec();
+    }
+
+    let mut out: Vec<Point> = cur[..len_visible].to_vec();
+    let partial_t = scaled - len_visible as f32;
+    let next = cur[len_visible];
+    if let Some(last_full) = len_visible.checked_sub(1).and_then(|i| cur.get(i)).copied() {
+        out.push(Point {
+            x: last_full.x + (next.x - last_full.x) * partial_t,
+            y: last_full.y + (next.y - last_full.y) * partial_t,
+        });
+    } else {
+        out.push(next);
+    }
+    out
 }
 
 #[cfg(test)]

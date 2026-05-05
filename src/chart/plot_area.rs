@@ -215,6 +215,9 @@ where
             if let Series::Waterfall(wf) = series {
                 wf.set_animate(animate);
             }
+            if let Series::Line(line) = series {
+                line.set_animate(animate);
+            }
         }
         self
     }
