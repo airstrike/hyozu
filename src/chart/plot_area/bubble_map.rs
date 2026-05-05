@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::animation;
 use crate::core::Size;
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
@@ -26,10 +27,21 @@ pub struct State {
     pub feature_bboxes: Vec<crate::core::Rectangle>,
     /// The projection used for the current frame.
     pub projection: Option<crate::geo::Projection>,
+    /// Centers and radii from the most recent layout before the current
+    /// one, captured by [`crate::chart::Chart::diff`] when data changes
+    /// so the next sweep can interpolate radii from previous values to
+    /// current. Empty on a fresh mount, in which case the animation
+    /// collapses to a `0` → final-radius scale-in at the projected
+    /// position. Centers themselves are not interpolated — they reflect
+    /// projection state, which is fixed by the dirty-check cache.
+    pub previous_bubble_circles: Vec<(crate::core::Point, f32)>,
+    /// Per-frame entrance/transition lifecycle (progress, pending-start
+    /// flag, latest captured `Instant`) advanced by the chart widget.
+    pub tick: animation::Tick,
     // Dirty-check fields
-    prev_size: (f32, f32),
-    prev_scope: crate::geo::MapScope,
-    prev_geo: Option<Arc<crate::geo::GeoData>>,
+    pub(crate) prev_size: (f32, f32),
+    pub(crate) prev_scope: crate::geo::MapScope,
+    pub(crate) prev_geo: Option<Arc<crate::geo::GeoData>>,
 }
 
 impl Default for State {
@@ -46,6 +58,8 @@ impl State {
             projected_polygons: Vec::new(),
             feature_bboxes: Vec::new(),
             projection: None,
+            previous_bubble_circles: Vec::new(),
+            tick: animation::Tick::new(),
             prev_size: (0.0, 0.0),
             prev_scope: crate::geo::MapScope::World,
             prev_geo: None,
@@ -80,6 +94,10 @@ where
     Renderer: text::Renderer + geometry::Renderer,
 {
     pub(super) data: &'a crate::mark::bubble_map::BubbleMap,
+    /// Whether the mount/data-change sweep runs. Mirrors
+    /// [`crate::Data::animate`] (the chart-level toggle); `false` makes
+    /// `draw` snap to the laid-out geometry.
+    pub(crate) animate: bool,
     _marker: std::marker::PhantomData<(Message, Renderer)>,
 }
 
@@ -91,8 +109,15 @@ where
     pub fn new(data: &'a crate::mark::bubble_map::BubbleMap) -> Self {
         Self {
             data,
+            animate: true,
             _marker: std::marker::PhantomData,
         }
+    }
+
+    /// Sets whether the mount/data-change sweep should run. Wired by
+    /// [`super::PlotArea::with_animate`] from [`crate::Data::animate`].
+    pub(crate) fn set_animate(&mut self, animate: bool) {
+        self.animate = animate;
     }
 
     pub(super) fn state(&self) -> Tree {
@@ -217,6 +242,18 @@ where
         let seed = theme.seed();
         let layout_bounds = layout.bounds();
 
+        // Sweep: with a previous-layout snapshot (data change), each
+        // bubble's radius lerps from prev to cur at the projected center.
+        // Without a snapshot (fresh mount), the radius scales from `0` to
+        // `cur` at the projected center. Centers are not interpolated —
+        // the projection state is fixed by the dirty-check cache, and
+        // lerping centers would visually conflict with that. With
+        // `animate = false` progress pins to `1.0` and the animated
+        // radius equals the laid-out value exactly.
+        let progress = if !self.animate { 1.0 } else { state.tick.progress() };
+        let animating = progress < 1.0 - f32::EPSILON;
+        let has_prev = !state.previous_bubble_circles.is_empty();
+
         // ── Land polygons ──────────────────────────────────────────
         let mut land_frame = Frame::new(renderer, layout_bounds.size());
 
@@ -257,7 +294,16 @@ where
         let opacity = self.data.opacity;
 
         for (i, pt) in self.data.points.iter().enumerate() {
-            let (center, radius) = state.bubble_circles[i];
+            let (center, cur_radius) = state.bubble_circles[i];
+            let radius = if has_prev {
+                let prev_radius = state.previous_bubble_circles.get(i).map(|(_, r)| *r).unwrap_or(0.0);
+                prev_radius + (cur_radius - prev_radius) * progress
+            } else {
+                cur_radius * progress
+            };
+            if radius <= 0.0 {
+                continue;
+            }
 
             let base_color = if let Some(c) = pt.color {
                 c.resolve(background, text_pair, &seed, None)
@@ -288,27 +334,29 @@ where
 
         let label_size = crate::core::Pixels(theme.font_size() * 0.75);
 
-        for (i, pt) in self.data.points.iter().enumerate() {
-            let label_text = match &pt.label {
-                Some(l) => l.as_str(),
-                None => continue,
-            };
+        if !animating {
+            for (i, pt) in self.data.points.iter().enumerate() {
+                let label_text = match &pt.label {
+                    Some(l) => l.as_str(),
+                    None => continue,
+                };
 
-            let (center, radius) = state.bubble_circles[i];
-            let label_color = text_pair.resolve(background, None);
+                let (center, radius) = state.bubble_circles[i];
+                let label_color = text_pair.resolve(background, None);
 
-            label_frame.fill_text(CanvasText {
-                content: label_text.to_string(),
-                position: crate::core::Point::new(center.x, center.y - radius - 3.0),
-                color: label_color,
-                size: label_size,
-                font: theme.font(),
-                align_x: crate::core::alignment::Horizontal::Center.into(),
-                align_y: crate::core::alignment::Vertical::Bottom,
-                line_height: crate::core::text::LineHeight::default(),
-                shaping: crate::core::text::Shaping::Basic,
-                ..CanvasText::default()
-            });
+                label_frame.fill_text(CanvasText {
+                    content: label_text.to_string(),
+                    position: crate::core::Point::new(center.x, center.y - radius - 3.0),
+                    color: label_color,
+                    size: label_size,
+                    font: theme.font(),
+                    align_x: crate::core::alignment::Horizontal::Center.into(),
+                    align_y: crate::core::alignment::Vertical::Bottom,
+                    line_height: crate::core::text::LineHeight::default(),
+                    shaping: crate::core::text::Shaping::Basic,
+                    ..CanvasText::default()
+                });
+            }
         }
 
         // ── Composite ──────────────────────────────────────────────

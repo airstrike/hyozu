@@ -439,6 +439,9 @@ fn animation_tick_mut(tree: &mut Tree) -> Option<&mut animation::Tick> {
     if tag == tree::Tag::of::<plot_area::xy::State>() {
         return Some(&mut tree.state.downcast_mut::<plot_area::xy::State>().tick);
     }
+    if tag == tree::Tag::of::<plot_area::bubble_map::State>() {
+        return Some(&mut tree.state.downcast_mut::<plot_area::bubble_map::State>().tick);
+    }
     None
 }
 
@@ -537,6 +540,32 @@ fn replant_xy(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
     }
 }
 
+/// Snapshots a BubbleMap mark's pre-rebuild `bubble_circles` onto the
+/// post-rebuild tree's `previous_bubble_circles` and arms the next
+/// redraw to interpolate from there. Independent of the animation
+/// gate, the projection cache (`prev_size`, `prev_scope`, `prev_geo`,
+/// `projected_polygons`, `feature_bboxes`) is always replanted onto
+/// the new tree so the next layout's dirty-check stays a hit and the
+/// projection isn't re-flattened on a data change. The caller is
+/// responsible for confirming both nodes carry a `bubble_map::State`.
+fn replant_bubble_map(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
+    let old_state = old_mark.state.downcast_ref::<plot_area::bubble_map::State>();
+    let new_state = new_mark.state.downcast_mut::<plot_area::bubble_map::State>();
+
+    new_state.prev_size = old_state.prev_size;
+    new_state.prev_scope = old_state.prev_scope;
+    new_state.prev_geo = old_state.prev_geo.clone();
+    new_state.projected_polygons = old_state.projected_polygons.clone();
+    new_state.feature_bboxes = old_state.feature_bboxes.clone();
+
+    if animate {
+        new_state.previous_bubble_circles = old_state.bubble_circles.clone();
+        new_state.tick.pending_start = true;
+    } else {
+        new_state.tick.pending_start = false;
+    }
+}
+
 /// Walks old/new plot-area children pairwise and dispatches per-tag
 /// to the matching `replant_<mark>` snapshot helper. A no-op when
 /// either tree lacks a plot area.
@@ -547,6 +576,7 @@ fn replant_mark_animations(old_children: &[Tree], new_children: &mut [Tree], ani
     let line_tag = tree::Tag::of::<plot_area::line::State>();
     let area_tag = tree::Tag::of::<plot_area::area::State>();
     let xy_tag = tree::Tag::of::<plot_area::xy::State>();
+    let bubble_map_tag = tree::Tag::of::<plot_area::bubble_map::State>();
     let Some(old_scene) = old_children.first() else {
         return;
     };
@@ -583,6 +613,10 @@ fn replant_mark_animations(old_children: &[Tree], new_children: &mut [Tree], ani
         }
         if old_mark.tag == xy_tag && new_mark.tag == xy_tag {
             replant_xy(old_mark, new_mark, animate);
+            continue;
+        }
+        if old_mark.tag == bubble_map_tag && new_mark.tag == bubble_map_tag {
+            replant_bubble_map(old_mark, new_mark, animate);
             continue;
         }
     }

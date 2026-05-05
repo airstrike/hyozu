@@ -224,6 +224,9 @@ where
             if let Series::Xy(xy) = series {
                 xy.set_animate(animate);
             }
+            if let Series::BubbleMap(bm) = series {
+                bm.set_animate(animate);
+            }
         }
         self
     }
