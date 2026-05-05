@@ -29,7 +29,7 @@ pub enum FeatureState {
 }
 
 /// State for Choropleth -- stores projected polygon geometry, feature IDs,
-/// bounding boxes, and pre-computed value normalization for each feature.
+/// bounding boxes, and the pre-computed transform-mapped t for each feature.
 ///
 /// The per-feature `feature_state` values, the scale legend plan, and the
 /// data value range are all theme-independent and computed in `layout` so
@@ -117,19 +117,80 @@ fn format_legend_value(v: f64) -> String {
     }
 }
 
-/// Apply normalization to map a raw value to [0, 1].
-fn normalize(value: f64, v_min: f64, v_max: f64, norm: crate::mark::choropleth::Normalization) -> f32 {
-    use crate::mark::choropleth::Normalization;
-    let range = v_max - v_min;
-    if range <= 0.0 {
-        return 0.5;
+/// Map a raw value to [0, 1] via the color scale's transform, clamping
+/// the result to the unit interval so non-finite or below-domain inputs
+/// can never reach the gradient sampler.
+fn normalize(value: f64, v_min: f64, v_max: f64, transform: crate::scale::Transform) -> f32 {
+    transform.map_to_unit(value, v_min, v_max).clamp(0.0, 1.0) as f32
+}
+
+/// Compute the data-derived `(min, max)` value range for a Choropleth.
+/// Filters entries with no value (the "available, no measurement"
+/// signal) and skips non-finite values so the gradient sampler never
+/// sees NaN or Inf. When all entries are filtered out, returns
+/// `(0.0, 1.0)` so the legend has a printable degenerate range.
+pub(super) fn compute_value_range(entries: &[crate::mark::choropleth::ChoroplethEntry]) -> (f64, f64) {
+    let mut lo = f64::INFINITY;
+    let mut hi = f64::NEG_INFINITY;
+    for entry in entries {
+        if let Some(v) = entry.value()
+            && v.is_finite()
+        {
+            if v < lo {
+                lo = v;
+            }
+            if v > hi {
+                hi = v;
+            }
+        }
     }
-    let t = match norm {
-        Normalization::Linear => (value - v_min) / range,
-        Normalization::Sqrt => ((value - v_min) / range).sqrt(),
-        Normalization::Log => (1.0 + value - v_min).ln() / (1.0 + range).ln(),
-    };
-    t.clamp(0.0, 1.0) as f32
+    if lo.is_infinite() {
+        lo = 0.0;
+    }
+    if hi.is_infinite() || hi <= lo {
+        hi = lo + 1.0;
+    }
+    (lo, hi)
+}
+
+/// Resolve a [`Palette`](crate::palette::Palette) into a continuous list
+/// of raw RGB stops suitable for [`crate::palette::sample_gradient`].
+///
+/// For [`Palette::Gradient`], stops resolve through their seed slots one
+/// by one — preserving the original stop count so a 3-stop "success →
+/// warning → danger" gradient samples to its midpoint at `t = 0.5`. For
+/// [`Palette::Sequential`] and [`Palette::Categorical`], the palette is
+/// discretized through [`crate::palette::Resolved::resolve`] with a
+/// fixed sample count and the wrapper colors are then resolved against
+/// the same seed.
+fn palette_to_continuous_stops(
+    palette: &crate::palette::Palette,
+    seed: &crate::palette::Seed,
+) -> Vec<crate::core::Color> {
+    /// Sample count used to discretize non-gradient palettes. Eight is
+    /// enough for a smooth visual sweep without the perceptual banding
+    /// of three or four stops.
+    const DISCRETE_SAMPLES: usize = 8;
+    match palette {
+        crate::palette::Palette::Gradient(stops) => stops.iter().map(|c| c.resolve_seed(seed)).collect(),
+        crate::palette::Palette::Sequential(_) | crate::palette::Palette::Categorical => {
+            let resolved = crate::palette::Resolved::resolve(palette, seed, DISCRETE_SAMPLES);
+            resolved.colors().iter().map(|c| c.resolve_seed(seed)).collect()
+        }
+    }
+}
+
+/// Default palette for a Choropleth when the user hasn't set one. A
+/// three-stop semantic gradient that flows through the active theme's
+/// success / warning / danger slots — this matches the historical
+/// behavior of the explicit `vec![seed.success, seed.warning, seed.danger]`
+/// fallback the renderer previously baked inline.
+fn default_choropleth_palette() -> crate::palette::Palette {
+    crate::palette::Palette::Gradient(vec![
+        crate::color::Color::Success,
+        crate::color::Color::Warning,
+        crate::color::Color::Danger,
+    ])
 }
 
 /// Linear-RGB blend of `a` toward `b` by `t` in `[0.0, 1.0]`. `t = 0`
@@ -165,7 +226,7 @@ pub(super) fn compute_feature_states(
     filtered_ids: &[crate::feature::Id],
     lo: f64,
     hi: f64,
-    norm: crate::mark::choropleth::Normalization,
+    transform: crate::scale::Transform,
 ) -> Vec<FeatureState> {
     // Entry lookup: id → value (or None to mean "available, no value").
     // NaN/Inf-valued entries get downgraded to Available so the gradient
@@ -181,7 +242,7 @@ pub(super) fn compute_feature_states(
     filtered_ids
         .iter()
         .map(|id| match entry_map.get(id.as_str()) {
-            Some(Some(v)) => FeatureState::Value(normalize(*v, lo, hi, norm)),
+            Some(Some(v)) => FeatureState::Value(normalize(*v, lo, hi, transform)),
             Some(None) => FeatureState::Available,
             None => FeatureState::Missing,
         })
@@ -318,30 +379,12 @@ where
         // ── Entry-derived state (always recomputed) ──────────────────
         //
         // value_range, feature_state, and legend strings depend on
-        // `self.data.entries` and `self.data.normalization`, neither of
+        // `self.data.entries` and the color scale's transform, neither of
         // which is covered by the projection dirty check. The work is O(n)
         // on entries (typically dozens, not millions), so unconditional
         // recompute is fine. Moves the per-frame walk out of `draw`.
-        let mut lo = f64::INFINITY;
-        let mut hi = f64::NEG_INFINITY;
-        for entry in &self.data.entries {
-            if let Some(v) = entry.value
-                && v.is_finite()
-            {
-                if v < lo {
-                    lo = v;
-                }
-                if v > hi {
-                    hi = v;
-                }
-            }
-        }
-        if lo.is_infinite() {
-            lo = 0.0;
-        }
-        if hi.is_infinite() || hi <= lo {
-            hi = lo + 1.0;
-        }
+        let entries = &self.data.entries;
+        let (lo, hi) = self.data.color.resolved_domain(|| compute_value_range(entries));
         state.value_range = (lo, hi);
 
         // 3-way state per filtered feature:
@@ -352,8 +395,7 @@ where
         //   Missing — no entry; renders as decorative land fill.
         // NaN/Inf-valued entries are downgraded to Available so non-finite
         // values can never reach `sample_gradient → from_oklch`.
-        state.feature_state =
-            compute_feature_states(&self.data.entries, &state.filtered_ids, lo, hi, self.data.normalization);
+        state.feature_state = compute_feature_states(entries, &state.filtered_ids, lo, hi, self.data.color.transform);
 
         state.legend_plan = scale_legend::Plan {
             min_label: format_legend_value(lo),
@@ -390,13 +432,12 @@ where
         let layout_bounds = layout.bounds();
 
         // ── Resolve color scale ───────────────────────────────────
-        // Theme-dependent (uses the palette seed when no explicit stops are
-        // set), so it stays in draw. Cheap — at most a 3-color clone.
-        let color_stops: Vec<crate::core::Color> = if let Some(stops) = &self.data.color_stops {
-            stops.clone()
-        } else {
-            vec![seed.success, seed.warning, seed.danger]
-        };
+        // Theme-dependent (uses the palette seed when no explicit palette
+        // is set), so it stays in draw. The user's explicit palette wins;
+        // otherwise the closure produces the mark's semantic
+        // success → warning → danger gradient.
+        let palette = self.data.color.resolved_palette(default_choropleth_palette);
+        let color_stops: Vec<crate::core::Color> = palette_to_continuous_stops(&palette, &seed);
 
         // ── Derived colors ───────────────────────────────────────
         let land_fill = crate::core::Color {
@@ -565,11 +606,8 @@ where
         let text_pair = theme.text_pair();
         let seed = theme.seed();
 
-        let color_stops: Vec<crate::core::Color> = if let Some(stops) = &self.data.color_stops {
-            stops.clone()
-        } else {
-            vec![seed.success, seed.warning, seed.danger]
-        };
+        let palette = self.data.color.resolved_palette(default_choropleth_palette);
+        let color_stops: Vec<crate::core::Color> = palette_to_continuous_stops(&palette, &seed);
         let border_color = theme.divider_color().resolve(background, text_pair, &seed, None);
         let label_color = {
             let resolved = text_pair.resolve(background, None);
@@ -633,7 +671,8 @@ where
 mod tests {
     use super::*;
     use crate::feature::Id;
-    use crate::mark::choropleth::{Normalization, choropleth_entry, choropleth_entry_available};
+    use crate::mark::choropleth::{choropleth_entry, choropleth_entry_available};
+    use crate::scale::Transform;
 
     fn id(s: &str) -> Id {
         Id::new(s.to_owned())
@@ -647,7 +686,7 @@ mod tests {
         let entries = vec![choropleth_entry("CA", 4_500_000.0), choropleth_entry_available("TX")];
         let filtered_ids = vec![id("CA"), id("TX"), id("NM")];
 
-        let states = compute_feature_states(&entries, &filtered_ids, 0.0, 4_500_000.0, Normalization::Linear);
+        let states = compute_feature_states(&entries, &filtered_ids, 0.0, 4_500_000.0, Transform::Linear);
 
         assert_eq!(states.len(), 3);
         assert!(matches!(states[0], FeatureState::Value(_)), "CA should be Value");
@@ -665,7 +704,7 @@ mod tests {
         let entries = vec![choropleth_entry("CA", f64::NAN), choropleth_entry("TX", f64::INFINITY)];
         let filtered_ids = vec![id("CA"), id("TX")];
 
-        let states = compute_feature_states(&entries, &filtered_ids, 0.0, 1.0, Normalization::Linear);
+        let states = compute_feature_states(&entries, &filtered_ids, 0.0, 1.0, Transform::Linear);
 
         assert_eq!(states[0], FeatureState::Available);
         assert_eq!(states[1], FeatureState::Available);
@@ -680,7 +719,7 @@ mod tests {
         ];
         let filtered_ids = vec![id("LO"), id("MID"), id("HI")];
 
-        let states = compute_feature_states(&entries, &filtered_ids, 0.0, 100.0, Normalization::Linear);
+        let states = compute_feature_states(&entries, &filtered_ids, 0.0, 100.0, Transform::Linear);
 
         let unwrap_t = |s: FeatureState| match s {
             FeatureState::Value(t) => t,

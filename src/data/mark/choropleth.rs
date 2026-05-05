@@ -4,20 +4,8 @@ use std::sync::Arc;
 use crate::data::legend;
 use crate::feature;
 use crate::geo::{GeoData, MapScope, ProjectionKind};
-
-/// How values are mapped onto the [0, 1] color scale range.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum Normalization {
-    /// Linear: `t = (v - min) / (max - min)`. Good for uniform data.
-    Linear,
-    /// Square root: `t = sqrt((v - min) / (max - min))`. Expands the
-    /// low end, good for moderately skewed data (GDP, population).
-    #[default]
-    Sqrt,
-    /// Logarithmic: `t = log(v - min + 1) / log(max - min + 1)`. Best
-    /// for data spanning orders of magnitude.
-    Log,
-}
+use crate::palette::Palette;
+use crate::scale::ColorScale;
 
 /// A single entry: maps a feature ID to either a numeric value (gradient
 /// fill) or an explicit "available, no value" marker (muted neutral fill,
@@ -69,16 +57,20 @@ impl ChoroplethEntry {
 /// Choropleth chart specification.
 ///
 /// Fills geographic features with colors mapped to data values.
-/// Each entry maps a feature ID (matching a GeoJSON property) to a numeric value;
-/// the value is then mapped onto a color scale defined by `color_stops`.
+/// Each entry maps a feature ID (matching a GeoJSON property) to a
+/// numeric value; the value is then mapped onto a color scale described
+/// by [`ColorScale<f64>`] (domain + palette + transform + format).
 #[derive(Debug, Clone)]
 pub struct Choropleth {
     pub(crate) entries: Vec<ChoroplethEntry>,
     pub(crate) geo: Option<Arc<GeoData>>,
     pub(crate) scope: MapScope,
-    pub(crate) color_stops: Option<Vec<crate::core::Color>>,
     pub(crate) projection: ProjectionKind,
-    pub(crate) normalization: Normalization,
+    /// Color encoding scale: domain (auto-inferred when `None`), palette
+    /// (mark default when `None`), transform, and optional legend tick
+    /// formatter. Default is [`ColorScale::default().sqrt()`] to preserve
+    /// the historical "square-root normalization" choropleth behavior.
+    pub(crate) color: ColorScale<f64>,
     /// Optional title for the color-scale legend.
     pub(crate) legend_title: Option<String>,
     /// Color-scale legend configuration. `None` suppresses the legend
@@ -115,9 +107,8 @@ impl<const N: usize> IntoChoropleth for [ChoroplethEntry; N] {
             entries: self.into(),
             geo: None,
             scope: MapScope::World,
-            color_stops: None,
             projection: ProjectionKind::default(),
-            normalization: Normalization::default(),
+            color: ColorScale::default().sqrt(),
             legend_title: None,
             legend: default_legend(),
             selected: None,
@@ -133,9 +124,8 @@ impl IntoChoropleth for Vec<ChoroplethEntry> {
             entries: self,
             geo: None,
             scope: MapScope::World,
-            color_stops: None,
             projection: ProjectionKind::default(),
-            normalization: Normalization::default(),
+            color: ColorScale::default().sqrt(),
             legend_title: None,
             legend: default_legend(),
             selected: None,
@@ -161,9 +151,8 @@ where
                 .collect(),
             geo: None,
             scope: MapScope::World,
-            color_stops: None,
             projection: ProjectionKind::default(),
-            normalization: Normalization::default(),
+            color: ColorScale::default().sqrt(),
             legend_title: None,
             legend: default_legend(),
             selected: None,
@@ -189,9 +178,8 @@ where
                 .collect(),
             geo: None,
             scope: MapScope::World,
-            color_stops: None,
             projection: ProjectionKind::default(),
-            normalization: Normalization::default(),
+            color: ColorScale::default().sqrt(),
             legend_title: None,
             legend: default_legend(),
             selected: None,
@@ -218,13 +206,51 @@ impl Choropleth {
     ///
     /// Use `-scheme` to reverse: `.scheme(-palette::Scheme::GreenRed)`.
     pub fn scheme(mut self, scheme: crate::palette::Scheme) -> Self {
-        self.color_stops = Some(scheme.stops());
+        let stops: Vec<crate::color::Color> = scheme.stops().into_iter().map(Into::into).collect();
+        self.color.palette = Some(Palette::Gradient(stops));
         self
     }
 
     /// Sets raw color scale stops.
     pub fn color_range(mut self, stops: impl Into<Vec<crate::core::Color>>) -> Self {
-        self.color_stops = Some(stops.into());
+        let stops: Vec<crate::color::Color> = stops.into().into_iter().map(Into::into).collect();
+        self.color.palette = Some(Palette::Gradient(stops));
+        self
+    }
+
+    /// Replaces the entire color encoding scale (domain + palette +
+    /// transform + format) in one go. Use this when you've built a
+    /// [`ColorScale<f64>`] elsewhere (e.g. shared across marks).
+    pub fn color_scale(mut self, scale: ColorScale<f64>) -> Self {
+        self.color = scale;
+        self
+    }
+
+    /// Sets the explicit value domain `(lo, hi)` on the color scale.
+    /// Overrides the data-derived auto-inferred range at draw time.
+    pub fn color_domain(mut self, lo: f64, hi: f64) -> Self {
+        self.color.domain = Some((lo, hi));
+        self
+    }
+
+    /// Switches the color scale's transform to linear.
+    pub fn linear(mut self) -> Self {
+        self.color.transform = crate::scale::Transform::Linear;
+        self
+    }
+
+    /// Switches the color scale's transform to square root. Useful for
+    /// moderately skewed numeric distributions (GDP, population). This is
+    /// the default for choropleth.
+    pub fn sqrt(mut self) -> Self {
+        self.color.transform = crate::scale::Transform::Sqrt;
+        self
+    }
+
+    /// Switches the color scale's transform to logarithmic. Useful for
+    /// data spanning orders of magnitude.
+    pub fn log(mut self) -> Self {
+        self.color.transform = crate::scale::Transform::Log;
         self
     }
 
@@ -274,16 +300,6 @@ impl Choropleth {
     /// Returns the active selection set, if any.
     pub fn selected_ids(&self) -> Option<&HashSet<feature::Id>> {
         self.selected.as_ref()
-    }
-
-    /// Sets the value normalization (default: Sqrt).
-    ///
-    /// - `Linear`: uniform data
-    /// - `Sqrt`: moderately skewed data (GDP, population) — **default**
-    /// - `Log`: data spanning orders of magnitude
-    pub fn normalization(mut self, norm: Normalization) -> Self {
-        self.normalization = norm;
-        self
     }
 
     /// Sets the projection kind (default: Mercator).

@@ -22,8 +22,7 @@ pub use bar::{Bars, IntoBars, bar, bars};
 pub use boxplot::{BoxPlot, boxplot, entry, entry_from_data};
 pub use bubble_map::{BubbleMap, MapPoint, bubble_map, map_point};
 pub use choropleth::{
-    Choropleth, ChoroplethEntry, IntoChoropleth, Normalization, choropleth, choropleth_entry,
-    choropleth_entry_available,
+    Choropleth, ChoroplethEntry, IntoChoropleth, choropleth, choropleth_entry, choropleth_entry_available,
 };
 pub use gauge::{Gauge, gauge};
 pub use heatmap::{Heatmap, heatmap};

@@ -43,10 +43,9 @@ pub use data::axis::{self, Axis, Orientation};
 pub use data::legend;
 pub use data::mark::{
     self, Area, Band, BandOrientation, Bars, BoxPlot, BubbleMap, Choropleth, ChoroplethEntry, Gauge, Heatmap,
-    LegendEntry, Line, LineStyle, MapPoint, Mark, Normalization, Pie, Rule, Tick, Treemap, Violin, Waterfall, Xy, area,
-    areas, band, bar, bars, boxplot, bubble_map, choropleth, choropleth_entry, choropleth_entry_available, entry,
-    entry_from_data, gauge, heatmap, line, map_point, pie, rule, tick, treemap, violin, violin_entry, violin_from_data,
-    waterfall, xy,
+    LegendEntry, Line, LineStyle, MapPoint, Mark, Pie, Rule, Tick, Treemap, Violin, Waterfall, Xy, area, areas, band,
+    bar, bars, boxplot, bubble_map, choropleth, choropleth_entry, choropleth_entry_available, entry, entry_from_data,
+    gauge, heatmap, line, map_point, pie, rule, tick, treemap, violin, violin_entry, violin_from_data, waterfall, xy,
 };
 pub use data::tooltip::{ColoredText, Swatch, Tooltip, TooltipEntry};
 

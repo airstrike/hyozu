@@ -1189,7 +1189,7 @@ impl App {
         let choropleth = hyozu::choropleth(entries)
             .geo(geo.clone())
             .scope(self.scope)
-            .normalization(hyozu::Normalization::Log)
+            .log()
             .projection(ProjectionKind::NaturalEarth)
             .scheme(self.color_scale.clone())
             .legend_title(self.indicator.label());
