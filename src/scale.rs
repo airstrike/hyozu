@@ -64,6 +64,12 @@ pub struct Scale<T> {
     /// numeric-axis marks (Bar, Line, Area, Xy); ignored by Pie,
     /// Choropleth, TileGrid.
     pub transform: Transform,
+    /// Whether numeric-axis bounds and ticks should round outward to nice
+    /// numbers when the user hasn't provided explicit bounds. `true` by
+    /// default — matches D3's `.nice()` and Vega-Lite's
+    /// `scale.nice: true`. Set to `false` via [`Scale::nice`] to keep the
+    /// raw data range.
+    pub nice: bool,
 }
 
 impl<T> Default for Scale<T> {
@@ -71,6 +77,7 @@ impl<T> Default for Scale<T> {
         Self {
             format: None,
             transform: Transform::default(),
+            nice: true,
         }
     }
 }
@@ -80,6 +87,7 @@ impl<T> Clone for Scale<T> {
         Self {
             format: self.format.clone(),
             transform: self.transform,
+            nice: self.nice,
         }
     }
 }
@@ -89,6 +97,7 @@ impl<T> std::fmt::Debug for Scale<T> {
         f.debug_struct("Scale")
             .field("format", &self.format.as_ref().map(|_| "<function>"))
             .field("transform", &self.transform)
+            .field("nice", &self.nice)
             .finish()
     }
 }
@@ -117,6 +126,15 @@ impl<T> Scale<T> {
     /// max.
     pub fn log(mut self) -> Self {
         self.transform = Transform::Log;
+        self
+    }
+
+    /// Toggles nice-number rounding for auto-derived axis bounds. `true`
+    /// is the default; pass `false` to keep the raw data range when the
+    /// user hasn't supplied explicit bounds. Has no effect when explicit
+    /// bounds are set on the axis — explicit always wins.
+    pub fn nice(mut self, nice: bool) -> Self {
+        self.nice = nice;
         self
     }
 }

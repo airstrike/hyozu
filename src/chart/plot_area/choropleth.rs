@@ -304,8 +304,17 @@ where
         // the geo plane's projection dirty check. The work is O(n) on
         // entries (typically dozens, not millions), so unconditional
         // recompute is fine. Moves the per-frame walk out of `draw`.
+        // Color legends target ~5 ticks; the niceing step in
+        // `resolved_numeric_domain` snaps the data-derived range to clean
+        // round endpoints (matches D3's `.nice()` default). Explicit
+        // `.domain(lo, hi)` on the color scale bypasses nicing — the
+        // user's number always wins.
+        const COLOR_LEGEND_TICK_TARGET: usize = 5;
         let entries = &self.data.entries;
-        let (lo, hi) = self.data.color.resolved_domain(|| compute_value_range(entries));
+        let (lo, hi) = self
+            .data
+            .color
+            .resolved_numeric_domain(|| compute_value_range(entries), COLOR_LEGEND_TICK_TARGET);
         state.value_range = (lo, hi);
 
         // 3-way state per filtered feature:

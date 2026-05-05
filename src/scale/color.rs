@@ -46,6 +46,11 @@ pub struct ColorScale<I> {
     /// ticks. `None` means "fall back to the chart's default formatter
     /// for `I`."
     pub format: Option<Format<I>>,
+    /// Whether the resolved (data-derived) domain should round outward to
+    /// nice numbers. `true` by default — matches D3's `.nice()` and
+    /// Vega-Lite's `scale.nice: true`. Has no effect when an explicit
+    /// `domain` is set; explicit always wins.
+    pub nice: bool,
 }
 
 impl<I> Default for ColorScale<I> {
@@ -55,6 +60,7 @@ impl<I> Default for ColorScale<I> {
             palette: None,
             transform: Transform::Linear,
             format: None,
+            nice: true,
         }
     }
 }
@@ -66,6 +72,7 @@ impl<I: Clone> Clone for ColorScale<I> {
             palette: self.palette.clone(),
             transform: self.transform,
             format: self.format.clone(),
+            nice: self.nice,
         }
     }
 }
@@ -77,6 +84,7 @@ impl<I: std::fmt::Debug> std::fmt::Debug for ColorScale<I> {
             .field("palette", &self.palette)
             .field("transform", &self.transform)
             .field("format", &self.format.as_ref().map(|_| "<function>"))
+            .field("nice", &self.nice)
             .finish()
     }
 }
@@ -122,6 +130,15 @@ impl<I: Clone> ColorScale<I> {
         self
     }
 
+    /// Toggles nice-number rounding on the data-derived domain. `true` is
+    /// the default; pass `false` to keep the raw `(min, max)` from the
+    /// fallback closure. Has no effect when [`Self::domain`] is set
+    /// explicitly — explicit always wins.
+    pub fn nice(mut self, nice: bool) -> Self {
+        self.nice = nice;
+        self
+    }
+
     /// Returns the user's explicit domain if set, else evaluates
     /// `fallback` (typically a data-derived `(min, max)` computation).
     pub fn resolved_domain(&self, fallback: impl FnOnce() -> (I, I)) -> (I, I) {
@@ -132,6 +149,39 @@ impl<I: Clone> ColorScale<I> {
     /// `fallback` (typically a theme-derived default palette).
     pub fn resolved_palette(&self, fallback: impl FnOnce() -> Palette) -> Palette {
         self.palette.clone().unwrap_or_else(fallback)
+    }
+}
+
+impl ColorScale<f64> {
+    /// Resolves the numeric domain, rounding the data-derived fallback
+    /// outward to nice numbers when [`Self::nice`] is `true`. Caller-supplied
+    /// `(lo, hi)` from the fallback never leaks the un-niced raw range
+    /// past this method, which is the single seam every f64-typed
+    /// renderer threads its color domain through.
+    ///
+    /// `max_ticks` is the legend's target tick count (color legends
+    /// typically use ~5).
+    ///
+    /// Behavior:
+    /// - Explicit `domain` → returned unchanged. Nicing applies only to
+    ///   the fallback path.
+    /// - `nice == false` → fallback returned unchanged.
+    /// - `Transform::Linear | Transform::Sqrt` → linear nicing
+    ///   ([`crate::scale::transform::nice_domain`]).
+    /// - `Transform::Log` → decade-aligned nicing
+    ///   ([`crate::scale::transform::nice_log_domain`]).
+    pub fn resolved_numeric_domain(&self, fallback: impl FnOnce() -> (f64, f64), max_ticks: usize) -> (f64, f64) {
+        if let Some(domain) = self.domain {
+            return domain;
+        }
+        let (lo, hi) = fallback();
+        if !self.nice {
+            return (lo, hi);
+        }
+        match self.transform {
+            Transform::Linear | Transform::Sqrt => crate::scale::transform::nice_domain(lo, hi, max_ticks),
+            Transform::Log => crate::scale::transform::nice_log_domain(lo, hi),
+        }
     }
 }
 
@@ -179,5 +229,53 @@ mod tests {
         let s: ColorScale<f64> = ColorScale::default();
         let (lo, hi) = s.resolved_domain(|| (10.0, 20.0));
         assert_eq!((lo, hi), (10.0, 20.0));
+    }
+
+    #[test]
+    fn nice_defaults_to_true() {
+        let s: ColorScale<f64> = ColorScale::default();
+        assert!(s.nice);
+    }
+
+    #[test]
+    fn resolved_numeric_domain_nices_fallback_by_default() {
+        let s: ColorScale<f64> = ColorScale::default();
+        let (lo, hi) = s.resolved_numeric_domain(|| (10.8, 24.1), 5);
+        assert!((lo - 10.0).abs() < 1e-9);
+        assert!((hi - 25.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn resolved_numeric_domain_preserves_explicit_domain() {
+        // Explicit always wins, even when nice = true.
+        let s: ColorScale<f64> = ColorScale::default().domain(0.5, 99.5);
+        let (lo, hi) = s.resolved_numeric_domain(|| (10.8, 24.1), 5);
+        assert!((lo - 0.5).abs() < 1e-9);
+        assert!((hi - 99.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn resolved_numeric_domain_skips_nicing_when_opted_out() {
+        let s: ColorScale<f64> = ColorScale::default().nice(false);
+        let (lo, hi) = s.resolved_numeric_domain(|| (10.8, 24.1), 5);
+        assert!((lo - 10.8).abs() < 1e-9);
+        assert!((hi - 24.1).abs() < 1e-9);
+    }
+
+    #[test]
+    fn resolved_numeric_domain_uses_log_decade_nicing() {
+        let s: ColorScale<f64> = ColorScale::default().log();
+        let (lo, hi) = s.resolved_numeric_domain(|| (2.5, 8500.0), 5);
+        assert!((lo - 1.0).abs() < 1e-9);
+        assert!((hi - 10000.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn resolved_numeric_domain_sqrt_nices_linearly() {
+        // Sqrt's input domain is linear; nicing applies to the input.
+        let s: ColorScale<f64> = ColorScale::default().sqrt();
+        let (lo, hi) = s.resolved_numeric_domain(|| (10.8, 24.1), 5);
+        assert!((lo - 10.0).abs() < 1e-9);
+        assert!((hi - 25.0).abs() < 1e-9);
     }
 }

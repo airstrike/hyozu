@@ -295,6 +295,17 @@ where
         });
 
         let y_transform = data.y_scale().transform;
+        let y_nice = data.y_scale().nice;
+        // X-axis nicing flows from whichever `Scale` the x-axis is
+        // tagged with. Categorical x-axes don't route through the
+        // nice-step path at all (positions come from data values), and
+        // Time uses its own tick alignment — but the flag still travels
+        // for symmetry, in case those paths gain nice-aware code later.
+        let x_nice = match data.x_scale_ref() {
+            crate::scale::XScale::Category(scale) => scale.nice,
+            crate::scale::XScale::Linear(scale) => scale.nice,
+            crate::scale::XScale::Time(scale) => scale.nice,
+        };
         Self {
             title: data.title.as_deref().map(|t| Title::new(t, data.title_text)),
             legend,
@@ -302,22 +313,22 @@ where
                 .secondary
                 .x_axis
                 .as_ref()
-                .map(|axis| Guide::new(axis, data.secondary.marks())),
-            right_axis: data
-                .secondary
-                .y_axis
-                .as_ref()
-                .map(|axis| Guide::new(axis, data.secondary.marks()).with_transform(y_transform)),
+                .map(|axis| Guide::new(axis, data.secondary.marks()).with_nice(x_nice)),
+            right_axis: data.secondary.y_axis.as_ref().map(|axis| {
+                Guide::new(axis, data.secondary.marks())
+                    .with_transform(y_transform)
+                    .with_nice(y_nice)
+            }),
             bottom_axis: data
                 .primary
                 .x_axis
                 .as_ref()
-                .map(|axis| Guide::new(axis, data.primary.marks())),
-            left_axis: data
-                .primary
-                .y_axis
-                .as_ref()
-                .map(|axis| Guide::new(axis, data.primary.marks()).with_transform(y_transform)),
+                .map(|axis| Guide::new(axis, data.primary.marks()).with_nice(x_nice)),
+            left_axis: data.primary.y_axis.as_ref().map(|axis| {
+                Guide::new(axis, data.primary.marks())
+                    .with_transform(y_transform)
+                    .with_nice(y_nice)
+            }),
             plot_area: {
                 // Per-series value-format vector mirrors the order
                 // PlotArea::new + with_secondary appends series, so a

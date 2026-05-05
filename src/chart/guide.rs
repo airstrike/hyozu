@@ -464,6 +464,12 @@ where
     /// Categorical and time axes ignore this; only Scalar axes route
     /// through it.
     transform: crate::scale::Transform,
+    /// Whether numeric-axis bounds should round outward to nice numbers
+    /// when no explicit bounds are set on the axis. `true` matches
+    /// historical behavior (`Kind::Scalar.bounds()`); `false` keeps the
+    /// raw data range so the user's reading lines up byte-for-byte with
+    /// the numbers they passed in.
+    nice: bool,
     _renderer: std::marker::PhantomData<(Message, Renderer)>,
 }
 
@@ -480,6 +486,7 @@ where
             axis,
             marks,
             transform: crate::scale::Transform::default(),
+            nice: true,
             _renderer: std::marker::PhantomData,
         }
     }
@@ -489,6 +496,15 @@ where
     /// 10 within the domain.
     pub fn with_transform(mut self, transform: crate::scale::Transform) -> Self {
         self.transform = transform;
+        self
+    }
+
+    /// Sets whether the auto-derived axis bounds should round outward to
+    /// nice numbers. Mirrors [`crate::scale::Scale::nice`]; `true` is the
+    /// historical default. Has no effect when both bounds on the axis
+    /// are explicit.
+    pub fn with_nice(mut self, nice: bool) -> Self {
+        self.nice = nice;
         self
     }
 
@@ -531,10 +547,16 @@ where
             let min = self.axis.lower_bound.unwrap_or(data_min);
             let max = self.axis.upper_bound.unwrap_or(data_max);
             if matches!(self.transform, crate::scale::Transform::Log) {
-                let (lo, hi) = log_nice_bounds(min, max);
-                Bounds::exact(lo, hi)
-            } else {
+                if self.nice {
+                    let (lo, hi) = log_nice_bounds(min, max);
+                    Bounds::exact(lo, hi)
+                } else {
+                    Bounds::exact(min, max)
+                }
+            } else if self.nice {
                 self.axis.kind().bounds(min, max)
+            } else {
+                Bounds::exact(min, max)
             }
         }
     }
