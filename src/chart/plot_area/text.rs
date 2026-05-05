@@ -79,7 +79,12 @@ where
         geo_plane: Option<&geo::Plane>,
     ) -> Node {
         let state = tree.state.downcast_mut::<State>();
-        let (dx, dy) = self.data.offset;
+        let (mark_dx, mark_dy) = self.data.offset;
+        // Per-item offset (radius-aware bubble-map labels, etc.)
+        // overrides the mark-level offset. Mirrors the per-datum
+        // `dy` accessor in Vega-Lite's `Plot.text`.
+        let offset_for =
+            |item: &crate::mark::text::TextItem| -> (f32, f32) { item.offset.unwrap_or((mark_dx, mark_dy)) };
 
         state.pixel_points = match self.data.coord_kind {
             CoordKind::Cartesian => self
@@ -88,6 +93,7 @@ where
                 .iter()
                 .map(|item| {
                     let p = plane.to_pixel(item.datum);
+                    let (dx, dy) = offset_for(item);
                     Point::new(p.x + dx, p.y + dy)
                 })
                 .collect(),
@@ -98,6 +104,7 @@ where
                     .iter()
                     .map(|item| {
                         let p = plane.project_point(item.datum.x as f32, item.datum.y as f32);
+                        let (dx, dy) = offset_for(item);
                         Point::new(p.x + dx, p.y + dy)
                     })
                     .collect(),

@@ -14,19 +14,36 @@ use crate::data::mark::xy::CoordKind;
 
 /// One labeled point. Bundling the datum with its label enforces a 1:1
 /// pairing by construction — callers can't desync two parallel vectors.
+///
+/// `offset` overrides the mark-level [`Text::offset`] for this single
+/// item when set. Use it for radius-aware label placement on bubble
+/// maps (each label sits just above its bubble's edge instead of at a
+/// fixed pixel offset that's wrong for varying bubble sizes) — see
+/// [`crate::mark::bubble_map::label_offset_for`].
 #[derive(Debug, Clone)]
 pub struct TextItem {
     pub datum: Datum,
     pub label: String,
+    pub offset: Option<(f32, f32)>,
 }
 
 impl TextItem {
-    /// Convenience constructor.
+    /// Convenience constructor with no per-item offset (the renderer
+    /// falls back to [`Text::offset`]).
     pub fn new(datum: Datum, label: impl Into<String>) -> Self {
         Self {
             datum,
             label: label.into(),
+            offset: None,
         }
+    }
+
+    /// Sets a per-item pixel offset that overrides the mark-level
+    /// offset for this label only. `(dx, dy)` follows iced's pixel-y-
+    /// down convention — negative `dy` shifts the label up.
+    pub fn offset(mut self, dx: f32, dy: f32) -> Self {
+        self.offset = Some((dx, dy));
+        self
     }
 }
 

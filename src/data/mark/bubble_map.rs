@@ -119,11 +119,37 @@ impl MapPoint {
 ///     map_point(52.2, 21.0, 29.0).label("Warsaw"),
 /// ]);
 /// ```
+/// Minimum and maximum bubble radii in pixels for [`bubble_map`].
+/// Exposed so callers building label or annotation overlays can compute
+/// per-bubble offsets that match the rendered radius.
+pub const MIN_RADIUS: f32 = 4.0;
+pub const MAX_RADIUS: f32 = 30.0;
+
+/// Returns the rendered radius (in pixels) for a bubble whose magnitude
+/// is `value` within the given `(v_lo, v_hi)` range — same formula
+/// [`bubble_map`] uses internally (sqrt of the linearly-normalized
+/// value scaled into the [`MIN_RADIUS`]..[`MAX_RADIUS`] band).
+///
+/// Use this when composing label or annotation overlays alongside a
+/// bubble map so labels can sit at a radius-aware offset (e.g. just
+/// above each bubble's top edge) instead of a uniform pixel nudge that
+/// goes wrong on the largest bubbles. Returns [`MIN_RADIUS`] when the
+/// value is non-finite or below `v_lo`.
+pub fn radius_for(value: f64, value_range: (f64, f64)) -> f32 {
+    let (v_lo, v_hi) = value_range;
+    if !value.is_finite() {
+        return MIN_RADIUS;
+    }
+    let span = v_hi - v_lo;
+    let t = if span > 0.0 {
+        ((value.abs() - v_lo) / span).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    MIN_RADIUS + (t.sqrt() as f32) * (MAX_RADIUS - MIN_RADIUS)
+}
+
 pub fn bubble_map(points: impl IntoIterator<Item = MapPoint>) -> Xy {
-    /// Bubble radii in pixels. Diameters (passed into `size_by`) are 2×
-    /// the radii.
-    const MIN_RADIUS: f32 = 4.0;
-    const MAX_RADIUS: f32 = 30.0;
     const MIN_DIAMETER: f32 = 2.0 * MIN_RADIUS;
     const MAX_DIAMETER: f32 = 2.0 * MAX_RADIUS;
 
@@ -199,16 +225,30 @@ pub fn bubble_map(points: impl IntoIterator<Item = MapPoint>) -> Xy {
 /// let data = hyozu::data(marks);
 /// ```
 pub fn bubble_map_with_labels(points: impl IntoIterator<Item = MapPoint>, name: impl Into<String>) -> Vec<Mark> {
+    /// Vertical gap between a bubble's top edge and its label baseline,
+    /// in pixels. Picked so the choropleth's hover ring (`radius + 2`)
+    /// can't overprint the label when a bubble is hovered.
+    const LABEL_PADDING: f32 = 8.0;
+
     let entries: Vec<MapPoint> = points.into_iter().collect();
+    let value_range = compute_value_range(&entries);
     // Pull labels off the entries before they move into `bubble_map`. The
     // label set is sparse — only entries with `label.is_some()` produce a
     // `TextItem` — so the layer renders nothing for unlabeled bubbles.
+    // Each labeled item gets a per-item offset sized to its bubble's
+    // rendered radius, so the label sits just above the bubble's top
+    // edge regardless of magnitude — uniform mark-level offsets put
+    // small-bubble labels too high and big-bubble labels inside the disc.
     let label_items: Vec<TextItem> = entries
         .iter()
         .filter_map(|p| {
-            p.label.as_ref().map(|l| TextItem {
-                datum: Datum::new(p.lon, p.lat),
-                label: l.clone(),
+            p.label.as_ref().map(|l| {
+                let radius = radius_for(p.value, value_range);
+                TextItem {
+                    datum: Datum::new(p.lon, p.lat),
+                    label: l.clone(),
+                    offset: Some((0.0, -(radius + LABEL_PADDING))),
+                }
             })
         })
         .collect();

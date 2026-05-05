@@ -262,16 +262,32 @@ impl App {
         let bubbles = hyozu::bubble_map(shop_points)
             .with_name("Flagship store revenue ($K)")
             .color(BUBBLE_FILL);
+
+        // Per-shop label offset sized to each bubble's rendered radius
+        // so labels sit just above the bubble's top edge regardless of
+        // magnitude. `bubble_map`'s `radius_for` reports the same
+        // formula the bubble layer renders, and the +8 px padding
+        // keeps labels clear of the hover ring (radius + 2 px).
+        let value_range = {
+            let values: Vec<f64> = shops_data.iter().map(|s| s.revenue_k).collect();
+            let lo = values.iter().copied().fold(f64::INFINITY, f64::min);
+            let hi = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+            (lo, hi)
+        };
+        const LABEL_PADDING: f32 = 8.0;
         let label_items: Vec<hyozu::TextItem> = shops_data
             .iter()
-            .map(|s| hyozu::TextItem {
-                datum: hyozu::Datum::new(s.lon, s.lat),
-                label: s.label.to_string(),
+            .map(|s| {
+                let r = hyozu::mark::bubble_map::radius_for(s.revenue_k, value_range);
+                hyozu::TextItem {
+                    datum: hyozu::Datum::new(s.lon, s.lat),
+                    label: s.label.to_string(),
+                    offset: Some((0.0, -(r + LABEL_PADDING))),
+                }
             })
             .collect();
         let labels = hyozu::text(label_items)
             .on_geo()
-            .offset(0.0, -16.0)
             .align(hyozu::TextAlign::Center)
             .size(11.0);
 
