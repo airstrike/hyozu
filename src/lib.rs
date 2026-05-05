@@ -1,4 +1,5 @@
 pub mod alignment;
+pub mod animation;
 pub mod chart;
 pub mod color;
 pub mod data;

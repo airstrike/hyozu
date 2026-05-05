@@ -1,6 +1,5 @@
-use std::time::Duration;
-
 use super::Plane;
+use crate::animation;
 use crate::core::Size;
 use crate::core::animation::{Animation, Easing};
 use crate::core::layout::{Limits, Node};
@@ -11,10 +10,6 @@ use crate::widget::canvas::{Frame, Path, Stroke, Text as CanvasText};
 
 use crate::core::text;
 use crate::widget::renderer::geometry;
-
-/// Mount-animation duration for pie/donut slices, matching Recharts'
-/// 1500ms default.
-const ANIMATION_DURATION: Duration = Duration::from_millis(1500);
 
 /// Number of line segments per full circle for arc approximation.
 const ARC_SEGMENTS_PER_TAU: usize = 64;
@@ -148,8 +143,8 @@ where
                 label_rects: Vec::new(),
                 previous_angles: Vec::new(),
                 progress: Animation::new(0.0_f32)
-                    .easing(Easing::EaseOut)
-                    .duration(ANIMATION_DURATION),
+                    .easing(Easing::Custom(animation::ease))
+                    .duration(animation::DEFAULT_DURATION),
                 pending_start: true,
                 now: None,
             }),
