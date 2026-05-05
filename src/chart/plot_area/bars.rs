@@ -1,4 +1,5 @@
 use super::{Plane, PlotInsets};
+use crate::animation;
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
 use crate::core::{Point, Rectangle, Size};
@@ -66,6 +67,15 @@ pub struct State {
     /// encoding's expensive walk (extractor calls, distinct-key indexing)
     /// only runs when the data changes, not on every repaint.
     pub series_fill_plans: Vec<Option<crate::encoding::FillPlan>>,
+    /// Bar rectangles from the most recent layout before the current one,
+    /// captured by [`crate::chart::Chart::diff`] when data changes so the
+    /// next sweep can interpolate from previous bounds to current bounds.
+    /// Empty on a fresh mount, in which case the animation collapses to a
+    /// baseline-anchored grow-in.
+    pub previous_series_rects: Vec<Vec<Rectangle>>,
+    /// Per-frame entrance/transition lifecycle (progress, pending-start
+    /// flag, latest captured `Instant`) advanced by the chart widget.
+    pub tick: animation::Tick,
 }
 
 /// A Bars series that renders vertical bar charts.
@@ -77,6 +87,10 @@ where
     Renderer: crate::core::text::Renderer + geometry::Renderer,
 {
     pub(crate) data: &'a crate::bar::Bars,
+    /// Whether the mount/data-change sweep runs. Mirrors
+    /// [`crate::Data::animate`] (the chart-level toggle); `false` makes
+    /// `draw` snap to the laid-out geometry.
+    pub(crate) animate: bool,
     _marker: std::marker::PhantomData<(Message, Renderer)>,
 }
 
@@ -89,8 +103,15 @@ where
     pub fn new(data: &'a crate::bar::Bars) -> Self {
         Self {
             data,
+            animate: true,
             _marker: std::marker::PhantomData,
         }
+    }
+
+    /// Sets whether the mount/data-change sweep should run. Wired by
+    /// [`super::PlotArea::with_animate`] from [`crate::Data::animate`].
+    pub(crate) fn set_animate(&mut self, animate: bool) {
+        self.animate = animate;
     }
 
     /// Returns the initial tree state for this Bars
@@ -101,6 +122,8 @@ where
                 series_rects: Vec::new(),
                 label_rects: Vec::new(),
                 series_fill_plans: Vec::new(),
+                previous_series_rects: Vec::new(),
+                tick: animation::Tick::new(),
             }),
             children: Vec::new(),
         }
@@ -637,6 +660,30 @@ where
 
         let is_horizontal = self.data.direction == crate::mark::bar::Direction::Horizontal;
         let radius = self.data.corner_radius;
+
+        // Sweep: each bar's rectangle interpolates from its previous-layout
+        // rect (or from a baseline-anchored zero-extent rect on fresh mount)
+        // toward its current rect. With `animate = false` progress pins to
+        // `1.0` and the animated rect equals `state.series_rects[s][i]`,
+        // reproducing today's geometry exactly.
+        let progress = if !self.animate { 1.0 } else { state.tick.progress() };
+        let animating = progress < 1.0 - f32::EPSILON;
+        let animated_series_rects: Vec<Vec<Rectangle>> = state
+            .series_rects
+            .iter()
+            .enumerate()
+            .map(|(s, rects)| {
+                rects
+                    .iter()
+                    .enumerate()
+                    .map(|(i, cur)| {
+                        let prev = state.previous_series_rects.get(s).and_then(|v| v.get(i)).copied();
+                        animate_rect(*cur, prev, progress, is_horizontal)
+                    })
+                    .collect()
+            })
+            .collect();
+
         // For stacked layout, only the topmost segment of each stack should
         // round its end corners, so middle segments meet without gaps.
         let total_series = self.data.series.len();
@@ -648,7 +695,7 @@ where
         let seed = theme.seed();
 
         // Draw each series
-        for (series_idx, (series, rects)) in self.data.series.iter().zip(state.series_rects.iter()).enumerate() {
+        for (series_idx, (series, rects)) in self.data.series.iter().zip(animated_series_rects.iter()).enumerate() {
             let round_this_series = radius > 0.0 && (!is_stacked || series_idx + 1 == total_series);
             // Determine base color for this series
             let base_color = if let Some(series_color) = series.color {
@@ -711,8 +758,12 @@ where
 
             all_bar_colors.push(bar_colors);
 
-            // Draw labels for this series if configured
-            if let Some(label_config) = &series.label {
+            // Draw labels for this series if configured. Suppressed
+            // mid-sweep so they don't pop in over bars that haven't
+            // grown into their final positions yet.
+            if let Some(label_config) = &series.label
+                && !animating
+            {
                 let label_size = label_config.text.size.map(|p| p.0).unwrap_or(12.0);
                 let is_horizontal = self.data.direction == crate::mark::bar::Direction::Horizontal;
 
@@ -758,7 +809,7 @@ where
                         Position::Above => {
                             let label_point = crate::core::Point::new(label_x, label_y);
 
-                            let containing_bar = all_bar_colors.iter().zip(state.series_rects.iter()).find_map(
+                            let containing_bar = all_bar_colors.iter().zip(animated_series_rects.iter()).find_map(
                                 |(colors, other_rects)| {
                                     other_rects
                                         .iter()
@@ -804,10 +855,14 @@ where
             }
         }
 
-        // Draw selection highlights
+        // Draw selection highlights — only painted once the mount sweep
+        // completes so the highlight doesn't ride along with bars that
+        // haven't grown into their final positions yet.
         let mut selection_frame = Frame::new(renderer, layout_bounds.size());
 
-        if let Some(target) = selection {
+        if let Some(target) = selection
+            && !animating
+        {
             use crate::target::Target;
             use crate::widget::canvas::Stroke;
 
@@ -979,6 +1034,43 @@ fn label_position(
                 Horizontal::Center,
                 Vertical::Bottom,
             ),
+        }
+    }
+}
+
+/// Computes the on-screen rectangle for a bar at the current sweep
+/// progress. With a `prev` rect (data change), x/y/width/height each
+/// lerp linearly from `prev` to `cur`. Without one (fresh mount), the
+/// bar grows from the orientation-appropriate baseline:
+///
+/// - Vertical bars (height changes, anchored at the bottom edge):
+///   `height` scales by `progress`, the top edge slides down so the
+///   bottom stays put.
+/// - Horizontal bars (width changes, anchored at the left edge):
+///   `width` scales by `progress`, x and y stay current.
+///
+/// At `progress == 1.0` the result equals `cur` exactly in every
+/// branch, so disabling animation reproduces today's geometry.
+fn animate_rect(cur: Rectangle, prev: Option<Rectangle>, progress: f32, is_horizontal: bool) -> Rectangle {
+    if let Some(prev) = prev {
+        let x = prev.x + (cur.x - prev.x) * progress;
+        let y = prev.y + (cur.y - prev.y) * progress;
+        let width = prev.width + (cur.width - prev.width) * progress;
+        let height = prev.height + (cur.height - prev.height) * progress;
+        Rectangle { x, y, width, height }
+    } else if is_horizontal {
+        Rectangle {
+            x: cur.x,
+            y: cur.y,
+            width: cur.width * progress,
+            height: cur.height,
+        }
+    } else {
+        Rectangle {
+            x: cur.x,
+            y: cur.y + cur.height * (1.0 - progress),
+            width: cur.width,
+            height: cur.height * progress,
         }
     }
 }

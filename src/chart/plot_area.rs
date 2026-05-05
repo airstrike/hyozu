@@ -209,6 +209,9 @@ where
             if let Series::Pie(pie) = series {
                 pie.set_animate(animate);
             }
+            if let Series::Bars(bars) = series {
+                bars.set_animate(animate);
+            }
         }
         self
     }

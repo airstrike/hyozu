@@ -424,6 +424,9 @@ fn animation_tick_mut(tree: &mut Tree) -> Option<&mut animation::Tick> {
     if tag == tree::Tag::of::<plot_area::pie::State>() {
         return Some(&mut tree.state.downcast_mut::<plot_area::pie::State>().tick);
     }
+    if tag == tree::Tag::of::<plot_area::bars::State>() {
+        return Some(&mut tree.state.downcast_mut::<plot_area::bars::State>().tick);
+    }
     None
 }
 
@@ -442,11 +445,27 @@ fn replant_pie(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
     }
 }
 
+/// Snapshots a Bars mark's pre-rebuild `series_rects` onto the
+/// post-rebuild tree's `previous_series_rects` and arms the next
+/// redraw to interpolate from there. The caller is responsible for
+/// confirming both nodes carry a `bars::State`.
+fn replant_bars(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
+    let old_state = old_mark.state.downcast_ref::<plot_area::bars::State>();
+    let new_state = new_mark.state.downcast_mut::<plot_area::bars::State>();
+    if animate {
+        new_state.previous_series_rects = old_state.series_rects.clone();
+        new_state.tick.pending_start = true;
+    } else {
+        new_state.tick.pending_start = false;
+    }
+}
+
 /// Walks old/new plot-area children pairwise and dispatches per-tag
 /// to the matching `replant_<mark>` snapshot helper. A no-op when
 /// either tree lacks a plot area.
 fn replant_mark_animations(old_children: &[Tree], new_children: &mut [Tree], animate: bool) {
     let pie_tag = tree::Tag::of::<plot_area::pie::State>();
+    let bars_tag = tree::Tag::of::<plot_area::bars::State>();
     let Some(old_scene) = old_children.first() else {
         return;
     };
@@ -463,6 +482,10 @@ fn replant_mark_animations(old_children: &[Tree], new_children: &mut [Tree], ani
     for (old_mark, new_mark) in old_plot_area.children.iter().zip(new_plot_area.children.iter_mut()) {
         if old_mark.tag == pie_tag && new_mark.tag == pie_tag {
             replant_pie(old_mark, new_mark, animate);
+            continue;
+        }
+        if old_mark.tag == bars_tag && new_mark.tag == bars_tag {
+            replant_bars(old_mark, new_mark, animate);
             continue;
         }
     }
