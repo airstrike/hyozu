@@ -1,6 +1,8 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::animation;
 use crate::chart::scale_legend;
 use crate::core::Size;
 use crate::core::layout::{Limits, Node};
@@ -45,9 +47,27 @@ pub struct State {
     pub value_range: (f64, f64),
     /// Theme-free plan for the scale legend (pre-formatted min/max labels).
     pub legend_plan: scale_legend::Plan,
-    prev_size: (f32, f32),
-    prev_scope: crate::geo::MapScope,
-    prev_geo: Option<Arc<crate::geo::GeoData>>,
+    /// Per-filtered-feature resolved fill colors, written by
+    /// [`Choropleth::draw`] at the start of each repaint and read by
+    /// [`crate::chart::Chart::diff`] to seed `previous_fill_colors`
+    /// during a data-change replant. Aligned 1:1 with
+    /// [`Self::filtered_ids`]. Lives in a [`RefCell`] because fill
+    /// resolution is theme-dependent and only `draw` carries the
+    /// theme — `layout` cannot bake fills without staling on a theme
+    /// change.
+    pub fill_colors: RefCell<Vec<crate::core::Color>>,
+    /// Per-feature fill colors from the most recent layout before the
+    /// current one, captured by [`crate::chart::Chart::diff`] when data
+    /// changes so the next sweep can interpolate from previous fills to
+    /// current fills. Empty on a fresh mount, in which case the
+    /// animation collapses to an alpha fade-in at the final color.
+    pub previous_fill_colors: Vec<crate::core::Color>,
+    /// Per-frame entrance/transition lifecycle (progress, pending-start
+    /// flag, latest captured `Instant`) advanced by the chart widget.
+    pub tick: animation::Tick,
+    pub(crate) prev_size: (f32, f32),
+    pub(crate) prev_scope: crate::geo::MapScope,
+    pub(crate) prev_geo: Option<Arc<crate::geo::GeoData>>,
 }
 
 /// A Choropleth series that renders geographic features filled with
@@ -58,6 +78,10 @@ where
     Renderer: text::Renderer + geometry::Renderer,
 {
     pub(super) data: &'a crate::mark::choropleth::Choropleth,
+    /// Whether the mount/data-change sweep runs. Mirrors
+    /// [`crate::Data::animate`] (the chart-level toggle); `false` makes
+    /// `draw` snap to the laid-out fill colors.
+    pub(crate) animate: bool,
     _marker: std::marker::PhantomData<(Message, Renderer)>,
 }
 
@@ -122,6 +146,17 @@ fn blend_colors(a: crate::core::Color, b: crate::core::Color, t: f32) -> crate::
     }
 }
 
+/// Per-channel linear interpolation between `prev` and `cur`. At
+/// `progress == 0.0` returns `prev`; at `1.0` returns `cur` exactly.
+fn lerp_color(prev: crate::core::Color, cur: crate::core::Color, progress: f32) -> crate::core::Color {
+    crate::core::Color {
+        r: prev.r + (cur.r - prev.r) * progress,
+        g: prev.g + (cur.g - prev.g) * progress,
+        b: prev.b + (cur.b - prev.b) * progress,
+        a: prev.a + (cur.a - prev.a) * progress,
+    }
+}
+
 /// Pure helper that maps each filtered feature to its display state
 /// given the entries map and the value range. Pulled out so it can be
 /// unit-tested without spinning up the full layout pipeline.
@@ -161,8 +196,15 @@ where
     pub fn new(data: &'a crate::mark::choropleth::Choropleth) -> Self {
         Self {
             data,
+            animate: true,
             _marker: std::marker::PhantomData,
         }
+    }
+
+    /// Sets whether the mount/data-change sweep should run. Wired by
+    /// [`super::PlotArea::with_animate`] from [`crate::Data::animate`].
+    pub(crate) fn set_animate(&mut self, animate: bool) {
+        self.animate = animate;
     }
 
     pub(super) fn state(&self) -> Tree {
@@ -175,6 +217,9 @@ where
                 feature_state: Vec::new(),
                 value_range: (0.0, 1.0),
                 legend_plan: scale_legend::Plan::default(),
+                fill_colors: RefCell::new(Vec::new()),
+                previous_fill_colors: Vec::new(),
+                tick: animation::Tick::new(),
                 prev_size: (0.0, 0.0),
                 prev_scope: crate::geo::MapScope::World,
                 prev_geo: None,
@@ -400,15 +445,17 @@ where
         });
         frame.fill(&ocean, ocean_color);
 
-        // ── Draw features ────────────────────────────────────────
-
-        for (feat_idx, feature_rings) in state.projected_polygons.iter().enumerate() {
-            // Per-feature display state was computed in layout; sampling the
-            // gradient (or picking a neutral fill) is the only theme-touching
-            // step left here. When a selection set is active, value-bearing
-            // features outside the set blend halfway toward `land_fill` so
-            // the selected feature(s) read as the focus.
-            let fill = match state.feature_state.get(feat_idx).copied() {
+        // ── Resolve target fill per feature ──────────────────────
+        // Target color resolution is theme-dependent (gradient seed,
+        // land_fill blend) so it lives here rather than in layout.
+        // The cache is written to `state.fill_colors` so a subsequent
+        // data-change replant in `chart::diff` can snapshot it onto
+        // the post-rebuild tree's `previous_fill_colors`.
+        let target_fills: Vec<crate::core::Color> = state
+            .projected_polygons
+            .iter()
+            .enumerate()
+            .map(|(feat_idx, _)| match state.feature_state.get(feat_idx).copied() {
                 Some(FeatureState::Value(t)) => {
                     let gradient = crate::palette::sample_gradient(&color_stops, t);
                     let id = state.filtered_ids.get(feat_idx);
@@ -427,6 +474,32 @@ where
                 }
                 Some(FeatureState::Available) => available_fill,
                 Some(FeatureState::Missing) | None => land_fill,
+            })
+            .collect();
+
+        // ── Animation gating ─────────────────────────────────────
+        // With a previous-layout snapshot (data change), each region's
+        // fill lerps per-channel from prev to cur. Without one (fresh
+        // mount), the alpha component multiplies by progress so regions
+        // fade in from fully transparent to their final color. With
+        // `animate = false` progress pins to `1.0` and the rendered
+        // color equals `target_fills[i]` exactly. Geometry (projected
+        // polygons) does not animate — projection is too expensive to
+        // recompute per-frame.
+        let progress = if !self.animate { 1.0 } else { state.tick.progress() };
+        let has_prev = !state.previous_fill_colors.is_empty();
+
+        // ── Draw features ────────────────────────────────────────
+        for (feat_idx, feature_rings) in state.projected_polygons.iter().enumerate() {
+            let target = target_fills[feat_idx];
+            let fill = if has_prev {
+                let prev = state.previous_fill_colors.get(feat_idx).copied().unwrap_or(target);
+                lerp_color(prev, target, progress)
+            } else {
+                crate::core::Color {
+                    a: target.a * progress,
+                    ..target
+                }
             };
 
             for ring in feature_rings {
@@ -447,6 +520,12 @@ where
                 frame.stroke(&path, Stroke::default().with_color(border_color).with_width(0.5));
             }
         }
+
+        // Snapshot the resolved targets for the next replant to seed
+        // `previous_fill_colors` from. Always written, regardless of
+        // `self.animate`, so toggling animation on later still has a
+        // valid baseline.
+        *state.fill_colors.borrow_mut() = target_fills;
 
         // ── Composite ────────────────────────────────────────────
         let translation = crate::core::Vector::new(layout_bounds.x, layout_bounds.y);

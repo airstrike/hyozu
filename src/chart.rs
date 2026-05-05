@@ -448,6 +448,9 @@ fn animation_tick_mut(tree: &mut Tree) -> Option<&mut animation::Tick> {
     if tag == tree::Tag::of::<plot_area::treemap::State>() {
         return Some(&mut tree.state.downcast_mut::<plot_area::treemap::State>().tick);
     }
+    if tag == tree::Tag::of::<plot_area::choropleth::State>() {
+        return Some(&mut tree.state.downcast_mut::<plot_area::choropleth::State>().tick);
+    }
     None
 }
 
@@ -602,6 +605,38 @@ fn replant_treemap(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
     }
 }
 
+/// Snapshots a Choropleth mark's pre-rebuild `fill_colors` onto the
+/// post-rebuild tree's `previous_fill_colors` and arms the next redraw
+/// to interpolate from there. Independent of the animation gate, the
+/// projection cache (`prev_size`, `prev_scope`, `prev_geo`,
+/// `projected_polygons`, `filtered_ids`, `feature_bboxes`) and the
+/// derived per-frame state (`feature_state`, `value_range`,
+/// `legend_plan`) are always replanted onto the new tree so the next
+/// layout's dirty-check stays a hit and the projection isn't
+/// re-flattened on a data change. The caller is responsible for
+/// confirming both nodes carry a `choropleth::State`.
+fn replant_choropleth(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
+    let old_state = old_mark.state.downcast_ref::<plot_area::choropleth::State>();
+    let new_state = new_mark.state.downcast_mut::<plot_area::choropleth::State>();
+
+    new_state.prev_size = old_state.prev_size;
+    new_state.prev_scope = old_state.prev_scope;
+    new_state.prev_geo = old_state.prev_geo.clone();
+    new_state.projected_polygons = old_state.projected_polygons.clone();
+    new_state.filtered_ids = old_state.filtered_ids.clone();
+    new_state.feature_bboxes = old_state.feature_bboxes.clone();
+    new_state.feature_state = old_state.feature_state.clone();
+    new_state.value_range = old_state.value_range;
+    new_state.legend_plan = old_state.legend_plan.clone();
+
+    if animate {
+        new_state.previous_fill_colors = old_state.fill_colors.borrow().clone();
+        new_state.tick.pending_start = true;
+    } else {
+        new_state.tick.pending_start = false;
+    }
+}
+
 /// Walks old/new plot-area children pairwise and dispatches per-tag
 /// to the matching `replant_<mark>` snapshot helper. A no-op when
 /// either tree lacks a plot area.
@@ -615,6 +650,7 @@ fn replant_mark_animations(old_children: &[Tree], new_children: &mut [Tree], ani
     let bubble_map_tag = tree::Tag::of::<plot_area::bubble_map::State>();
     let heatmap_tag = tree::Tag::of::<plot_area::heatmap::State>();
     let treemap_tag = tree::Tag::of::<plot_area::treemap::State>();
+    let choropleth_tag = tree::Tag::of::<plot_area::choropleth::State>();
     let Some(old_scene) = old_children.first() else {
         return;
     };
@@ -663,6 +699,10 @@ fn replant_mark_animations(old_children: &[Tree], new_children: &mut [Tree], ani
         }
         if old_mark.tag == treemap_tag && new_mark.tag == treemap_tag {
             replant_treemap(old_mark, new_mark, animate);
+            continue;
+        }
+        if old_mark.tag == choropleth_tag && new_mark.tag == choropleth_tag {
+            replant_choropleth(old_mark, new_mark, animate);
             continue;
         }
     }

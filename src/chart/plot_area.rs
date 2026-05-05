@@ -233,6 +233,9 @@ where
             if let Series::Treemap(tm) = series {
                 tm.set_animate(animate);
             }
+            if let Series::Choropleth(c) = series {
+                c.set_animate(animate);
+            }
         }
         self
     }
