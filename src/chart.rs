@@ -67,7 +67,7 @@ pub enum Kind<'a, Message, Theme> {
 struct State {
     generation: u64,
     is_pressed: bool,
-    hover: Option<hover::State>,
+    hover: Option<hover::Geometry>,
     /// Names of series hidden via legend click toggles. Lives with the
     /// widget state and is reset when the tree is dropped.
     hidden_series: std::collections::HashSet<String>,
@@ -234,13 +234,22 @@ fn compute_plot_bounds(
 
 /// Scan the plot area tree for the cursor's hover target.
 ///
-/// Pie hit-test takes priority: a slice's polar bounds always describe
-/// a tighter hover region than the global "nearest pixel-x" snap a
-/// Cartesian mark would produce. Falls back to the Cartesian dispatch
-/// when no pie slice contains the cursor.
-fn find_nearest_hover(local: Point, plot_area_tree: &Tree, plane: &plot_area::Plane) -> Option<hover::State> {
+/// Tighter geometries take priority over looser ones. Pie slices are
+/// the tightest (full polar bounds). Geo bubbles are next (Euclidean
+/// proximity to a projected point). The Cartesian "nearest pixel-x"
+/// snap is the fallback because it accepts any cursor inside its
+/// 30px x-snap threshold and would otherwise swallow precise hits.
+fn find_nearest_hover<Message>(
+    local: Point,
+    plot_area_tree: &Tree,
+    plot_area: &plot_area::PlotArea<'_, Message, Renderer>,
+    plane: &plot_area::Plane,
+) -> Option<hover::Geometry> {
     if let Some(pie_hover) = find_pie_hover(local, plot_area_tree) {
         return Some(pie_hover);
+    }
+    if let Some(geo_hover) = find_geo_hover(local, plot_area_tree, plot_area) {
+        return Some(geo_hover);
     }
     find_nearest_cartesian_hover(local, plot_area_tree, plane)
 }
@@ -248,7 +257,11 @@ fn find_nearest_hover(local: Point, plot_area_tree: &Tree, plane: &plot_area::Pl
 /// Scan Cartesian (line/area/xy/bars) marks for the nearest pixel x,
 /// then collect all entries at that x. Returns `None` if no hoverable
 /// points exist or the cursor is too far from any point.
-fn find_nearest_cartesian_hover(local: Point, plot_area_tree: &Tree, plane: &plot_area::Plane) -> Option<hover::State> {
+fn find_nearest_cartesian_hover(
+    local: Point,
+    plot_area_tree: &Tree,
+    plane: &plot_area::Plane,
+) -> Option<hover::Geometry> {
     let line_tag = tree::Tag::of::<plot_area::line::State>();
     let area_tag = tree::Tag::of::<plot_area::area::State>();
     let xy_tag = tree::Tag::of::<plot_area::xy::State>();
@@ -364,7 +377,7 @@ fn find_nearest_cartesian_hover(local: Point, plot_area_tree: &Tree, plane: &plo
     if entries.is_empty() {
         return None;
     }
-    Some(hover::State::Cartesian { data_x, entries })
+    Some(hover::Geometry::Cartesian { data_x, entries })
 }
 
 /// Hit-test a point against a single pie's pre-laid-out polar state.
@@ -400,7 +413,7 @@ fn pie_slice_at(local: Point, pie_state: &plot_area::pie::State) -> Option<usize
 /// The cursor must lie within `[inner_radius, outer_radius]` of the
 /// pie's center and inside one slice's `[start_angle, end_angle]`
 /// sweep. Returns the first matching slice across pie marks.
-fn find_pie_hover(local: Point, plot_area_tree: &Tree) -> Option<hover::State> {
+fn find_pie_hover(local: Point, plot_area_tree: &Tree) -> Option<hover::Geometry> {
     let pie_tag = tree::Tag::of::<plot_area::pie::State>();
 
     for (mark_idx, mark_tree) in plot_area_tree.children.iter().enumerate() {
@@ -409,10 +422,67 @@ fn find_pie_hover(local: Point, plot_area_tree: &Tree) -> Option<hover::State> {
         }
         let pie_state = mark_tree.state.downcast_ref::<plot_area::pie::State>();
         if let Some(slice_idx) = pie_slice_at(local, pie_state) {
-            return Some(hover::State::Pie { mark_idx, slice_idx });
+            return Some(hover::Geometry::Pie { mark_idx, slice_idx });
         }
     }
     None
+}
+
+/// Hit-test the cursor against any geo-projected Xy bubbles.
+///
+/// Walks every `Series::Xy` whose `coord_kind == Geo` and finds the
+/// closest bubble within `radius + 4px` of the cursor. Distance ties
+/// resolve by smallest `(distance - radius)`, so a cursor inside two
+/// overlapping bubbles snaps to the one whose interior it penetrates
+/// further. Returns `None` when no geo bubble is in range — the
+/// caller falls through to the cartesian snap-to-x.
+fn find_geo_hover<Message>(
+    local: Point,
+    plot_area_tree: &Tree,
+    plot_area: &plot_area::PlotArea<'_, Message, Renderer>,
+) -> Option<hover::Geometry> {
+    let xy_tag = tree::Tag::of::<plot_area::xy::State>();
+    let mut best: Option<(usize, usize, f32)> = None;
+
+    for (mark_idx, series) in plot_area.series.iter().enumerate() {
+        let plot_area::Series::Xy(xy) = series else {
+            continue;
+        };
+        if xy.data.coord_kind != crate::mark::xy::CoordKind::Geo {
+            continue;
+        }
+        let Some(child) = plot_area_tree.children.get(mark_idx) else {
+            continue;
+        };
+        if child.tag != xy_tag {
+            continue;
+        }
+        let state = child.state.downcast_ref::<plot_area::xy::State>();
+        for (point_idx, pixel) in state.pixel_points.iter().enumerate() {
+            let radius = state.resolved_sizes.get(point_idx).copied().unwrap_or(0.0) / 2.0;
+            let dx = local.x - pixel.x;
+            let dy = local.y - pixel.y;
+            let dist = (dx * dx + dy * dy).sqrt();
+            let tolerance = radius + 4.0;
+            if dist > tolerance {
+                continue;
+            }
+            // `dist - radius` is negative when the cursor is inside
+            // the marker; smallest value wins so deeper-penetrated
+            // overlaps take priority over neighbours just inside
+            // their tolerance band.
+            let key = dist - radius;
+            let take = match best {
+                Some((_, _, b)) => key < b,
+                None => true,
+            };
+            if take {
+                best = Some((mark_idx, point_idx, key));
+            }
+        }
+    }
+
+    best.map(|(mark_idx, point_idx, _)| hover::Geometry::Geographic { mark_idx, point_idx })
 }
 
 /// Returns a mutable handle to the [`animation::Tick`] hosted on
@@ -1086,17 +1156,32 @@ where
             Event::Mouse(mouse::Event::CursorMoved { .. }) => match cursor.position_in(plot_bounds) {
                 Some(local) => {
                     let plot_area_tree = &scene_tree.children[6];
-                    let new_hover = find_nearest_hover(Point::new(local.x, local.y), plot_area_tree, plane);
+                    let new_hover = find_nearest_hover(
+                        Point::new(local.x, local.y),
+                        plot_area_tree,
+                        self.scene.plot_area(),
+                        plane,
+                    );
 
                     let changed = match (&state.hover, &new_hover) {
                         (
-                            Some(hover::State::Cartesian { data_x: a, .. }),
-                            Some(hover::State::Cartesian { data_x: b, .. }),
+                            Some(hover::Geometry::Cartesian { data_x: a, .. }),
+                            Some(hover::Geometry::Cartesian { data_x: b, .. }),
                         ) => (a - b).abs() > f64::EPSILON,
                         (
-                            Some(hover::State::Pie { slice_idx: a, .. }),
-                            Some(hover::State::Pie { slice_idx: b, .. }),
+                            Some(hover::Geometry::Pie { slice_idx: a, .. }),
+                            Some(hover::Geometry::Pie { slice_idx: b, .. }),
                         ) => a != b,
+                        (
+                            Some(hover::Geometry::Geographic {
+                                mark_idx: ma,
+                                point_idx: pa,
+                            }),
+                            Some(hover::Geometry::Geographic {
+                                mark_idx: mb,
+                                point_idx: pb,
+                            }),
+                        ) => ma != mb || pa != pb,
                         (None, None) => false,
                         _ => true,
                     };
@@ -1497,7 +1582,7 @@ fn draw_tooltip_overlay<Message>(
     padding: Padding,
     plot_area_offset: Point,
     plane: &plot_area::Plane,
-    hover: &hover::State,
+    hover: &hover::Geometry,
     tooltip_config: &crate::data::tooltip::Tooltip,
     scene: &scene::Scene<'_, Message, Renderer>,
     scene_tree: &Tree,
@@ -1505,7 +1590,7 @@ fn draw_tooltip_overlay<Message>(
     cursor: mouse::Cursor,
 ) {
     match hover {
-        hover::State::Cartesian { data_x, entries } => draw_cartesian_tooltip_overlay(
+        hover::Geometry::Cartesian { data_x, entries } => draw_cartesian_tooltip_overlay(
             renderer,
             design,
             chart_bounds,
@@ -1519,7 +1604,7 @@ fn draw_tooltip_overlay<Message>(
             scene_tree,
             viewport,
         ),
-        hover::State::Pie { mark_idx, slice_idx } => draw_pie_tooltip_overlay(
+        hover::Geometry::Pie { mark_idx, slice_idx } => draw_pie_tooltip_overlay(
             renderer,
             design,
             chart_bounds,
@@ -1532,6 +1617,20 @@ fn draw_tooltip_overlay<Message>(
             scene,
             viewport,
             cursor,
+        ),
+        hover::Geometry::Geographic { mark_idx, point_idx } => draw_geo_tooltip_overlay(
+            renderer,
+            design,
+            chart_bounds,
+            padding,
+            plot_area_offset,
+            plane,
+            *mark_idx,
+            *point_idx,
+            tooltip_config,
+            scene,
+            scene_tree,
+            viewport,
         ),
     }
 }
@@ -1727,7 +1826,9 @@ fn draw_cartesian_tooltip_overlay<Message>(
             frame.stroke(&path, stroke);
         }
 
-        // Hover annotations — each mark type declares its own visual
+        // Hover annotations — each mark type declares its own visual.
+        // The cartesian overlay only emits PointMarker / None entries;
+        // Ring is produced by the geographic overlay and handled there.
         if tooltip_config.markers {
             for re in &entries {
                 match &re.annotation {
@@ -1745,6 +1846,7 @@ fn draw_cartesian_tooltip_overlay<Message>(
                         );
                     }
                     hover::Annotation::None => {}
+                    hover::Annotation::Ring { .. } => {}
                 }
             }
         }
@@ -1864,6 +1966,166 @@ fn draw_pie_tooltip_overlay<Message>(
             effective_tooltip,
             &entries,
             cursor_pos,
+            flip_axis_x,
+            chart_bounds,
+            text_color,
+            viewport,
+        );
+    });
+}
+
+/// Draws the geographic hover overlay — a stroke ring around the
+/// hovered bubble and a side-anchored tooltip box.
+///
+/// No tracking line: the bubble is itself the visual focus, and a
+/// dashed crosshair across longitudes would carry no useful meaning
+/// on a projected map. The tooltip box anchors at the bubble center
+/// and clamps to the chart bounds via the existing flip-axis logic.
+#[allow(clippy::too_many_arguments)]
+fn draw_geo_tooltip_overlay<Message>(
+    renderer: &mut Renderer,
+    design: &dyn design::Design,
+    chart_bounds: Rectangle,
+    padding: Padding,
+    plot_area_offset: Point,
+    plane: &plot_area::Plane,
+    mark_idx: usize,
+    point_idx: usize,
+    tooltip_config: &crate::data::tooltip::Tooltip,
+    scene: &scene::Scene<'_, Message, Renderer>,
+    scene_tree: &Tree,
+    viewport: &Rectangle,
+) {
+    use crate::core::renderer::Renderer as _;
+    use crate::widget::canvas::{Frame, Path, Stroke};
+    use crate::widget::renderer::geometry;
+
+    let plot_area = scene.plot_area();
+    let plot_area_tree = &scene_tree.children[6];
+
+    let plot_area::Series::Xy(xy) = &plot_area.series[mark_idx] else {
+        return;
+    };
+    let Some(child) = plot_area_tree.children.get(mark_idx) else {
+        return;
+    };
+    if child.tag != tree::Tag::of::<plot_area::xy::State>() {
+        return;
+    }
+    let xy_state = child.state.downcast_ref::<plot_area::xy::State>();
+    let Some(pixel) = xy_state.pixel_points.get(point_idx).copied() else {
+        return;
+    };
+    let Some(point) = xy.data.points.get(point_idx).copied() else {
+        return;
+    };
+    let diameter = xy_state
+        .resolved_sizes
+        .get(point_idx)
+        .copied()
+        .unwrap_or(xy.data.marker.size);
+    let radius = diameter / 2.0;
+
+    let background = design.background_color();
+    let text_pair = design.text_pair();
+    let seed = design.seed();
+    let text_color = design.text_color().resolve(background, text_pair, &seed, None);
+    let palette = scene.resolve_palette(design);
+
+    let bubble_color = if let Some(c) = xy.data.color {
+        c.resolve(background, text_pair, &seed, None)
+    } else {
+        let color_idx = plot_area.color_offset_for(mark_idx, 0);
+        palette.get(color_idx).resolve(background, text_pair, &seed, None)
+    };
+
+    // Tooltip text: prefer a chain-aware format closure when the user
+    // hasn't supplied one, mirroring the pie overlay so legend / axis
+    // formats flow through to hover text.
+    let chain_tooltip;
+    let effective_tooltip: &crate::data::tooltip::Tooltip = if tooltip_config.format_is_default() {
+        let mark_format = scene.primary_mark_value_format(mark_idx).cloned();
+        chain_tooltip = tooltip_config.clone().format(move |entry: &TooltipEntry| {
+            let formatted = match &mark_format {
+                Some(f) => f(&entry.y),
+                None => crate::scale::default_f64_format(entry.y),
+            };
+            match &entry.series_name {
+                Some(name) => format!("{name}: {formatted}"),
+                None => formatted,
+            }
+        });
+        &chain_tooltip
+    } else {
+        tooltip_config
+    };
+
+    let plot_bounds = compute_plot_bounds(chart_bounds, padding, plot_area_offset, plane);
+    let anchor_abs = Point::new(
+        plot_bounds.x + pixel.x - plane.bounds.x,
+        plot_bounds.y + pixel.y - plane.bounds.y,
+    );
+    let flip_axis_x = anchor_abs.x;
+
+    let entry = hover::Entry {
+        tooltip: TooltipEntry {
+            x: point.x,
+            y: point.y,
+            series_name: xy.data.name.as_deref().map(|s| s.to_string()),
+            series_index: 0,
+            mark_index: mark_idx,
+            color: bubble_color,
+        },
+        anchor: anchor_abs,
+        color: bubble_color,
+        annotation: hover::Annotation::Ring {
+            pixel,
+            radius: radius + 2.0,
+            color: bubble_color,
+            width: 1.5,
+        },
+    };
+    let entries = [entry];
+
+    renderer.with_layer(*viewport, |renderer| {
+        // Ring around the hovered bubble. Drawn on a frame translated
+        // to the plot bounds so coordinates match the cartesian path.
+        if tooltip_config.markers {
+            let frame_size = crate::core::Size::new(plane.bounds.width, plane.bounds.height);
+            let mut frame = Frame::new(renderer, frame_size);
+            for re in &entries {
+                match &re.annotation {
+                    hover::Annotation::Ring {
+                        pixel,
+                        radius,
+                        color,
+                        width,
+                    } => {
+                        let cx = pixel.x - plane.bounds.x;
+                        let cy = pixel.y - plane.bounds.y;
+                        let path = Path::circle(Point::new(cx, cy), *radius);
+                        frame.stroke(&path, Stroke::default().with_width(*width).with_color(*color));
+                    }
+                    hover::Annotation::PointMarker { .. } => {}
+                    hover::Annotation::None => {}
+                }
+            }
+            renderer.with_translation(crate::core::Vector::new(plot_bounds.x, plot_bounds.y), |renderer| {
+                geometry::Renderer::draw_geometry(renderer, frame.into_geometry());
+            });
+        }
+
+        // Side-anchored tooltip box: offset right of the bubble center
+        // by (radius + 8px). The flip-axis is the anchor itself so the
+        // box flips L/R only when it would overflow chart bounds; the
+        // existing clamp inside `draw_tooltip_box` keeps it on-screen.
+        let box_anchor = Point::new(anchor_abs.x + radius + 8.0, anchor_abs.y);
+        draw_tooltip_box(
+            renderer,
+            design,
+            effective_tooltip,
+            &entries,
+            box_anchor,
             flip_axis_x,
             chart_bounds,
             text_color,
