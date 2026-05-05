@@ -40,6 +40,12 @@ pub struct State {
     pub inner_radius: f32,
     /// Pixel rectangles for each label
     pub label_rects: Vec<Option<crate::core::Rectangle>>,
+    /// Slice angles from the most recent layout before the current one,
+    /// captured by [`crate::chart::Chart::diff`] when data changes so the
+    /// next sweep can interpolate from previous deltas to current deltas.
+    /// Empty on a fresh mount, in which case the animation collapses to a
+    /// 0 → full sweep.
+    pub previous_angles: Vec<(f32, f32)>,
     /// Mount sweep progress (`0.0` collapsed, `1.0` fully drawn).
     pub progress: Animation<f32>,
     /// Set when the animation needs to be kicked off on the next
@@ -129,6 +135,7 @@ where
                 outer_radius: 0.0,
                 inner_radius: 0.0,
                 label_rects: Vec::new(),
+                previous_angles: Vec::new(),
                 progress: Animation::new(0.0_f32)
                     .easing(Easing::EaseOut)
                     .duration(ANIMATION_DURATION),
@@ -278,10 +285,11 @@ where
         let has_gap = self.data.gap > 0.0 && self.data.slices.len() > 1;
         let gap_offset = self.data.gap / 2.0;
 
-        // Mount sweep: each slice's angular delta scales 0 → full and the
-        // next slice's start chains off the previous slice's *animated*
-        // end, so the visible arc grows clockwise from `-π/2` like
-        // Recharts.
+        // Sweep: each slice's angular delta interpolates from its
+        // previous-layout delta to its current delta, and the next
+        // slice's start chains off the previous slice's *animated* end.
+        // With no previous (fresh mount) prev_delta is `0`, so the
+        // expression collapses to the 0 → full mount sweep.
         let progress = match state.now {
             Some(now) => state.progress.interpolate_with(|v| v, now),
             None => 0.0,
@@ -302,7 +310,9 @@ where
             };
             slice_colors.push(color);
 
-            let delta = (*orig_end - *orig_start) * progress;
+            let cur_delta = *orig_end - *orig_start;
+            let prev_delta = state.previous_angles.get(i).map(|(ps, pe)| pe - ps).unwrap_or(0.0);
+            let delta = prev_delta + (cur_delta - prev_delta) * progress;
             let start = anim_cursor;
             let end = anim_cursor + delta;
             anim_cursor = end;

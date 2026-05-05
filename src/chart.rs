@@ -408,6 +408,37 @@ fn find_pie_hover(local: Point, plot_area_tree: &Tree) -> Option<hover::State> {
     None
 }
 
+/// Copies each pie's `slice_angles` from the pre-rebuild tree into
+/// `previous_angles` on the post-rebuild tree, and arms the animation
+/// so the next redraw interpolates from those previous deltas to the
+/// new ones. A no-op when either tree lacks a plot area or the pie
+/// position changed (different mark types at the same index).
+fn replant_pie_angles(old_children: &[Tree], new_children: &mut [Tree]) {
+    let pie_tag = tree::Tag::of::<plot_area::pie::State>();
+    let Some(old_scene) = old_children.first() else {
+        return;
+    };
+    let Some(new_scene) = new_children.first_mut() else {
+        return;
+    };
+    let Some(old_plot_area) = old_scene.children.get(6) else {
+        return;
+    };
+    let Some(new_plot_area) = new_scene.children.get_mut(6) else {
+        return;
+    };
+
+    for (old_mark, new_mark) in old_plot_area.children.iter().zip(new_plot_area.children.iter_mut()) {
+        if old_mark.tag != pie_tag || new_mark.tag != pie_tag {
+            continue;
+        }
+        let old_state = old_mark.state.downcast_ref::<plot_area::pie::State>();
+        let new_state = new_mark.state.downcast_mut::<plot_area::pie::State>();
+        new_state.previous_angles = old_state.slice_angles.clone();
+        new_state.pending_start = true;
+    }
+}
+
 /// Walks the plot-area subtree, kicks pending pie sweeps off on the
 /// first redraw that carries an `Instant`, and asks for another redraw
 /// while any pie is still animating. Mirrors the
@@ -529,7 +560,14 @@ where
         let state = tree.state.downcast_mut::<State>();
         if state.generation != self.generation {
             state.generation = self.generation;
-            tree.children = self.children();
+            // Wholesale rebuild loses pie tree state, so snapshot the
+            // previous slice angles per pie and replant them on the new
+            // tree. The next sweep then interpolates from those instead
+            // of mounting from `0`. Done positionally — each pie mark
+            // stays at its plot-area child index across rebuilds, since
+            // the data's mark vector drives both layouts.
+            let old_children = std::mem::replace(&mut tree.children, self.children());
+            replant_pie_angles(&old_children, &mut tree.children);
             return;
         }
         self.scene.diff(&mut tree.children[0]);
