@@ -11,69 +11,74 @@
 use std::sync::Arc;
 
 use hyozu::ProjectionKind;
+use hyozu::data::legend;
 use hyozu::geo::{self, GeoData, MapScope};
 use iced::widget::{center, column, container, text};
-use iced::{Background, Color, Element, Fill, Font, Task, Theme, color};
+use iced::{Color, Element, Fill, Font, Task, Theme, color};
 
-/// Hex of the choropleth's light-mode ocean fill (`#F2F7FA`). Reused by
-/// the container behind the chart so the chart edge blends seamlessly
-/// into the surrounding page chrome.
+/// Hex of the choropleth's light-mode ocean fill (`#F2F7FA`). Used as
+/// the chart widget's own background so its frame blends with the
+/// rendered ocean rather than fighting it with a white border.
 const OCEAN_FILL: Color = color!(0xF2F7FA);
+
+/// Warm contrast color for the bubble overlay so flagship stores read
+/// against the blue choropleth instead of disappearing into it.
+const BUBBLE_FILL: Color = color!(0xE07A2D);
 
 const STATES_URL: &str = "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_1_states_provinces.geojson";
 
 // ── Data ───────────────────────────────────────────────────────────
 
-/// Per-state monthly ice-cream sales per capita, in USD. Postal codes
-/// match Natural Earth's `postal` property on US states.
+/// Monthly state-level revenue in thousands of USD. Postal codes match
+/// Natural Earth's `postal` property on US states.
 ///
 /// The northern plains and intermountain west — MT, WY, ND, SD, NE,
 /// KS, ID — are intentionally absent so the choropleth's
 /// `FeatureState::Missing` rendering (theme `missing_fill`) is visible
 /// alongside the gradient-filled states.
-fn sales_per_capita() -> Vec<(&'static str, f64)> {
+fn state_revenue() -> Vec<(&'static str, f64)> {
     vec![
-        ("CA", 24.10),
-        ("TX", 19.80),
-        ("FL", 22.50),
-        ("NY", 18.30),
-        ("PA", 14.20),
-        ("IL", 15.90),
-        ("OH", 13.40),
-        ("GA", 17.60),
-        ("NC", 16.40),
-        ("MI", 12.80),
-        ("NJ", 17.10),
-        ("VA", 15.50),
-        ("WA", 16.90),
-        ("AZ", 21.30),
-        ("MA", 18.90),
-        ("TN", 14.70),
-        ("IN", 12.30),
-        ("MO", 13.10),
-        ("MD", 16.80),
-        ("WI", 14.60),
-        ("CO", 17.20),
-        ("MN", 13.80),
-        ("SC", 16.10),
-        ("AL", 15.20),
-        ("LA", 18.10),
-        ("KY", 12.10),
-        ("OR", 15.30),
-        ("OK", 14.40),
-        ("CT", 16.30),
-        ("UT", 14.90),
-        ("IA", 11.70),
-        ("NV", 20.40),
-        ("AR", 13.50),
-        ("MS", 14.80),
-        ("NM", 16.60),
-        ("WV", 10.80),
-        ("NH", 15.70),
-        ("ME", 14.30),
-        ("RI", 16.70),
-        ("DE", 17.40),
-        ("VT", 14.10),
+        ("CA", 1450.0),
+        ("TX", 1280.0),
+        ("FL", 1100.0),
+        ("NY", 950.0),
+        ("PA", 720.0),
+        ("IL", 680.0),
+        ("OH", 590.0),
+        ("GA", 580.0),
+        ("NC", 510.0),
+        ("MI", 470.0),
+        ("NJ", 460.0),
+        ("VA", 440.0),
+        ("WA", 430.0),
+        ("AZ", 420.0),
+        ("MA", 400.0),
+        ("TN", 380.0),
+        ("IN", 370.0),
+        ("MO", 350.0),
+        ("MD", 340.0),
+        ("WI", 330.0),
+        ("CO", 320.0),
+        ("MN", 310.0),
+        ("SC", 300.0),
+        ("AL", 290.0),
+        ("LA", 280.0),
+        ("KY", 270.0),
+        ("OR", 260.0),
+        ("OK", 250.0),
+        ("CT", 240.0),
+        ("UT", 230.0),
+        ("IA", 220.0),
+        ("NV", 210.0),
+        ("AR", 200.0),
+        ("MS", 190.0),
+        ("NM", 180.0),
+        ("WV", 100.0),
+        ("NH", 95.0),
+        ("ME", 85.0),
+        ("RI", 80.0),
+        ("DE", 75.0),
+        ("VT", 60.0),
     ]
 }
 
@@ -237,46 +242,63 @@ impl App {
 
         let chart = hyozu::chart(&self.chart_data)
             .height(Fill)
-            .on_action(Message::ChartAction);
-
-        let chart_box = container(chart)
-            .padding(8)
+            .on_action(Message::ChartAction)
+            .style(|_design| hyozu::chart::Style {
+                background: Some(OCEAN_FILL),
+                ..hyozu::chart::Style::default()
+            });
+        column![header(), container(chart).padding(8).width(Fill).height(Fill)]
             .width(Fill)
             .height(Fill)
-            .style(|_theme: &Theme| container::Style {
-                background: Some(Background::Color(OCEAN_FILL)),
-                ..container::Style::default()
-            });
-        column![header(), chart_box].width(Fill).height(Fill).into()
+            .into()
     }
 
-    /// Builds the Data: choropleth (states colored by sales/cap) +
-    /// bubble overlay (shops sized by revenue), both projected through
-    /// the same `Data::geo(...)` Mercator plane.
+    /// Builds the Data: choropleth (states colored by revenue) + bubble
+    /// overlay (shops sized by revenue), both projected through the
+    /// same `Data::geo(...)` Mercator plane.
     fn build_chart_data(&self) -> hyozu::Data {
         let Some(states) = self.states.as_ref() else {
             return hyozu::Data::default();
         };
 
-        let choropleth = hyozu::choropleth(sales_per_capita())
-            .scheme(hyozu::palette::Scheme::Viridis)
-            .legend_title("Monthly sales / capita ($)")
+        let choropleth = hyozu::choropleth(state_revenue())
+            .scheme(hyozu::palette::Scheme::Blues)
+            .legend_title("Monthly revenue ($K)")
+            .legend(legend::Config::overlay(legend::Anchor::BottomRight).orientation(legend::Orientation::Vertical))
             .linear();
 
-        let shop_points: Vec<hyozu::MapPoint> = shops()
-            .into_iter()
+        let shops_data = shops();
+        let shop_points: Vec<hyozu::MapPoint> = shops_data
+            .iter()
             .map(|s| hyozu::map_point(s.lat, s.lon, s.revenue_k as f32).label(s.label))
             .collect();
 
-        let mut marks = vec![hyozu::Mark::Choropleth(choropleth)];
-        marks.extend(hyozu::bubble_map_with_labels(
-            shop_points,
-            "Flagship store revenue ($K)",
-        ));
+        // Build the bubble overlay manually instead of going through
+        // `bubble_map_with_labels` so the warm bubble color is applied
+        // directly. The helper covers the simple no-customization case.
+        let bubbles = hyozu::bubble_map(shop_points)
+            .with_name("Flagship store revenue ($K)")
+            .color(BUBBLE_FILL);
+        let label_items: Vec<hyozu::TextItem> = shops_data
+            .iter()
+            .map(|s| hyozu::TextItem {
+                datum: hyozu::Datum::new(s.lon, s.lat),
+                label: s.label.to_string(),
+            })
+            .collect();
+        let labels = hyozu::text(label_items)
+            .on_geo()
+            .offset(0.0, -16.0)
+            .align(hyozu::TextAlign::Center)
+            .size(11.0);
 
-        hyozu::data(marks)
-            .geo(states.clone(), MapScope::UnitedStates, ProjectionKind::Mercator)
-            .title("Sundae Drive — Monthly Performance, CONUS")
+        hyozu::data(vec![
+            hyozu::Mark::Choropleth(choropleth),
+            hyozu::Mark::Xy(bubbles),
+            hyozu::Mark::Text(labels),
+        ])
+        .geo(states.clone(), MapScope::UnitedStates, ProjectionKind::Mercator)
+        .title("Sundae Drive — Monthly Performance, CONUS")
     }
 }
 
