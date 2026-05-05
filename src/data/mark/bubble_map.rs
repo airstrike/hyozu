@@ -136,6 +136,8 @@ pub fn bubble_map(points: impl IntoIterator<Item = MapPoint>) -> Xy {
     // index is what bridges the two parallel vectors.
     let values: Vec<f64> = entries.iter().map(|e| e.value.abs()).collect();
     let datums: Vec<Datum> = entries.iter().map(|e| Datum::new(e.lon, e.lat)).collect();
+    let labels: Vec<Option<String>> = entries.iter().map(|e| e.label.clone()).collect();
+    let tooltip_values: Vec<Option<f64>> = entries.iter().map(|e| Some(e.value)).collect();
 
     let size_encoding = encoding::size_by(move |i, _d| {
         // The closure returns the desired pixel diameter directly. The
@@ -169,6 +171,8 @@ pub fn bubble_map(points: impl IntoIterator<Item = MapPoint>) -> Xy {
         size_by: Some(size_encoding),
         coord_kind: CoordKind::Geo,
         opacity: 0.7,
+        labels,
+        tooltip_values,
     }
 }
 

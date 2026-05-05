@@ -2041,19 +2041,30 @@ fn draw_geo_tooltip_overlay<Message>(
         palette.get(color_idx).resolve(background, text_pair, &seed, None)
     };
 
-    // Tooltip text: prefer a chain-aware format closure when the user
-    // hasn't supplied one, mirroring the pie overlay so legend / axis
-    // formats flow through to hover text.
+    // Per-point label and tooltip value (populated for geo bubble points
+    // built via `bubble_map(...)`; empty for plain `xy(...).on_geo()`).
+    let point_label = xy.data.labels.get(point_idx).cloned().flatten();
+    let point_value = xy.data.tooltip_values.get(point_idx).copied().flatten();
+
+    // Tooltip text: prefer the per-point label as the descriptor when
+    // present, falling back to the series name. The value runs through
+    // the chart's value-format chain so a user-supplied `Data::value_format`
+    // (e.g. `|v| format!("${v:.0}K")`) styles the magnitude consistently
+    // with the legend.
     let chain_tooltip;
     let effective_tooltip: &crate::data::tooltip::Tooltip = if tooltip_config.format_is_default() {
         let mark_format = scene.primary_mark_value_format(mark_idx).cloned();
-        chain_tooltip = tooltip_config.clone().format(move |entry: &TooltipEntry| {
+        let series_name = xy.data.name.clone();
+        let label = point_label.clone();
+        let value = point_value.unwrap_or(point.y);
+        chain_tooltip = tooltip_config.clone().format(move |_entry: &TooltipEntry| {
             let formatted = match &mark_format {
-                Some(f) => f(&entry.y),
-                None => crate::scale::default_f64_format(entry.y),
+                Some(f) => f(&value),
+                None => crate::scale::default_f64_format(value),
             };
-            match &entry.series_name {
-                Some(name) => format!("{name}: {formatted}"),
+            let descriptor = label.as_deref().or(series_name.as_deref());
+            match descriptor {
+                Some(d) => format!("{d}: {formatted}"),
                 None => formatted,
             }
         });

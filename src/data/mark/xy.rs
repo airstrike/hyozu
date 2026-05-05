@@ -45,6 +45,18 @@ pub struct Xy {
     /// opaque). Multiplies the resolved fill color's alpha channel at
     /// draw time; defaults to `1.0` so cartesian scatter is unchanged.
     pub(crate) opacity: f32,
+    /// Optional per-point labels surfaced by the hover tooltip and (in
+    /// the future) per-point text overlays. Either empty (no labels) or
+    /// aligned 1:1 with [`Self::points`]. Populated by
+    /// [`crate::bubble_map`] from each `MapPoint::label`; cartesian Xy
+    /// charts leave it empty.
+    pub(crate) labels: Vec<Option<String>>,
+    /// Optional per-point values surfaced by the hover tooltip in place
+    /// of `Datum.y`. Either empty (use `Datum.y`) or aligned 1:1 with
+    /// [`Self::points`]. Populated by [`crate::bubble_map`] from each
+    /// `MapPoint::value` so geo bubbles report their original magnitude
+    /// instead of latitude.
+    pub(crate) tooltip_values: Vec<Option<f64>>,
 }
 
 /// Creates an XY scatter chart from point data.
@@ -69,6 +81,8 @@ pub fn xy(data: impl IntoDatums) -> Xy {
         size_by: None,
         coord_kind: CoordKind::Cartesian,
         opacity: 1.0,
+        labels: Vec::new(),
+        tooltip_values: Vec::new(),
     }
 }
 

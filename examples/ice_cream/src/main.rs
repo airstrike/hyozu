@@ -298,6 +298,7 @@ impl App {
             hyozu::Mark::Text(labels),
         ])
         .geo(states.clone(), MapScope::UnitedStates, ProjectionKind::Mercator)
+        .value_format(|v| format!("${v:.0}K"))
         .title("Sundae Drive — Monthly Performance, CONUS")
     }
 }
