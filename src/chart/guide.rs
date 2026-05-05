@@ -151,23 +151,6 @@ fn log_ticks(min: f64, max: f64) -> Vec<f64> {
     (lo_exp..=hi_exp).step_by(stride).map(|k| 10_f64.powi(k)).collect()
 }
 
-/// Compute a nice step size for a given range and target tick count
-fn compute_nice_step(range: f64, target_count: usize) -> f64 {
-    let rough_step = range / (target_count as f64);
-    let magnitude = 10_f64.powf(rough_step.log10().floor());
-    let normalized = rough_step / magnitude;
-
-    if normalized <= 1.5 {
-        magnitude
-    } else if normalized <= 3.0 {
-        2.0 * magnitude
-    } else if normalized <= 7.0 {
-        5.0 * magnitude
-    } else {
-        10.0 * magnitude
-    }
-}
-
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
 
@@ -1064,7 +1047,7 @@ where
         }
 
         let range = max - min;
-        let nice_step = compute_nice_step(range, target_count);
+        let nice_step = crate::scale::transform::nice_step(range, target_count);
 
         let mut ticks = Vec::new();
 

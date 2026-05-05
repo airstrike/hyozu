@@ -71,7 +71,7 @@ impl Kind {
 
                 // Snap to nice round numbers
                 let padded_range = padded_max - padded_min;
-                let step = nice_step(padded_range, 5);
+                let step = crate::scale::transform::nice_step(padded_range, 5);
                 let mut nice_min = (padded_min / step).floor() * step;
                 let nice_max = (padded_max / step).ceil() * step;
 
@@ -98,7 +98,7 @@ impl Kind {
                 let padded_max = data_max + range * 0.05;
 
                 // Snap to nice round numbers
-                let step = nice_step(padded_max, 5);
+                let step = crate::scale::transform::nice_step(padded_max, 5);
                 let nice_max = (padded_max / step).ceil() * step;
 
                 // Zero anchor for non-negative, otherwise compute nice min
@@ -172,23 +172,6 @@ impl Bounds {
     /// Convert to tuple.
     pub fn as_tuple(&self) -> (f64, f64) {
         (self.min, self.max)
-    }
-}
-
-/// Compute a nice step size for tick marks.
-fn nice_step(range: f64, target_count: usize) -> f64 {
-    let rough_step = range / (target_count as f64);
-    let magnitude = 10_f64.powf(rough_step.log10().floor());
-    let normalized = rough_step / magnitude;
-
-    if normalized <= 1.5 {
-        magnitude
-    } else if normalized <= 3.0 {
-        2.0 * magnitude
-    } else if normalized <= 7.0 {
-        5.0 * magnitude
-    } else {
-        10.0 * magnitude
     }
 }
 
