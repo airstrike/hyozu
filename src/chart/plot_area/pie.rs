@@ -1,9 +1,7 @@
 use super::Plane;
 use crate::animation;
 use crate::core::Size;
-use crate::core::animation::{Animation, Easing};
 use crate::core::layout::{Limits, Node};
-use crate::core::time::Instant;
 use crate::core::widget::{Tree, tree};
 use crate::mark::pie::label::{FormatKind, Position, Show};
 use crate::widget::canvas::{Frame, Path, Stroke, Text as CanvasText};
@@ -41,16 +39,9 @@ pub struct State {
     /// Empty on a fresh mount, in which case the animation collapses to a
     /// 0 → full sweep.
     pub previous_angles: Vec<(f32, f32)>,
-    /// Mount sweep progress (`0.0` collapsed, `1.0` fully drawn).
-    pub progress: Animation<f32>,
-    /// Set when the animation needs to be kicked off on the next
-    /// `RedrawRequested`. The animation primitive needs an `Instant` that
-    /// only the redraw event carries; the parent chart consumes this flag
-    /// in its `update` and calls [`Animation::go_mut`].
-    pub pending_start: bool,
-    /// Most recent `RedrawRequested` time, captured in the chart widget's
-    /// `update` so `draw` can interpolate the animation.
-    pub now: Option<Instant>,
+    /// Per-frame entrance/transition lifecycle (progress, pending-start
+    /// flag, latest captured `Instant`) advanced by the chart widget.
+    pub tick: animation::Tick,
 }
 
 impl State {
@@ -142,11 +133,7 @@ where
                 inner_radius: 0.0,
                 label_rects: Vec::new(),
                 previous_angles: Vec::new(),
-                progress: Animation::new(0.0_f32)
-                    .easing(Easing::Custom(animation::ease))
-                    .duration(animation::DEFAULT_DURATION),
-                pending_start: true,
-                now: None,
+                tick: animation::Tick::new(),
             }),
             children: Vec::new(),
         }
@@ -298,14 +285,7 @@ where
         // expression collapses to the 0 → full mount sweep. When
         // animation is opted out, progress pins to `1.0` and the
         // expression renders the laid-out geometry directly.
-        let progress = if !self.animate {
-            1.0
-        } else {
-            match state.now {
-                Some(now) => state.progress.interpolate_with(|v| v, now),
-                None => 0.0,
-            }
-        };
+        let progress = if !self.animate { 1.0 } else { state.tick.progress() };
         let animating = progress < 1.0 - f32::EPSILON;
         let mut anim_cursor = state.slice_angles.first().map(|(s, _)| *s).unwrap_or(0.0);
 

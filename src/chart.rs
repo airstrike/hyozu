@@ -442,9 +442,9 @@ fn replant_pie_angles(old_children: &[Tree], new_children: &mut [Tree], animate:
         let new_state = new_mark.state.downcast_mut::<plot_area::pie::State>();
         if animate {
             new_state.previous_angles = old_state.slice_angles.clone();
-            new_state.pending_start = true;
+            new_state.tick.pending_start = true;
         } else {
-            new_state.pending_start = false;
+            new_state.tick.pending_start = false;
         }
     }
 }
@@ -471,14 +471,7 @@ fn advance_pie_animations<Message>(tree: &mut Tree, now: Instant, animate: bool,
             continue;
         }
         let pie_state = mark_tree.state.downcast_mut::<plot_area::pie::State>();
-        pie_state.now = Some(now);
-        if pie_state.pending_start {
-            pie_state.progress.go_mut(1.0, now);
-            pie_state.pending_start = false;
-            shell.request_redraw();
-        } else if pie_state.progress.is_animating(now) {
-            shell.request_redraw();
-        }
+        pie_state.tick.advance(now, shell);
     }
 }
 
