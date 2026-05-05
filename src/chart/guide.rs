@@ -513,8 +513,19 @@ where
         let has_explicit_bounds = self.axis.lower_bound.is_some() && self.axis.upper_bound.is_some();
 
         if has_explicit_bounds {
-            // User specified exact bounds - use as-is
-            Bounds::exact(self.axis.lower_bound.unwrap(), self.axis.upper_bound.unwrap())
+            let lower = self.axis.lower_bound.unwrap();
+            let upper = self.axis.upper_bound.unwrap();
+            // Log axes can't show non-positive values; the transform
+            // clamps to `f64::EPSILON` for mapping anyway, which spans
+            // ~16 decades of empty space below any real data. Clamp the
+            // user's lower to a positive default derived from `upper`
+            // so tick positioning, gridlines, and the rendered plane
+            // all agree on the same range.
+            if matches!(self.transform, crate::scale::Transform::Log) && lower <= 0.0 && upper > 0.0 {
+                Bounds::exact(upper / 1e4, upper)
+            } else {
+                Bounds::exact(lower, upper)
+            }
         } else {
             // Apply partial overrides if any, then let Kind compute proper bounds
             let min = self.axis.lower_bound.unwrap_or(data_min);
