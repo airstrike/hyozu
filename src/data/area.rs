@@ -370,7 +370,7 @@ impl Area {
                     }
                 },
                 // Non-Cartesian marks don't contribute bounds
-                Mark::Pie(_) | Mark::Gauge(_) | Mark::Treemap(_) | Mark::BubbleMap(_) | Mark::Choropleth(_) => {}
+                Mark::Pie(_) | Mark::Gauge(_) | Mark::Treemap(_) | Mark::Choropleth(_) => {}
             }
         }
 

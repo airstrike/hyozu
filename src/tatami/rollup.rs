@@ -1,5 +1,5 @@
 //! [`tatami::rollup::Tree`] → [`crate::Data`] with [`crate::Mark::Choropleth`]
-//! (and optional [`crate::Mark::BubbleMap`]).
+//! (and optional bubble-map [`crate::Mark::Xy`]).
 //!
 //! Rollups are hierarchical; choropleth renders one level (typically the
 //! leaves, e.g. countries). The caller resolves each node's feature id

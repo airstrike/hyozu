@@ -20,7 +20,7 @@ pub use area::{Area, IntoAreas, area, areas};
 pub use band::{Band, BandOrientation, band};
 pub use bar::{Bars, IntoBars, bar, bars};
 pub use boxplot::{BoxPlot, boxplot, entry, entry_from_data};
-pub use bubble_map::{BubbleMap, MapPoint, bubble_map, map_point};
+pub use bubble_map::{MapPoint, bubble_map, map_point};
 pub use choropleth::{
     Choropleth, ChoroplethEntry, IntoChoropleth, choropleth, choropleth_entry, choropleth_entry_available,
 };
@@ -73,7 +73,6 @@ pub enum Mark {
     Band(Band),
     Bars(Bars),
     BoxPlot(BoxPlot),
-    BubbleMap(BubbleMap),
     Choropleth(Choropleth),
     Line(Line),
     Pie(Pie),
@@ -194,18 +193,6 @@ impl Mark {
                     value: None,
                 })
                 .collect(),
-            Mark::BubbleMap(bm) => bm
-                .points
-                .iter()
-                .filter_map(|p| {
-                    p.name.as_ref().map(|name| LegendEntry {
-                        name: name.clone(),
-                        color: p.color,
-                        swatch: LegendSwatch::Square,
-                        value: None,
-                    })
-                })
-                .collect(),
             // Rule, Band, Tick, Gauge, Heatmap, Choropleth don't contribute to legend
             Mark::Rule(_)
             | Mark::Band(_)
@@ -310,12 +297,6 @@ impl From<Treemap> for Mark {
 impl From<Violin> for Mark {
     fn from(violin: Violin) -> Self {
         Mark::Violin(violin)
-    }
-}
-
-impl From<BubbleMap> for Mark {
-    fn from(bm: BubbleMap) -> Self {
-        Mark::BubbleMap(bm)
     }
 }
 

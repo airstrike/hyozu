@@ -19,8 +19,9 @@
 //! - [`rollup::choropleth`] — build [`crate::Data`] from [`tatami::rollup::Tree`]
 //!   with [`crate::Mark::Choropleth`]; caller supplies a `MemberRef → feature_id`
 //!   closure.
-//! - [`rollup::bubble_map`] — overlay [`crate::Mark::BubbleMap`] on a rollup;
-//!   caller supplies a `MemberRef → Option<(lat, lon)>` closure.
+//! - [`rollup::bubble_map`] — overlay a geo-projected [`crate::Mark::Xy`]
+//!   (built via [`crate::bubble_map`]) on a rollup; caller supplies a
+//!   `MemberRef → Option<(lat, lon)>` closure.
 //! - [`pivot::table`] — render [`tatami::pivot::Result`] as an iced
 //!   `column`/`row` table with per-cell `Cell::Valid::format` honored.
 //!

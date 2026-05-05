@@ -22,7 +22,6 @@ fn mark_value_format(mark: &Mark) -> Option<crate::scale::Format<f64>> {
         | Mark::Band(_)
         | Mark::Bars(_)
         | Mark::BoxPlot(_)
-        | Mark::BubbleMap(_)
         | Mark::Choropleth(_)
         | Mark::Line(_)
         | Mark::Gauge(_)
@@ -105,7 +104,7 @@ where
     /// Chart-level geographic configuration sourced from
     /// [`crate::Data`]'s `geo_data` / `geo_scope` / `geo_projection` /
     /// `geo_basemap` fields. Threaded into `PlotArea::layout` for
-    /// geo-aware marks (Choropleth, BubbleMap).
+    /// geo-aware marks (Choropleth, geo-Xy).
     geo_config: crate::chart::plot_area::GeoConfig,
 }
 

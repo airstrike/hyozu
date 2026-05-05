@@ -9,10 +9,10 @@ pub use area::Area;
 pub use axis::{Axis, Orientation};
 pub use datum::{Datum, IntoDatums};
 pub use mark::{
-    Band, Bars, BoxPlot, BubbleMap, Choropleth, ChoroplethEntry, Gauge, Heatmap, LegendEntry, Line, MapPoint, Mark,
-    Pie, Rule, Treemap, Violin, Waterfall, Xy, areas, band, bar, bars, boxplot, bubble_map, choropleth,
-    choropleth_entry, entry, entry_from_data, gauge, heatmap, line, map_point, pie, rule, treemap, violin,
-    violin_entry, violin_from_data, waterfall, xy,
+    Band, Bars, BoxPlot, Choropleth, ChoroplethEntry, Gauge, Heatmap, LegendEntry, Line, MapPoint, Mark, Pie, Rule,
+    Treemap, Violin, Waterfall, Xy, areas, band, bar, bars, boxplot, bubble_map, choropleth, choropleth_entry, entry,
+    entry_from_data, gauge, heatmap, line, map_point, pie, rule, treemap, violin, violin_entry, violin_from_data,
+    waterfall, xy,
 };
 
 /// Trait for types that can be converted into chart Data.
@@ -94,7 +94,7 @@ pub struct Data {
     pub(crate) animate: bool,
 
     /// Optional geographic feature collection consumed by geo-aware marks
-    /// (Choropleth, BubbleMap). `None` leaves geo marks empty.
+    /// (Choropleth, geo-Xy). `None` leaves geo marks empty.
     pub(crate) geo_data: Option<std::sync::Arc<crate::geo::GeoData>>,
 
     /// Region of the world the geo-aware marks render. Defaults to
@@ -146,7 +146,6 @@ fn axes_for_mark(mark: &Mark) -> (Option<Axis>, Option<Axis>) {
         }
         Mark::BoxPlot(bp) => (Some(bp.x_axis()), Some(bp.y_axis())),
         Mark::Line(_) => (Some(Line::x_axis()), Some(Line::y_axis())),
-        Mark::BubbleMap(_) => (BubbleMap::x_axis(), BubbleMap::y_axis()),
         Mark::Choropleth(_) => (Choropleth::x_axis(), Choropleth::y_axis()),
         Mark::Pie(_) => (Pie::x_axis(), Pie::y_axis()),
         Mark::Gauge(_) => (Gauge::x_axis(), Gauge::y_axis()),
@@ -261,12 +260,6 @@ impl IntoData for Treemap {
 }
 
 impl IntoData for Violin {
-    fn into_data(self) -> Data {
-        Mark::from(self).into_data()
-    }
-}
-
-impl IntoData for BubbleMap {
     fn into_data(self) -> Data {
         Mark::from(self).into_data()
     }
@@ -504,8 +497,8 @@ impl Data {
         self
     }
 
-    /// Sets the geographic feature collection consumed by Choropleth /
-    /// BubbleMap marks. Replaces the per-mark `.geo(...)` builder that
+    /// Sets the geographic feature collection consumed by Choropleth and
+    /// geo-Xy marks. Replaces the per-mark `.geo(...)` builder that
     /// existed before geo configuration moved to chart-level.
     pub fn geo_data(mut self, geo: impl Into<std::sync::Arc<crate::geo::GeoData>>) -> Self {
         self.geo_data = Some(geo.into());
@@ -526,8 +519,8 @@ impl Data {
         self
     }
 
-    /// Toggles the geographic basemap (land polygons drawn under bubbles
-    /// in BubbleMap). Default `true`.
+    /// Toggles the geographic basemap (land polygons drawn beneath geo
+    /// marks). Default `true`.
     pub fn geo_basemap(mut self, show: bool) -> Self {
         self.geo_basemap = show;
         self

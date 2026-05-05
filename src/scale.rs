@@ -62,7 +62,7 @@ pub struct Scale<T> {
     pub format: Option<Format<T>>,
     /// How the numeric domain maps onto the screen position. Honored by
     /// numeric-axis marks (Bar, Line, Area, Xy); ignored by Pie,
-    /// Choropleth, TileGrid, BubbleMap.
+    /// Choropleth, TileGrid.
     pub transform: Transform,
 }
 

@@ -439,9 +439,6 @@ fn animation_tick_mut(tree: &mut Tree) -> Option<&mut animation::Tick> {
     if tag == tree::Tag::of::<plot_area::xy::State>() {
         return Some(&mut tree.state.downcast_mut::<plot_area::xy::State>().tick);
     }
-    if tag == tree::Tag::of::<plot_area::bubble_map::State>() {
-        return Some(&mut tree.state.downcast_mut::<plot_area::bubble_map::State>().tick);
-    }
     if tag == tree::Tag::of::<plot_area::heatmap::State>() {
         return Some(&mut tree.state.downcast_mut::<plot_area::heatmap::State>().tick);
     }
@@ -555,32 +552,6 @@ fn replant_xy(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
     if animate {
         new_state.previous_pixel_points = old_state.pixel_points.clone();
         new_state.previous_resolved_sizes = old_state.resolved_sizes.clone();
-        new_state.tick.pending_start = true;
-    } else {
-        new_state.tick.pending_start = false;
-    }
-}
-
-/// Snapshots a BubbleMap mark's pre-rebuild `bubble_circles` onto the
-/// post-rebuild tree's `previous_bubble_circles` and arms the next
-/// redraw to interpolate from there. Independent of the animation
-/// gate, the projection cache (`prev_size`, `prev_scope`, `prev_geo`,
-/// `projected_polygons`, `feature_bboxes`) is always replanted onto
-/// the new tree so the next layout's dirty-check stays a hit and the
-/// projection isn't re-flattened on a data change. The caller is
-/// responsible for confirming both nodes carry a `bubble_map::State`.
-fn replant_bubble_map(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
-    let old_state = old_mark.state.downcast_ref::<plot_area::bubble_map::State>();
-    let new_state = new_mark.state.downcast_mut::<plot_area::bubble_map::State>();
-
-    new_state.prev_size = old_state.prev_size;
-    new_state.prev_scope = old_state.prev_scope;
-    new_state.prev_geo = old_state.prev_geo.clone();
-    new_state.projected_polygons = old_state.projected_polygons.clone();
-    new_state.feature_bboxes = old_state.feature_bboxes.clone();
-
-    if animate {
-        new_state.previous_bubble_circles = old_state.bubble_circles.clone();
         new_state.tick.pending_start = true;
     } else {
         new_state.tick.pending_start = false;
@@ -710,7 +681,6 @@ fn replant_mark_animations(old_children: &[Tree], new_children: &mut [Tree], ani
     let line_tag = tree::Tag::of::<plot_area::line::State>();
     let area_tag = tree::Tag::of::<plot_area::area::State>();
     let xy_tag = tree::Tag::of::<plot_area::xy::State>();
-    let bubble_map_tag = tree::Tag::of::<plot_area::bubble_map::State>();
     let heatmap_tag = tree::Tag::of::<plot_area::heatmap::State>();
     let treemap_tag = tree::Tag::of::<plot_area::treemap::State>();
     let choropleth_tag = tree::Tag::of::<plot_area::choropleth::State>();
@@ -754,10 +724,6 @@ fn replant_mark_animations(old_children: &[Tree], new_children: &mut [Tree], ani
         }
         if old_mark.tag == xy_tag && new_mark.tag == xy_tag {
             replant_xy(old_mark, new_mark, animate);
-            continue;
-        }
-        if old_mark.tag == bubble_map_tag && new_mark.tag == bubble_map_tag {
-            replant_bubble_map(old_mark, new_mark, animate);
             continue;
         }
         if old_mark.tag == heatmap_tag && new_mark.tag == heatmap_tag {
@@ -1181,7 +1147,6 @@ where
                     let pie_tag = tree::Tag::of::<plot_area::pie::State>();
                     let treemap_tag = tree::Tag::of::<plot_area::treemap::State>();
                     let choropleth_tag = tree::Tag::of::<plot_area::choropleth::State>();
-                    let bubble_map_tag = tree::Tag::of::<plot_area::bubble_map::State>();
 
                     // First pass: hit-test labels (labels win when overlapping shapes)
                     for (mark_idx, mark_tree) in plot_area_tree.children.iter().enumerate() {
@@ -1289,26 +1254,6 @@ where
                                     }
                                 }
                                 if inside && let Some(id) = geo_plane.filtered_ids.get(feat_idx) {
-                                    shell.publish(on_action(Action::Clicked(crate::target::Target::Feature {
-                                        mark: mark_idx,
-                                        id: id.clone(),
-                                    })));
-                                    return;
-                                }
-                            }
-                        } else if mark_tree.tag == bubble_map_tag {
-                            let bm_state = mark_tree.state.downcast_ref::<plot_area::bubble_map::State>();
-
-                            // Walk bubble circles; hit = point inside disc.
-                            // Reads the matching `point_ids[i]` — bubbles
-                            // without an id stay click-silent (backward-
-                            // compatible with callers that never set one).
-                            for (i, (center, radius)) in bm_state.bubble_circles.iter().enumerate() {
-                                let dx = local.x - center.x;
-                                let dy = local.y - center.y;
-                                if dx * dx + dy * dy <= radius * radius
-                                    && let Some(Some(id)) = bm_state.point_ids.get(i)
-                                {
                                     shell.publish(on_action(Action::Clicked(crate::target::Target::Feature {
                                         mark: mark_idx,
                                         id: id.clone(),

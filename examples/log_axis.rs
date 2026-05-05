@@ -1,8 +1,8 @@
 //! Demonstrates `Data::y_log()` — toggle a log-scaled y-axis on a line chart.
 //!
 //! Numeric-axis marks (Bar, Line, Area, Xy) honor `Scale::transform`.
-//! Pie, Choropleth, TileGrid, and BubbleMap don't — pie is angle-based,
-//! the others are categorical or geographic.
+//! Pie, Choropleth, and TileGrid don't — pie is angle-based, the others
+//! are categorical or geographic.
 //!
 //! With log on, the y-axis ticks land on decade boundaries (1, 10, 100,
 //! 1000, 10000) and the line's exponential growth becomes a straight

@@ -10,7 +10,6 @@ pub mod area;
 pub mod band;
 pub mod bars;
 pub mod boxplot;
-pub mod bubble_map;
 pub mod choropleth;
 pub mod gauge;
 pub mod geo;
@@ -27,7 +26,6 @@ pub mod xy;
 pub use band::Band;
 pub use bars::Bars;
 pub use boxplot::BoxPlot;
-pub use bubble_map::BubbleMap;
 pub use choropleth::Choropleth;
 pub use gauge::Gauge;
 pub use heatmap::Heatmap;
@@ -53,8 +51,8 @@ pub struct Plane {
     pub obstacles: Vec<Rectangle>,
     /// Transform applied to the y domain when mapping to pixels.
     /// Honored by numeric-axis marks via [`Plane::to_pixel`]; categorical
-    /// or geographic marks (Pie, Treemap, BubbleMap, Choropleth) bypass
-    /// the plane entirely and aren't affected.
+    /// or geographic marks (Pie, Treemap, Choropleth) bypass the plane
+    /// entirely and aren't affected.
     pub y_transform: crate::scale::Transform,
 }
 
@@ -84,7 +82,7 @@ pub struct PlotInsets {
 /// [`crate::Data::geo_data`] / [`crate::Data::geo_scope`] /
 /// [`crate::Data::geo_projection`] / [`crate::Data::geo_basemap`] and
 /// threaded into the per-mark layout pass for geo-aware marks
-/// (Choropleth, BubbleMap). Cartesian marks ignore it.
+/// (Choropleth, geo-Xy). Cartesian marks ignore it.
 #[derive(Debug, Clone)]
 pub struct GeoConfig {
     pub geo: Option<std::sync::Arc<crate::geo::GeoData>>,
@@ -145,7 +143,6 @@ where
     Line(Line<'a, Message, Renderer>),
     Bars(Bars<'a, Message, Renderer>),
     BoxPlot(BoxPlot<'a, Message, Renderer>),
-    BubbleMap(BubbleMap<'a, Message, Renderer>),
     Choropleth(Choropleth<'a, Message, Renderer>),
     Pie(Pie<'a, Message, Renderer>),
     Gauge(Gauge<'a, Message, Renderer>),
@@ -175,7 +172,7 @@ pub struct State {
     /// The coordinate plane for the secondary (top/right) axes, if any.
     pub secondary_plane: Option<Plane>,
     /// Chart-level geo projection cache, populated whenever a
-    /// geo-aware mark (Choropleth, BubbleMap) is present. `None` for
+    /// geo-aware mark (Choropleth, geo-Xy) is present. `None` for
     /// purely cartesian charts. Survives [`crate::chart::Chart`]'s
     /// wholesale `diff` rebuild via the sibling `replant_geo_plane`
     /// helper, which moves the cache from the old tree onto the new
@@ -257,9 +254,6 @@ where
             if let Series::Xy(xy) = series {
                 xy.set_animate(animate);
             }
-            if let Series::BubbleMap(bm) = series {
-                bm.set_animate(animate);
-            }
             if let Series::Heatmap(hm) = series {
                 hm.set_animate(animate);
             }
@@ -291,7 +285,6 @@ where
             crate::Mark::Line(line) => Series::Line(Line::new(line)),
             crate::Mark::Bars(bars) => Series::Bars(Bars::new(bars)),
             crate::Mark::BoxPlot(bp) => Series::BoxPlot(BoxPlot::new(bp)),
-            crate::Mark::BubbleMap(bm) => Series::BubbleMap(BubbleMap::new(bm)),
             crate::Mark::Choropleth(c) => Series::Choropleth(Choropleth::new(c)),
             crate::Mark::Pie(pie) => Series::Pie(Pie::new(pie)),
             crate::Mark::Gauge(gauge) => Series::Gauge(Gauge::new(gauge)),
@@ -323,7 +316,6 @@ where
                 Series::Treemap(tm) => tm.data.items.len(),
                 Series::Waterfall(_) => 3,
                 Series::Heatmap(_) => 0,
-                Series::BubbleMap(bm) => bm.data.points.len(),
                 Series::Choropleth(_) => 0,
                 Series::Violin(v) => v.data.entries.len(),
                 Series::Tick(_) => 0,
@@ -345,7 +337,6 @@ where
                 Series::Line(line) => line.state(),
                 Series::Bars(bars) => bars.state(),
                 Series::BoxPlot(bp) => bp.state(),
-                Series::BubbleMap(bm) => bm.state(),
                 Series::Choropleth(c) => c.state(),
                 Series::Pie(pie) => pie.state(),
                 Series::Gauge(gauge) => gauge.state(),
@@ -385,7 +376,6 @@ where
                     Series::Line(_) => tree::Tag::of::<line::State>(),
                     Series::Bars(_) => tree::Tag::of::<bars::State>(),
                     Series::BoxPlot(_) => tree::Tag::of::<boxplot::State>(),
-                    Series::BubbleMap(_) => tree::Tag::of::<bubble_map::State>(),
                     Series::Choropleth(_) => tree::Tag::of::<choropleth::State>(),
                     Series::Pie(_) => tree::Tag::of::<pie::State>(),
                     Series::Gauge(_) => tree::Tag::of::<gauge::State>(),
@@ -405,7 +395,6 @@ where
                         Series::Line(line) => line.state(),
                         Series::Bars(bars) => bars.state(),
                         Series::BoxPlot(bp) => bp.state(),
-                        Series::BubbleMap(bm) => bm.state(),
                         Series::Choropleth(c) => c.state(),
                         Series::Pie(pie) => pie.state(),
                         Series::Gauge(gauge) => gauge.state(),
@@ -424,7 +413,6 @@ where
                         Series::Line(line) => line.diff(tree),
                         Series::Bars(bars) => bars.diff(tree),
                         Series::BoxPlot(bp) => bp.diff(tree),
-                        Series::BubbleMap(bm) => bm.diff(tree),
                         Series::Choropleth(c) => c.diff(tree),
                         Series::Pie(pie) => pie.diff(tree),
                         Series::Gauge(gauge) => gauge.diff(tree),
@@ -444,7 +432,6 @@ where
                 Series::Line(line) => line.state(),
                 Series::Bars(bars) => bars.state(),
                 Series::BoxPlot(bp) => bp.state(),
-                Series::BubbleMap(bm) => bm.state(),
                 Series::Choropleth(c) => c.state(),
                 Series::Pie(pie) => pie.state(),
                 Series::Gauge(gauge) => gauge.state(),
@@ -687,11 +674,7 @@ where
                     }
                 },
                 // Non-Cartesian marks don't use Cartesian bounds
-                Series::Pie(_)
-                | Series::Gauge(_)
-                | Series::Treemap(_)
-                | Series::BubbleMap(_)
-                | Series::Choropleth(_) => {}
+                Series::Pie(_) | Series::Gauge(_) | Series::Treemap(_) | Series::Choropleth(_) => {}
             }
         }
 
@@ -872,7 +855,7 @@ where
         // the full plot-area limits-max with origin (0, 0); per-mark
         // renderers translate by `layout_bounds.{x, y}` when drawing.
         let needs_geo_plane = self.series.iter().any(|s| {
-            matches!(s, Series::Choropleth(_) | Series::BubbleMap(_))
+            matches!(s, Series::Choropleth(_))
                 || matches!(s, Series::Xy(xy) if xy.data.coord_kind == crate::mark::xy::CoordKind::Geo)
         });
         if needs_geo_plane {
@@ -917,9 +900,6 @@ where
                 }
                 Series::BoxPlot(bp) => {
                     bp.layout(series_tree, renderer, limits, use_plane);
-                }
-                Series::BubbleMap(bm) => {
-                    bm.layout(series_tree, renderer, limits, use_plane, geo_config);
                 }
                 Series::Choropleth(c) => {
                     c.layout(series_tree, renderer, limits, use_plane, geo_plane_ref);
@@ -1381,20 +1361,6 @@ where
                         palette,
                     );
                     color_offset += bp.data.entries.len();
-                }
-                Series::BubbleMap(bm) => {
-                    bm.draw(
-                        series_tree,
-                        renderer,
-                        design,
-                        style,
-                        layout,
-                        cursor,
-                        viewport,
-                        color_offset,
-                        palette,
-                    );
-                    color_offset += bm.data.points.len();
                 }
                 Series::Choropleth(c) => {
                     c.draw(

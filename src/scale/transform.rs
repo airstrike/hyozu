@@ -4,8 +4,8 @@
 /// screen.
 ///
 /// Affects numeric-axis marks (Bar, Line, Area, Xy). Pie, Choropleth,
-/// TileGrid, and BubbleMap don't read this — pie is angle-based, the
-/// others are categorical or geographic.
+/// and TileGrid don't read this — pie is angle-based, the others are
+/// categorical or geographic.
 #[non_exhaustive]
 #[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Transform {
