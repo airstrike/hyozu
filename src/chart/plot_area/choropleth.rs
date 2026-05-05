@@ -412,11 +412,13 @@ where
                 a: 1.0,
             }
         } else {
-            // Light mode: soft blue
+            // Light mode: near-white with a faint cool tint, so the map
+            // sits cleanly against neutral page chrome and a host
+            // container can match this fill to blend the chart edge.
             crate::core::Color {
-                r: 0.83,
-                g: 0.90,
-                b: 0.95,
+                r: 0.95,
+                g: 0.97,
+                b: 0.98,
                 a: 1.0,
             }
         };

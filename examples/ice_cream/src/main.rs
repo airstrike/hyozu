@@ -13,7 +13,12 @@ use std::sync::Arc;
 use hyozu::ProjectionKind;
 use hyozu::geo::{self, GeoData, MapScope};
 use iced::widget::{center, column, container, text};
-use iced::{Element, Fill, Font, Task, Theme, color};
+use iced::{Background, Color, Element, Fill, Font, Task, Theme, color};
+
+/// Hex of the choropleth's light-mode ocean fill (`#F2F7FA`). Reused by
+/// the container behind the chart so the chart edge blends seamlessly
+/// into the surrounding page chrome.
+const OCEAN_FILL: Color = color!(0xF2F7FA);
 
 const STATES_URL: &str = "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_1_states_provinces.geojson";
 
@@ -21,6 +26,11 @@ const STATES_URL: &str = "https://raw.githubusercontent.com/nvkelso/natural-eart
 
 /// Per-state monthly ice-cream sales per capita, in USD. Postal codes
 /// match Natural Earth's `postal` property on US states.
+///
+/// The northern plains and intermountain west — MT, WY, ND, SD, NE,
+/// KS, ID — are intentionally absent so the choropleth's
+/// `FeatureState::Missing` rendering (theme `missing_fill`) is visible
+/// alongside the gradient-filled states.
 fn sales_per_capita() -> Vec<(&'static str, f64)> {
     vec![
         ("CA", 24.10),
@@ -57,20 +67,13 @@ fn sales_per_capita() -> Vec<(&'static str, f64)> {
         ("NV", 20.40),
         ("AR", 13.50),
         ("MS", 14.80),
-        ("KS", 11.90),
         ("NM", 16.60),
-        ("NE", 11.40),
-        ("ID", 13.20),
         ("WV", 10.80),
         ("NH", 15.70),
         ("ME", 14.30),
-        ("MT", 12.40),
         ("RI", 16.70),
         ("DE", 17.40),
-        ("SD", 11.20),
-        ("ND", 10.90),
         ("VT", 14.10),
-        ("WY", 12.60),
     ]
 }
 
@@ -236,10 +239,15 @@ impl App {
             .height(Fill)
             .on_action(Message::ChartAction);
 
-        column![header(), container(chart).padding(8).width(Fill).height(Fill)]
+        let chart_box = container(chart)
+            .padding(8)
             .width(Fill)
             .height(Fill)
-            .into()
+            .style(|_theme: &Theme| container::Style {
+                background: Some(Background::Color(OCEAN_FILL)),
+                ..container::Style::default()
+            });
+        column![header(), chart_box].width(Fill).height(Fill).into()
     }
 
     /// Builds the Data: choropleth (states colored by sales/cap) +
