@@ -1,12 +1,20 @@
+use std::time::Duration;
+
 use super::Plane;
 use crate::core::Size;
+use crate::core::animation::{Animation, Easing};
 use crate::core::layout::{Limits, Node};
+use crate::core::time::Instant;
 use crate::core::widget::{Tree, tree};
 use crate::mark::pie::label::{FormatKind, Position, Show};
 use crate::widget::canvas::{Frame, Path, Stroke, Text as CanvasText};
 
 use crate::core::text;
 use crate::widget::renderer::geometry;
+
+/// Mount-animation duration for pie/donut slices, matching Recharts'
+/// 1500ms default.
+const ANIMATION_DURATION: Duration = Duration::from_millis(1500);
 
 /// Number of line segments per full circle for arc approximation.
 const ARC_SEGMENTS_PER_TAU: usize = 64;
@@ -32,6 +40,16 @@ pub struct State {
     pub inner_radius: f32,
     /// Pixel rectangles for each label
     pub label_rects: Vec<Option<crate::core::Rectangle>>,
+    /// Mount sweep progress (`0.0` collapsed, `1.0` fully drawn).
+    pub progress: Animation<f32>,
+    /// Set when the animation needs to be kicked off on the next
+    /// `RedrawRequested`. The animation primitive needs an `Instant` that
+    /// only the redraw event carries; the parent chart consumes this flag
+    /// in its `update` and calls [`Animation::go_mut`].
+    pub pending_start: bool,
+    /// Most recent `RedrawRequested` time, captured in the chart widget's
+    /// `update` so `draw` can interpolate the animation.
+    pub now: Option<Instant>,
 }
 
 impl State {
@@ -111,6 +129,11 @@ where
                 outer_radius: 0.0,
                 inner_radius: 0.0,
                 label_rects: Vec::new(),
+                progress: Animation::new(0.0_f32)
+                    .easing(Easing::EaseOut)
+                    .duration(ANIMATION_DURATION),
+                pending_start: true,
+                now: None,
             }),
             children: Vec::new(),
         }
@@ -255,11 +278,21 @@ where
         let has_gap = self.data.gap > 0.0 && self.data.slices.len() > 1;
         let gap_offset = self.data.gap / 2.0;
 
+        // Mount sweep: each slice's angular delta scales 0 → full and the
+        // next slice's start chains off the previous slice's *animated*
+        // end, so the visible arc grows clockwise from `-π/2` like
+        // Recharts.
+        let progress = match state.now {
+            Some(now) => state.progress.interpolate_with(|v| v, now),
+            None => 0.0,
+        };
+        let animating = progress < 1.0 - f32::EPSILON;
+        let mut anim_cursor = state.slice_angles.first().map(|(s, _)| *s).unwrap_or(0.0);
+
         let mut slice_colors = Vec::with_capacity(self.data.slices.len());
 
         // Draw each slice
-        for (i, ((start_angle, end_angle), slice)) in state.slice_angles.iter().zip(self.data.slices.iter()).enumerate()
-        {
+        for (i, ((orig_start, orig_end), slice)) in state.slice_angles.iter().zip(self.data.slices.iter()).enumerate() {
             let color = if let Some(slice_color) = slice.color {
                 slice_color.resolve(background, text_pair, &seed, None)
             } else {
@@ -269,8 +302,10 @@ where
             };
             slice_colors.push(color);
 
-            let start = *start_angle;
-            let end = *end_angle;
+            let delta = (*orig_end - *orig_start) * progress;
+            let start = anim_cursor;
+            let end = anim_cursor + delta;
+            anim_cursor = end;
 
             let (scx, scy) = if has_gap {
                 let mid = (start + end) / 2.0;
@@ -306,8 +341,10 @@ where
             frame.fill(&path, color);
         }
 
-        // Slice labels
-        if total > 0.0 {
+        // Slice labels — suppressed mid-sweep so they don't pop in
+        // before the slices they annotate are visible (matches
+        // Recharts' `showLabels={!isAnimating}`).
+        if total > 0.0 && !animating {
             for (i, ((start_angle, end_angle), slice)) in
                 state.slice_angles.iter().zip(self.data.slices.iter()).enumerate()
             {
@@ -404,10 +441,14 @@ where
             }
         }
 
-        // Selection highlights
+        // Selection highlights — only painted once the mount sweep
+        // completes so they aren't drawn at angles the slices haven't
+        // grown into yet.
         let mut selection_frame = Frame::new(renderer, layout_bounds.size());
 
-        if let Some(target) = selection {
+        if let Some(target) = selection
+            && !animating
+        {
             use crate::target::Target;
 
             let inner_color = crate::core::Color::from_rgba(0.0, 0.0, 0.0, 0.5);

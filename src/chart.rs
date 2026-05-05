@@ -10,8 +10,11 @@ pub mod value;
 
 use std::borrow::Cow;
 
+use crate::core::time::Instant;
 use crate::core::widget::{Tree, tree};
-use crate::core::{Element, Event, Layout, Length, Padding, Point, Rectangle, Size, Widget, layout, mouse};
+use crate::core::{
+    Element, Event, Layout, Length, Padding, Point, Rectangle, Shell, Size, Widget, layout, mouse, window,
+};
 use crate::data::tooltip::TooltipEntry;
 use crate::widget::Renderer;
 
@@ -405,6 +408,36 @@ fn find_pie_hover(local: Point, plot_area_tree: &Tree) -> Option<hover::State> {
     None
 }
 
+/// Walks the plot-area subtree, kicks pending pie sweeps off on the
+/// first redraw that carries an `Instant`, and asks for another redraw
+/// while any pie is still animating. Mirrors the
+/// `pending_start` / `is_animating` lifecycle used by sweeten's
+/// `Transition` widget.
+fn advance_pie_animations<Message>(tree: &mut Tree, now: Instant, shell: &mut Shell<'_, Message>) {
+    let pie_tag = tree::Tag::of::<plot_area::pie::State>();
+    let Some(scene_tree) = tree.children.get_mut(0) else {
+        return;
+    };
+    let Some(plot_area_tree) = scene_tree.children.get_mut(6) else {
+        return;
+    };
+
+    for mark_tree in plot_area_tree.children.iter_mut() {
+        if mark_tree.tag != pie_tag {
+            continue;
+        }
+        let pie_state = mark_tree.state.downcast_mut::<plot_area::pie::State>();
+        pie_state.now = Some(now);
+        if pie_state.pending_start {
+            pie_state.progress.go_mut(1.0, now);
+            pie_state.pending_start = false;
+            shell.request_redraw();
+        } else if pie_state.progress.is_animating(now) {
+            shell.request_redraw();
+        }
+    }
+}
+
 /// Lays out a donut center overlay child as a sibling of the scene
 /// node, returning a `Node` already positioned in chart-local coords.
 ///
@@ -589,6 +622,12 @@ where
         shell: &mut crate::core::Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
+        // Animation tick — independent of capture / tooltip / action so
+        // pie sweeps run regardless of which widgets are listening.
+        if let Event::Window(window::Event::RedrawRequested(now)) = event {
+            advance_pie_animations(tree, *now, shell);
+        }
+
         if shell.is_event_captured() {
             return;
         }
