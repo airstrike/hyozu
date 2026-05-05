@@ -736,7 +736,17 @@ where
         let size = limits.max();
 
         // Use axis bounds if provided, otherwise compute from data
-        let (x_min, x_max, y_min, y_max) = axis_bounds.unwrap_or_else(|| self.compute_data_bounds());
+        let (x_min, x_max, mut y_min, y_max) = axis_bounds.unwrap_or_else(|| self.compute_data_bounds());
+
+        // Log axes can't show non-positive values; the transform clamps
+        // to `f64::EPSILON` for mapping anyway, which spans ~16 decades
+        // of empty space below any real data. When the user passes
+        // `y_axis_bounds(0.0, …)` on a log-scaled chart, clamp y_min to
+        // a sane positive default derived from y_max so the rendered
+        // range matches what tick generation produces.
+        if matches!(y_transform, crate::scale::Transform::Log) && y_min <= 0.0 && y_max > 0.0 {
+            y_min = y_max / 1e4;
+        }
 
         // Compute obstacle rectangles from axis layout
         // These are relative to plot area origin (0,0 is top-left of plot)
@@ -805,7 +815,10 @@ where
         // primary bounds so marks still render.
         let has_secondary_marks = self.axis_side.contains(&AxisSide::Secondary);
         let secondary_plane = if has_secondary_marks {
-            let (sx_min, sx_max, sy_min, sy_max) = secondary_axis_bounds.unwrap_or((x_min, x_max, y_min, y_max));
+            let (sx_min, sx_max, mut sy_min, sy_max) = secondary_axis_bounds.unwrap_or((x_min, x_max, y_min, y_max));
+            if matches!(secondary_y_transform, crate::scale::Transform::Log) && sy_min <= 0.0 && sy_max > 0.0 {
+                sy_min = sy_max / 1e4;
+            }
             Some(Plane {
                 x_min: sx_min,
                 x_max: sx_max,

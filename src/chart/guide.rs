@@ -120,23 +120,35 @@ fn log_nice_bounds(min: f64, max: f64) -> (f64, f64) {
 
 /// Generate log-axis ticks at integer powers of 10 within `[min, max]`.
 ///
-/// Non-positive bounds are clamped to `f64::EPSILON` to match
-/// [`crate::scale::Transform::Log`]'s mapping. The result always contains
-/// at least one entry — when the domain spans less than a full decade
-/// the function falls back to `[min, max]` so the axis still renders
-/// labelled endpoints.
+/// Non-positive lower bounds are nonsensical on a log axis (the
+/// transform clamps to `f64::EPSILON ≈ 2.22e-16`); falling back to that
+/// for tick generation would emit a tick for every decade down to
+/// `10^-15`, most rounding to `"0"` in the label formatter and sitting
+/// in pure empty space. Instead, when `min ≤ 0` we use `hi / 10^4` as
+/// the effective lower so the axis shows roughly four decades of ticks.
+///
+/// For any range, we cap the tick count at ~8 by striding decades when
+/// the total span exceeds that — wider domains stay readable instead of
+/// crowding labels.
+///
+/// The result always contains at least one entry — when the domain
+/// spans less than a full decade the function falls back to
+/// `[min, max]` so the axis still renders labelled endpoints.
 fn log_ticks(min: f64, max: f64) -> Vec<f64> {
     if !(min.is_finite() && max.is_finite()) || min >= max {
         return vec![min];
     }
-    let lo = min.max(f64::EPSILON);
     let hi = max.max(f64::EPSILON);
+    let lo = if min > 0.0 { min } else { hi / 1e4 };
     let lo_exp = lo.log10().ceil() as i32;
     let hi_exp = hi.log10().floor() as i32;
     if lo_exp > hi_exp {
         return vec![min, max];
     }
-    (lo_exp..=hi_exp).map(|k| 10_f64.powi(k)).collect()
+    const MAX_TICKS: usize = 8;
+    let count = (hi_exp - lo_exp + 1) as usize;
+    let stride = count.div_ceil(MAX_TICKS).max(1);
+    (lo_exp..=hi_exp).step_by(stride).map(|k| 10_f64.powi(k)).collect()
 }
 
 /// Compute a nice step size for a given range and target tick count

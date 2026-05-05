@@ -76,6 +76,6 @@ fn build_data(log_y: bool) -> Data {
     // the same curve becomes a straight diagonal across four decades.
     let exponential: Vec<f64> = (0..=40).map(|i| 10_f64.powf(i as f64 / 10.0)).collect();
     let mark = line(exponential).with_name("Growth");
-    let d = data(mark).title("Exponential growth");
+    let d = data(mark).title("Exponential growth").y_axis_bounds(0.0, 10000.0);
     if log_y { d.y_log() } else { d }
 }
