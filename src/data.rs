@@ -87,6 +87,11 @@ pub struct Data {
     /// that external state (e.g. newly loaded fonts) changed and the chart
     /// widget should re-measure all text.
     pub(crate) generation: u64,
+
+    /// Whether mark renderers that support entrance/transition animation
+    /// (currently pie/donut) should animate. Default `true`, matching
+    /// Recharts' `isAnimationActive`. Toggle via [`Data::animate`].
+    pub(crate) animate: bool,
 }
 
 impl Default for Data {
@@ -106,6 +111,7 @@ impl Default for Data {
             color_scale: crate::scale::Scale::default(),
             x_scale: crate::scale::XScale::default(),
             generation: 0,
+            animate: true,
         }
     }
 }
@@ -462,6 +468,19 @@ impl Data {
     /// present for symmetry with the numeric channels.
     pub fn color_format(mut self, f: impl Fn(&crate::core::Color) -> String + Send + Sync + 'static) -> Self {
         self.color_scale = self.color_scale.format(f);
+        self
+    }
+
+    /// Toggles entrance/transition animation. `true` (the default)
+    /// matches Recharts' `isAnimationActive`: pie/donut slices sweep in
+    /// on mount and interpolate between layouts on data change. `false`
+    /// snaps marks straight to their final geometry — useful for tests,
+    /// screenshots, or contexts where animation is distracting.
+    ///
+    /// Only mark types that have an animator wired up honor this; the
+    /// rest render unchanged.
+    pub fn animate(mut self, animate: bool) -> Self {
+        self.animate = animate;
         self
     }
 

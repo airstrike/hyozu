@@ -41,6 +41,10 @@ where
     design: Option<Cow<'a, Design>>,
     style: StyleFn<'a>,
     kind: Kind<'a, Message, Theme>,
+    /// Mirror of [`Data::animate`] captured at construction. Gates the
+    /// animation tick and the data-change snapshot so opted-out charts
+    /// don't keep requesting redraws.
+    animate: bool,
     _theme: std::marker::PhantomData<Theme>,
 }
 
@@ -114,6 +118,7 @@ where
             design: None,
             style: Box::new(default),
             kind: Kind::Generic,
+            animate: data.animate,
             _theme: std::marker::PhantomData,
         }
     }
@@ -154,6 +159,7 @@ where
             design: Some(design.into_design()),
             style: self.style,
             kind: self.kind,
+            animate: self.animate,
             _theme: std::marker::PhantomData,
         }
     }
@@ -413,7 +419,7 @@ fn find_pie_hover(local: Point, plot_area_tree: &Tree) -> Option<hover::State> {
 /// so the next redraw interpolates from those previous deltas to the
 /// new ones. A no-op when either tree lacks a plot area or the pie
 /// position changed (different mark types at the same index).
-fn replant_pie_angles(old_children: &[Tree], new_children: &mut [Tree]) {
+fn replant_pie_angles(old_children: &[Tree], new_children: &mut [Tree], animate: bool) {
     let pie_tag = tree::Tag::of::<plot_area::pie::State>();
     let Some(old_scene) = old_children.first() else {
         return;
@@ -434,8 +440,12 @@ fn replant_pie_angles(old_children: &[Tree], new_children: &mut [Tree]) {
         }
         let old_state = old_mark.state.downcast_ref::<plot_area::pie::State>();
         let new_state = new_mark.state.downcast_mut::<plot_area::pie::State>();
-        new_state.previous_angles = old_state.slice_angles.clone();
-        new_state.pending_start = true;
+        if animate {
+            new_state.previous_angles = old_state.slice_angles.clone();
+            new_state.pending_start = true;
+        } else {
+            new_state.pending_start = false;
+        }
     }
 }
 
@@ -444,7 +454,10 @@ fn replant_pie_angles(old_children: &[Tree], new_children: &mut [Tree]) {
 /// while any pie is still animating. Mirrors the
 /// `pending_start` / `is_animating` lifecycle used by sweeten's
 /// `Transition` widget.
-fn advance_pie_animations<Message>(tree: &mut Tree, now: Instant, shell: &mut Shell<'_, Message>) {
+fn advance_pie_animations<Message>(tree: &mut Tree, now: Instant, animate: bool, shell: &mut Shell<'_, Message>) {
+    if !animate {
+        return;
+    }
     let pie_tag = tree::Tag::of::<plot_area::pie::State>();
     let Some(scene_tree) = tree.children.get_mut(0) else {
         return;
@@ -567,7 +580,7 @@ where
             // stays at its plot-area child index across rebuilds, since
             // the data's mark vector drives both layouts.
             let old_children = std::mem::replace(&mut tree.children, self.children());
-            replant_pie_angles(&old_children, &mut tree.children);
+            replant_pie_angles(&old_children, &mut tree.children, self.animate);
             return;
         }
         self.scene.diff(&mut tree.children[0]);
@@ -663,7 +676,7 @@ where
         // Animation tick — independent of capture / tooltip / action so
         // pie sweeps run regardless of which widgets are listening.
         if let Event::Window(window::Event::RedrawRequested(now)) = event {
-            advance_pie_animations(tree, *now, shell);
+            advance_pie_animations(tree, *now, self.animate, shell);
         }
 
         if shell.is_event_captured() {

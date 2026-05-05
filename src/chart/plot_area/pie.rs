@@ -86,6 +86,10 @@ where
     /// `Value`. `None` means walk to
     /// [`crate::scale::default_f64_format`].
     pub(crate) value_format: Option<crate::scale::Format<f64>>,
+    /// Whether the mount/data-change sweep runs. Mirrors
+    /// [`crate::Data::animate`] (the chart-level toggle); `false` makes
+    /// `draw` snap to the laid-out geometry.
+    pub(crate) animate: bool,
     _marker: std::marker::PhantomData<(Message, Renderer)>,
 }
 
@@ -100,6 +104,7 @@ where
             data,
             hole: 0.0,
             value_format: None,
+            animate: true,
             _marker: std::marker::PhantomData,
         }
     }
@@ -110,6 +115,12 @@ where
     /// slot empty (label closures use their own format).
     pub(crate) fn set_value_format(&mut self, value_format: Option<crate::scale::Format<f64>>) {
         self.value_format = value_format;
+    }
+
+    /// Sets whether the mount/data-change sweep should run. Wired by
+    /// [`super::PlotArea::with_animate`] from [`crate::Data::animate`].
+    pub(crate) fn set_animate(&mut self, animate: bool) {
+        self.animate = animate;
     }
 
     /// Formats a slice label, walking the value-format chain when the
@@ -289,10 +300,16 @@ where
         // previous-layout delta to its current delta, and the next
         // slice's start chains off the previous slice's *animated* end.
         // With no previous (fresh mount) prev_delta is `0`, so the
-        // expression collapses to the 0 → full mount sweep.
-        let progress = match state.now {
-            Some(now) => state.progress.interpolate_with(|v| v, now),
-            None => 0.0,
+        // expression collapses to the 0 → full mount sweep. When
+        // animation is opted out, progress pins to `1.0` and the
+        // expression renders the laid-out geometry directly.
+        let progress = if !self.animate {
+            1.0
+        } else {
+            match state.now {
+                Some(now) => state.progress.interpolate_with(|v| v, now),
+                None => 0.0,
+            }
         };
         let animating = progress < 1.0 - f32::EPSILON;
         let mut anim_cursor = state.slice_angles.first().map(|(s, _)| *s).unwrap_or(0.0);

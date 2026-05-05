@@ -201,6 +201,18 @@ where
         self
     }
 
+    /// Threads the chart-level [`crate::Data::animate`] flag into every
+    /// mark renderer that has an animator. Mark types without one
+    /// silently ignore the call.
+    pub fn with_animate(mut self, animate: bool) -> Self {
+        for series in self.series.iter_mut() {
+            if let Series::Pie(pie) = series {
+                pie.set_animate(animate);
+            }
+        }
+        self
+    }
+
     fn to_series(mark: &'a crate::Mark) -> Series<'a, Message, Renderer> {
         match mark {
             crate::Mark::Area(a) => Series::Area(area::Area::new(a)),

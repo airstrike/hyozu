@@ -335,7 +335,7 @@ where
                 } else {
                     PlotArea::new(primary_marks).with_secondary(secondary_marks)
                 };
-                area.with_value_formats(chain)
+                area.with_value_formats(chain).with_animate(data.animate)
             },
             palette: palette_strategy,
             user_palette: data.palette.clone(),
