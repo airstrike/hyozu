@@ -31,9 +31,11 @@
 
 use std::sync::Arc;
 
+pub mod color;
 pub mod transform;
 pub mod x;
 
+pub use color::ColorScale;
 pub use transform::Transform;
 pub use x::XScale;
 

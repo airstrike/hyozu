@@ -21,6 +21,16 @@ pub enum Transform {
     /// drops them; hyozu clamps and renders so the chart still produces
     /// output instead of disappearing on a single bad sample.
     Log,
+    /// Square-root: position is `sqrt(value - min) / sqrt(max - min)`.
+    ///
+    /// Useful for skewed distributions where Log over-emphasizes the low
+    /// end. Below-domain values (`value < min`) clamp to `0.0` — i.e. they
+    /// land at the bottom of the visual range. This is asymmetric with
+    /// [`Self::Log`], which clamps non-positive inputs up to
+    /// [`f64::EPSILON`]; Sqrt's domain is `[min, ∞)` and a value beneath
+    /// that floor is treated as the floor itself rather than an
+    /// arbitrarily small positive number.
+    Sqrt,
 }
 
 impl Transform {
@@ -48,6 +58,15 @@ impl Transform {
                     0.5
                 } else {
                     (v.log10() - lo.log10()) / (hi.log10() - lo.log10())
+                }
+            }
+            Self::Sqrt => {
+                let v = (value - min).max(0.0);
+                let span = (max - min).max(0.0);
+                if span <= f64::EPSILON {
+                    0.0
+                } else {
+                    v.sqrt() / span.sqrt()
                 }
             }
         }
@@ -123,5 +142,36 @@ mod tests {
     #[test]
     fn log_min_equals_max_returns_half() {
         assert!(close(Transform::Log.map_to_unit(7.0, 5.0, 5.0), 0.5));
+    }
+
+    #[test]
+    fn sqrt_maps_quarter_to_half() {
+        // sqrt(0.25) / sqrt(1.0) = 0.5
+        assert!(close(Transform::Sqrt.map_to_unit(0.25, 0.0, 1.0), 0.5));
+    }
+
+    #[test]
+    fn sqrt_maps_in_range() {
+        let t = Transform::Sqrt;
+        // sqrt(0)/sqrt(100) = 0; sqrt(100)/sqrt(100) = 1
+        assert!(close(t.map_to_unit(0.0, 0.0, 100.0), 0.0));
+        assert!(close(t.map_to_unit(100.0, 0.0, 100.0), 1.0));
+        // sqrt(64)/sqrt(100) = 0.8
+        assert!(close(t.map_to_unit(64.0, 0.0, 100.0), 0.8));
+    }
+
+    #[test]
+    fn sqrt_min_equals_max_returns_zero() {
+        // Asymmetric with Linear's 0.5 — Sqrt's degenerate domain has no
+        // meaningful midpoint when the span is zero, and the Sqrt body
+        // returns 0.0 to keep below-domain semantics consistent.
+        assert!(close(Transform::Sqrt.map_to_unit(7.0, 5.0, 5.0), 0.0));
+    }
+
+    #[test]
+    fn sqrt_clamps_below_domain_to_zero() {
+        let t = Transform::Sqrt;
+        assert!(close(t.map_to_unit(-10.0, 0.0, 100.0), 0.0));
+        assert!(close(t.map_to_unit(-1.0, 5.0, 25.0), 0.0));
     }
 }
