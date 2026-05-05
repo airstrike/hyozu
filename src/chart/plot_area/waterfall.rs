@@ -263,15 +263,34 @@ where
 
         let mut bar_colors: Vec<crate::core::Color> = Vec::with_capacity(state.rects.len());
 
-        // Sweep: each bar's rectangle interpolates from its previous-layout
-        // rect (or from a baseline-anchored zero-extent rect on fresh mount)
-        // toward its current rect; the connector y-coordinates track the
-        // animated bar edges so connector lines emerge in lockstep with the
-        // bars they span. With `animate = false` progress pins to `1.0` and
-        // the animated geometry equals `state.rects` / `state.tops` exactly,
-        // reproducing today's geometry.
+        // Sweep with a left-to-right "running-total walk": each bar gets
+        // its own local progress fraction so the staircase reveals itself
+        // from the opening Total to the closing one, instead of every bar
+        // animating in lockstep. Without staggering, tall Total bars
+        // dominate the visible motion and the small Increase/Decrease bars
+        // appear to flash in instantly. Each bar's window covers
+        // `BAR_DURATION_FRACTION` of the total duration; consecutive bars
+        // are offset by `step` so bar 0 spans `[0, BAR_DURATION_FRACTION]`
+        // and the last bar finishes at `1.0`. `animating` stays gated on
+        // the global progress so labels/connectors only appear once every
+        // bar has settled. With `animate = false` progress pins to `1.0`
+        // and the animated geometry equals `state.rects` / `state.tops`
+        // exactly, reproducing today's geometry.
+        const BAR_DURATION_FRACTION: f32 = 0.5;
         let progress = if !self.animate { 1.0 } else { state.tick.progress() };
         let animating = progress < 1.0 - f32::EPSILON;
+        let n = state.rects.len();
+        let step = if n > 1 {
+            (1.0 - BAR_DURATION_FRACTION) / (n - 1) as f32
+        } else {
+            0.0
+        };
+        let local_progress = |i: usize| -> f32 {
+            if !self.animate || n <= 1 {
+                return progress;
+            }
+            ((progress - i as f32 * step) / BAR_DURATION_FRACTION).clamp(0.0, 1.0)
+        };
         let animated_rects: Vec<Rectangle> = state
             .rects
             .iter()
@@ -279,7 +298,7 @@ where
             .map(|(i, cur)| {
                 let prev = state.previous_rects.get(i).copied();
                 let kind = state.kinds.get(i).copied().unwrap_or(EntryKind::Increase);
-                animate_rect(*cur, prev, progress, kind)
+                animate_rect(*cur, prev, local_progress(i), kind)
             })
             .collect();
         let animated_tops: Vec<f32> = state
@@ -289,7 +308,13 @@ where
             .enumerate()
             .map(|(i, (&cur_top, &cur_rect))| {
                 let kind = state.kinds.get(i).copied().unwrap_or(EntryKind::Increase);
-                animate_top(cur_top, cur_rect, state.previous_tops.get(i).copied(), progress, kind)
+                animate_top(
+                    cur_top,
+                    cur_rect,
+                    state.previous_tops.get(i).copied(),
+                    local_progress(i),
+                    kind,
+                )
             })
             .collect();
 
