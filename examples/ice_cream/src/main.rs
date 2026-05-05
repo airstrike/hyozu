@@ -2,12 +2,19 @@
 //!
 //! Demo of two geo-aware marks rendered against the same `geo::Plane`:
 //!
-//! 1. A US-states **choropleth** colored by per-capita monthly sales.
-//! 2. An **`Xy::on_geo()` bubble overlay** for shop locations, sized by
-//!    revenue and projected through the same Mercator plane.
+//! 1. A US-states **choropleth** colored by each state's monthly
+//!    revenue (sum of its flagship stores).
+//! 2. An **`Xy::on_geo()` bubble overlay** for individual shop
+//!    locations, sized by revenue and projected through the same
+//!    Mercator plane.
+//!
+//! States without a flagship store render in the theme's missing-fill
+//! gray, so the chart's coverage and the bubble overlay describe the
+//! same business footprint.
 //!
 //! Run with: `cargo run --package ice_cream`
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use hyozu::ProjectionKind;
@@ -15,11 +22,6 @@ use hyozu::data::legend;
 use hyozu::geo::{self, GeoData, MapScope};
 use iced::widget::{center, column, container, text};
 use iced::{Color, Element, Fill, Font, Task, Theme, color};
-
-/// Hex of the choropleth's light-mode ocean fill (`#F2F7FA`). Used as
-/// the chart widget's own background so its frame blends with the
-/// rendered ocean rather than fighting it with a white border.
-const OCEAN_FILL: Color = color!(0xF2F7FA);
 
 /// Warm contrast color for the bubble overlay so flagship stores read
 /// against the blue choropleth instead of disappearing into it.
@@ -29,63 +31,25 @@ const STATES_URL: &str = "https://raw.githubusercontent.com/nvkelso/natural-eart
 
 // ── Data ───────────────────────────────────────────────────────────
 
-/// Monthly state-level revenue in thousands of USD. Postal codes match
-/// Natural Earth's `postal` property on US states.
-///
-/// The northern plains and intermountain west — MT, WY, ND, SD, NE,
-/// KS, ID — are intentionally absent so the choropleth's
-/// `FeatureState::Missing` rendering (theme `missing_fill`) is visible
-/// alongside the gradient-filled states.
-fn state_revenue() -> Vec<(&'static str, f64)> {
-    vec![
-        ("CA", 1450.0),
-        ("TX", 1280.0),
-        ("FL", 1100.0),
-        ("NY", 950.0),
-        ("PA", 720.0),
-        ("IL", 680.0),
-        ("OH", 590.0),
-        ("GA", 580.0),
-        ("NC", 510.0),
-        ("MI", 470.0),
-        ("NJ", 460.0),
-        ("VA", 440.0),
-        ("WA", 430.0),
-        ("AZ", 420.0),
-        ("MA", 400.0),
-        ("TN", 380.0),
-        ("IN", 370.0),
-        ("MO", 350.0),
-        ("MD", 340.0),
-        ("WI", 330.0),
-        ("CO", 320.0),
-        ("MN", 310.0),
-        ("SC", 300.0),
-        ("AL", 290.0),
-        ("LA", 280.0),
-        ("KY", 270.0),
-        ("OR", 260.0),
-        ("OK", 250.0),
-        ("CT", 240.0),
-        ("UT", 230.0),
-        ("IA", 220.0),
-        ("NV", 210.0),
-        ("AR", 200.0),
-        ("MS", 190.0),
-        ("NM", 180.0),
-        ("WV", 100.0),
-        ("NH", 95.0),
-        ("ME", 85.0),
-        ("RI", 80.0),
-        ("DE", 75.0),
-        ("VT", 60.0),
-    ]
+/// Sums each shop's revenue into its state, so the choropleth covers
+/// only states with a flagship store and matches the bubble overlay's
+/// footprint (states without shops fall through to `FeatureState::
+/// Missing` and render in the theme's missing-fill gray).
+fn state_revenue(shops: &[Shop]) -> Vec<(&'static str, f64)> {
+    let mut by_state: HashMap<&'static str, f64> = HashMap::new();
+    for shop in shops {
+        *by_state.entry(shop.state).or_insert(0.0) += shop.revenue_k;
+    }
+    by_state.into_iter().collect()
 }
 
-/// A flagship store in a major metro. `value` is monthly revenue in
-/// thousands of USD; the bubble overlay sizes markers by it.
+/// A flagship store in a major metro. `revenue_k` is July 2025 revenue
+/// in thousands of USD; the bubble overlay sizes markers by it, and
+/// the choropleth aggregates these by `state` per
+/// [`state_revenue`].
 struct Shop {
     label: &'static str,
+    state: &'static str,
     lon: f64,
     lat: f64,
     revenue_k: f64,
@@ -95,90 +59,105 @@ fn shops() -> Vec<Shop> {
     vec![
         Shop {
             label: "Los Angeles",
+            state: "CA",
             lon: -118.24,
             lat: 34.05,
             revenue_k: 412.0,
         },
         Shop {
             label: "New York",
+            state: "NY",
             lon: -74.00,
             lat: 40.71,
             revenue_k: 388.0,
         },
         Shop {
             label: "Chicago",
+            state: "IL",
             lon: -87.63,
             lat: 41.88,
             revenue_k: 245.0,
         },
         Shop {
             label: "Houston",
+            state: "TX",
             lon: -95.37,
             lat: 29.76,
             revenue_k: 268.0,
         },
         Shop {
             label: "Phoenix",
+            state: "AZ",
             lon: -112.07,
             lat: 33.45,
             revenue_k: 198.0,
         },
         Shop {
             label: "Miami",
+            state: "FL",
             lon: -80.19,
             lat: 25.76,
             revenue_k: 312.0,
         },
         Shop {
             label: "Dallas",
+            state: "TX",
             lon: -96.80,
             lat: 32.78,
             revenue_k: 224.0,
         },
         Shop {
             label: "Seattle",
+            state: "WA",
             lon: -122.33,
             lat: 47.61,
             revenue_k: 176.0,
         },
         Shop {
             label: "Denver",
+            state: "CO",
             lon: -104.99,
             lat: 39.74,
             revenue_k: 152.0,
         },
         Shop {
             label: "Atlanta",
+            state: "GA",
             lon: -84.39,
             lat: 33.75,
             revenue_k: 209.0,
         },
         Shop {
             label: "Boston",
+            state: "MA",
             lon: -71.06,
             lat: 42.36,
             revenue_k: 187.0,
         },
         Shop {
             label: "Las Vegas",
+            state: "NV",
             lon: -115.14,
             lat: 36.17,
             revenue_k: 234.0,
         },
         Shop {
             label: "Minneapolis",
+            state: "MN",
             lon: -93.27,
             lat: 44.98,
             revenue_k: 121.0,
         },
         Shop {
             label: "Nashville",
+            state: "TN",
             lon: -86.78,
             lat: 36.16,
             revenue_k: 143.0,
         },
         Shop {
             label: "New Orleans",
+            state: "LA",
             lon: -90.07,
             lat: 29.95,
             revenue_k: 168.0,
@@ -243,8 +222,8 @@ impl App {
         let chart = hyozu::chart(&self.chart_data)
             .height(Fill)
             .on_action(Message::ChartAction)
-            .style(|_design| hyozu::chart::Style {
-                background: Some(OCEAN_FILL),
+            .style(|design| hyozu::chart::Style {
+                background: Some(design.ocean_fill()),
                 ..hyozu::chart::Style::default()
             });
         column![header(), container(chart).padding(8).width(Fill).height(Fill)]
@@ -261,13 +240,17 @@ impl App {
             return hyozu::Data::default();
         };
 
-        let choropleth = hyozu::choropleth(state_revenue())
+        let shops_data = shops();
+        let choropleth = hyozu::choropleth(state_revenue(&shops_data))
             .scheme(hyozu::palette::Scheme::Blues)
-            .legend_title("Monthly revenue ($K)")
-            .legend(legend::Config::overlay(legend::Anchor::BottomRight).orientation(legend::Orientation::Vertical))
+            .legend_title("July 2025 revenue ($K)")
+            .legend(
+                legend::Config::overlay(legend::Anchor::BottomRight)
+                    .orientation(legend::Orientation::Vertical)
+                    .value_format(|v| format!("${v:.0}K")),
+            )
             .linear();
 
-        let shops_data = shops();
         let shop_points: Vec<hyozu::MapPoint> = shops_data
             .iter()
             .map(|s| hyozu::map_point(s.lat, s.lon, s.revenue_k as f32).label(s.label))
@@ -299,7 +282,7 @@ impl App {
         ])
         .geo(states.clone(), MapScope::UnitedStates, ProjectionKind::Mercator)
         .value_format(|v| format!("${v:.0}K"))
-        .title("Sundae Drive — Monthly Performance, CONUS")
+        .title("Sundae Drive — July 2025, CONUS")
     }
 }
 
