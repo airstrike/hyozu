@@ -163,7 +163,10 @@ pub(super) fn compute_value_range(entries: &[crate::mark::choropleth::Choropleth
 /// discretized through [`crate::palette::Resolved::resolve`] with a
 /// fixed sample count and the wrapper colors are then resolved against
 /// the same seed.
-fn palette_to_continuous_stops(
+///
+/// Shared with [`super::heatmap`] (Heatmap's layout step needs the same
+/// Palette → Vec<core::Color> bridge to feed `sample_gradient`).
+pub(super) fn palette_to_continuous_stops(
     palette: &crate::palette::Palette,
     seed: &crate::palette::Seed,
 ) -> Vec<crate::core::Color> {

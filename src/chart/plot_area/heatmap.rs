@@ -1,16 +1,13 @@
 use super::Plane;
+use super::choropleth::palette_to_continuous_stops;
 use crate::animation;
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
 use crate::core::{Color, Point, Rectangle, Size};
 use crate::data::Datum;
+use crate::palette::Palette;
 use crate::widget::canvas::{Frame, Path, Text as CanvasText};
 use crate::widget::renderer::geometry;
-
-/// Interpolate between color stops in OKLch at parameter `t` in 0..1.
-fn interpolate_stops(stops: &[Color], t: f32) -> Color {
-    crate::palette::sample_gradient(stops, t)
-}
 
 /// Per-channel linear interpolation between `prev` and `cur`. At
 /// `progress == 0.0` returns `prev`; at `1.0` returns `cur` exactly.
@@ -20,6 +17,69 @@ fn lerp_color(prev: Color, cur: Color, progress: f32) -> Color {
         g: prev.g + (cur.g - prev.g) * progress,
         b: prev.b + (cur.b - prev.b) * progress,
         a: prev.a + (cur.a - prev.a) * progress,
+    }
+}
+
+/// Default palette for a Heatmap when the user hasn't set one. A
+/// sequential blue gradient matching the historical
+/// [`crate::mark::heatmap::sequential_stops`] preset that the renderer
+/// previously baked inline.
+fn default_heatmap_palette() -> Palette {
+    Palette::Gradient(
+        crate::mark::heatmap::sequential_stops()
+            .into_iter()
+            .map(Into::into)
+            .collect(),
+    )
+}
+
+/// Compute the data-derived `(min, max)` value range for a Heatmap.
+/// Skips non-finite values so the gradient sampler never sees NaN or Inf.
+/// When all values are filtered out or the range collapses, returns a
+/// `(min, min + 1.0)` degenerate range so downstream mapping has a
+/// non-zero span.
+fn compute_value_range(values: &[f64]) -> (f64, f64) {
+    let mut lo = f64::INFINITY;
+    let mut hi = f64::NEG_INFINITY;
+    for &v in values {
+        if v.is_finite() {
+            if v < lo {
+                lo = v;
+            }
+            if v > hi {
+                hi = v;
+            }
+        }
+    }
+    if lo.is_infinite() {
+        lo = 0.0;
+    }
+    if hi.is_infinite() {
+        hi = 1.0;
+    }
+    if (hi - lo).abs() < f64::EPSILON {
+        hi = lo + 1.0;
+    }
+    (lo, hi)
+}
+
+/// Neutral seed used to bridge `Palette` into raw stops at layout time,
+/// where no theme is available. Heatmap's preset palettes
+/// (`sequential_stops`, `divergent_stops`, `warm_stops`) and any
+/// user-supplied `Vec<core::Color>` route through `Color::Fixed`, which
+/// ignores the seed entirely — so the neutral values matter only for the
+/// rare case where a caller hands a `ColorScale` whose palette references
+/// theme seed slots (`Color::Success` etc.). Those colors then resolve to
+/// these neutral defaults rather than the active theme's hues; this is
+/// the documented trade-off for keeping cell color resolution in layout.
+fn neutral_seed() -> crate::palette::Seed {
+    crate::palette::Seed {
+        primary: Color::from_rgb(0.5, 0.5, 0.5),
+        secondary: Color::from_rgb(0.5, 0.5, 0.5),
+        success: Color::from_rgb(0.3, 0.7, 0.3),
+        warning: Color::from_rgb(0.9, 0.7, 0.2),
+        danger: Color::from_rgb(0.8, 0.3, 0.3),
+        background: Color::from_rgb(1.0, 1.0, 1.0),
     }
 }
 
@@ -112,7 +172,14 @@ where
         let cell_width = plane.bounds.width / cols as f32;
         let cell_height = plane.bounds.height / rows as f32;
 
-        let (v_min, v_max) = self.data.compute_range();
+        let (v_min, v_max) = self
+            .data
+            .color
+            .resolved_domain(|| compute_value_range(&self.data.values));
+        let palette = self.data.color.resolved_palette(default_heatmap_palette);
+        let seed = neutral_seed();
+        let stops: Vec<Color> = palette_to_continuous_stops(&palette, &seed);
+        let transform = self.data.color.transform;
 
         for row in 0..rows {
             for col in 0..cols {
@@ -126,12 +193,8 @@ where
                 });
 
                 let value = self.data.get(row, col);
-                let t = if v_max > v_min {
-                    ((value - v_min) / (v_max - v_min)).clamp(0.0, 1.0) as f32
-                } else {
-                    0.5_f32
-                };
-                state.cell_colors.push(interpolate_stops(&self.data.color_stops, t));
+                let t = transform.map_to_unit(value, v_min, v_max).clamp(0.0, 1.0) as f32;
+                state.cell_colors.push(crate::palette::sample_gradient(&stops, t));
             }
         }
 

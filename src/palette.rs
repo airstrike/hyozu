@@ -227,7 +227,7 @@ pub fn count_color_slots(marks: &[Mark]) -> usize {
             Mark::Gauge(_) => 1,
             Mark::Treemap(tm) => tm.items.len(),
             Mark::Waterfall(_) => 3,
-            Mark::Heatmap(_) => 0, // heatmap uses its own color_stops
+            Mark::Heatmap(_) => 0, // heatmap uses its own ColorScale
             Mark::BubbleMap(bm) => bm.points.len(),
             Mark::Choropleth(_) => 0,
             Mark::Violin(v) => v.entries.len(),

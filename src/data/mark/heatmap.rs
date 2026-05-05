@@ -1,10 +1,16 @@
 use std::sync::Arc;
 
 use crate::data::axis::{self, Axis, Kind, Orientation, Placement};
+use crate::palette::Palette;
+use crate::scale::ColorScale;
 
 /// A heatmap mark: a 2D grid where each cell is colored by value.
 ///
-/// Both axes are categorical. Values are stored in row-major order.
+/// Both axes are categorical. Values are stored in row-major order. Color
+/// mapping is described by [`ColorScale<f64>`] (domain + palette +
+/// transform + format); the default linear transform with no explicit
+/// domain or palette preserves the historical heatmap behavior of
+/// auto-inferring the value range and using a sequential blue gradient.
 #[derive(Clone)]
 pub struct Heatmap {
     pub(crate) values: Vec<f64>,
@@ -14,9 +20,11 @@ pub struct Heatmap {
     pub(crate) col_names: Vec<String>,
     pub(crate) show_labels: bool,
     pub(crate) label_format: Arc<dyn Fn(f64) -> String + Send + Sync>,
-    pub(crate) value_range: Option<(f64, f64)>,
-    /// Gradient stops for color mapping. If empty, auto-selected based on data.
-    pub(crate) color_stops: Vec<crate::core::Color>,
+    /// Color encoding scale: domain (auto-inferred when `None`), palette
+    /// (mark default when `None`), transform, and optional legend tick
+    /// formatter. Default is [`ColorScale::default()`] — linear, no
+    /// domain override, falling back to [`sequential_stops`].
+    pub(crate) color: ColorScale<f64>,
 }
 
 impl std::fmt::Debug for Heatmap {
@@ -29,8 +37,7 @@ impl std::fmt::Debug for Heatmap {
             .field("col_names", &self.col_names)
             .field("show_labels", &self.show_labels)
             .field("label_format", &"<function>")
-            .field("value_range", &self.value_range)
-            .field("color_stops", &self.color_stops)
+            .field("color", &self.color)
             .finish()
     }
 }
@@ -70,6 +77,14 @@ pub fn warm_stops() -> Vec<IcedColor> {
     ]
 }
 
+/// Wrap a `Vec<core::Color>` of raw RGB stops as a [`Palette::Gradient`].
+/// Used by the preset builders (`.divergent()`, `.warm()`, etc.) to feed
+/// the new `ColorScale.palette` slot without leaking the wrapper-color
+/// type into the public surface.
+fn palette_from_stops(stops: Vec<IcedColor>) -> Palette {
+    Palette::Gradient(stops.into_iter().map(Into::into).collect())
+}
+
 /// Creates a heatmap from row-major values with given dimensions.
 ///
 /// Defaults to a sequential (blue) color scale. Use `.divergent()` for data
@@ -83,8 +98,7 @@ pub fn heatmap(values: impl Into<Vec<f64>>, rows: usize, cols: usize) -> Heatmap
         col_names: Vec::new(),
         show_labels: false,
         label_format: Arc::new(|v| format!("{v:.1}")),
-        value_range: None,
-        color_stops: sequential_stops(),
+        color: ColorScale::default(),
     }
 }
 
@@ -129,43 +143,66 @@ impl Heatmap {
         self
     }
 
-    /// Set explicit value range for color mapping.
-    /// If not set, the range is auto-computed from data.
-    pub fn value_range(mut self, min: f64, max: f64) -> Self {
-        self.value_range = Some((min, max));
-        self
-    }
-
     /// Use a divergent color scale (blue → white → red).
     /// Best for data centered on zero like correlation matrices.
     pub fn divergent(mut self) -> Self {
-        self.color_stops = divergent_stops();
+        self.color.palette = Some(palette_from_stops(divergent_stops()));
         self
     }
 
     /// Use a sequential color scale (light → dark blue).
     /// Best for magnitudes, counts, and non-negative data. This is the default.
     pub fn sequential(mut self) -> Self {
-        self.color_stops = sequential_stops();
+        self.color.palette = Some(palette_from_stops(sequential_stops()));
         self
     }
 
     /// Use a warm sequential color scale (cream → amber → brown).
     pub fn warm(mut self) -> Self {
-        self.color_stops = warm_stops();
+        self.color.palette = Some(palette_from_stops(warm_stops()));
         self
     }
 
     /// Use custom gradient stops for color mapping.
     /// Colors are interpolated in OKLch space between stops.
     pub fn color_stops(mut self, stops: impl Into<Vec<crate::core::Color>>) -> Self {
-        self.color_stops = stops.into();
+        self.color.palette = Some(palette_from_stops(stops.into()));
         self
     }
 
-    /// Returns the current color stops.
-    pub fn get_color_stops(&self) -> &[crate::core::Color] {
-        &self.color_stops
+    /// Replaces the entire color encoding scale (domain + palette +
+    /// transform + format) in one go. Use this when you've built a
+    /// [`ColorScale<f64>`] elsewhere (e.g. shared across marks).
+    pub fn color_scale(mut self, scale: ColorScale<f64>) -> Self {
+        self.color = scale;
+        self
+    }
+
+    /// Sets the explicit value domain `(lo, hi)` on the color scale.
+    /// Overrides the data-derived auto-inferred range at draw time.
+    pub fn color_domain(mut self, lo: f64, hi: f64) -> Self {
+        self.color.domain = Some((lo, hi));
+        self
+    }
+
+    /// Switches the color scale's transform to linear (the default).
+    pub fn linear(mut self) -> Self {
+        self.color.transform = crate::scale::Transform::Linear;
+        self
+    }
+
+    /// Switches the color scale's transform to square root. Useful for
+    /// moderately skewed numeric distributions.
+    pub fn sqrt(mut self) -> Self {
+        self.color.transform = crate::scale::Transform::Sqrt;
+        self
+    }
+
+    /// Switches the color scale's transform to logarithmic. Useful for
+    /// data spanning orders of magnitude.
+    pub fn log(mut self) -> Self {
+        self.color.transform = crate::scale::Transform::Log;
+        self
     }
 
     /// Get value at (row, col).
@@ -181,29 +218,6 @@ impl Heatmap {
     /// Number of columns.
     pub fn cols(&self) -> usize {
         self.cols
-    }
-
-    /// Compute value range (auto from data or explicit).
-    pub fn compute_range(&self) -> (f64, f64) {
-        if let Some(range) = self.value_range {
-            return range;
-        }
-        let mut min = f64::INFINITY;
-        let mut max = f64::NEG_INFINITY;
-        for &v in &self.values {
-            min = min.min(v);
-            max = max.max(v);
-        }
-        if min.is_infinite() {
-            min = 0.0;
-        }
-        if max.is_infinite() {
-            max = 1.0;
-        }
-        if (max - min).abs() < f64::EPSILON {
-            max = min + 1.0;
-        }
-        (min, max)
     }
 
     /// Default X axis for heatmap (categorical, bottom).
