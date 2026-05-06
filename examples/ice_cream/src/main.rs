@@ -304,9 +304,7 @@ impl App {
 
 fn header() -> Element<'static, Message> {
     let title = text("Sundae Drive").size(22);
-    let subtitle = text("Monthly performance · contiguous US")
-        .size(13)
-        .color(color!(0x666666));
+    let subtitle = text("Revenue · United States").size(13).color(color!(0x666666));
     container(column![title, subtitle].spacing(2)).padding([10, 16]).into()
 }
 
