@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use crate::data::legend;
 use crate::feature;
@@ -58,7 +59,7 @@ impl ChoroplethEntry {
 /// Each entry maps a feature ID (matching a GeoJSON property) to a
 /// numeric value; the value is then mapped onto a color scale described
 /// by [`ColorScale<f64>`] (domain + palette + transform + format).
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Choropleth {
     pub(crate) entries: Vec<ChoroplethEntry>,
     /// Color encoding scale: domain (auto-inferred when `None`), palette
@@ -82,57 +83,102 @@ pub struct Choropleth {
     /// whose entry is absent from the data. When `None`, the renderer
     /// falls back to the theme's [`Design::missing_fill`](crate::Design::missing_fill).
     pub(crate) missing_color: Option<crate::core::Color>,
-    /// Optional hover-time appearance overrides. `None` leaves the
-    /// renderer to pick theme-derived defaults; setting any field
-    /// on [`HoverStyle`] overrides just that field.
-    pub(crate) hover_style: Option<HoverStyle>,
+    /// Optional hover-time appearance closure. `None` leaves the
+    /// renderer to use [`HoverStyle::from_theme`]; otherwise the
+    /// closure runs at draw time with the resolved [`Design`] and
+    /// [`palette::Resolved`] in scope, mirroring iced's
+    /// `style: impl Fn(&Theme, Status) -> Style` widget pattern.
+    ///
+    /// [`Design`]: crate::design::Design
+    /// [`palette::Resolved`]: crate::palette::Resolved
+    pub(crate) hover_style: Option<HoverStyleFn>,
 }
 
-/// Hover-time appearance overrides for a [`Choropleth`].
+/// Theme-aware hover style closure. Receives the chart's
+/// [`Design`](crate::design::Design) (for theme-derived colors)
+/// and the resolved [`palette`](crate::palette::Resolved) (for
+/// indexed gradient stops on choropleth, palette colors on other
+/// marks). Returns the [`HoverStyle`] used for the next hover
+/// frame.
+pub type HoverStyleFn = Arc<dyn Fn(&dyn crate::design::Design, &crate::palette::Resolved) -> HoverStyle + Send + Sync>;
+
+/// Hover-time appearance for a [`Choropleth`].
 ///
-/// Built via [`HoverStyle::default`] + chained setters — only
-/// the fields you set override the theme-derived defaults.
-/// Mirrors the struct-shaped style pattern iced uses for
-/// `container::Style`, `button::Style`, etc.
+/// Mirrors iced's struct-shaped style pattern (`container::Style`
+/// etc.). Build via [`HoverStyle::from_theme`] for the
+/// theme-derived defaults and override fields with struct-update
+/// syntax — the closure form receives [`Design`] and
+/// [`palette::Resolved`] so theme changes propagate automatically.
 ///
 /// ```ignore
+/// use hyozu::Color;
 /// use hyozu::mark::choropleth::HoverStyle;
 ///
-/// // Just the stroke color, default width:
-/// HoverStyle::default().outline_color(Color::WHITE)
+/// // Default look — no hover_style call needed.
+/// hyozu::choropleth(entries)
 ///
-/// // Heavier stroke + custom color:
-/// HoverStyle::default().outline_width(2.5).outline_color(Color::WHITE)
+/// // Theme-derived, override one field:
+/// hyozu::choropleth(entries)
+///     .hover_style(|design, _palette| HoverStyle {
+///         outline_width: 2.0,
+///         ..HoverStyle::from_theme(design)
+///     })
+///
+/// // Fully fixed style:
+/// hyozu::choropleth(entries)
+///     .hover_style(|_, _| HoverStyle {
+///         outline_color: Color::WHITE,
+///         outline_width: 2.5,
+///     })
 /// ```
-#[derive(Debug, Clone, Copy, Default)]
+///
+/// [`Design`]: crate::design::Design
+/// [`palette::Resolved`]: crate::palette::Resolved
+#[derive(Debug, Clone, Copy)]
 pub struct HoverStyle {
-    pub(crate) outline_width: Option<f32>,
-    pub(crate) outline_color: Option<crate::core::Color>,
+    /// Stroke color drawn around the hovered feature's projected
+    /// polygons. Already-resolved RGBA — typically pulled from the
+    /// design via [`HoverStyle::from_theme`] or set fixed
+    /// (`Color::WHITE` etc.).
+    pub outline_color: crate::core::Color,
+    /// Stroke width in pixels.
+    pub outline_width: f32,
+}
+
+impl std::fmt::Debug for Choropleth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Choropleth")
+            .field("entries", &self.entries)
+            .field("color", &self.color)
+            .field("legend_title", &self.legend_title)
+            .field("legend", &self.legend)
+            .field("selected", &self.selected)
+            .field("missing_color", &self.missing_color)
+            .field("hover_style", &self.hover_style.as_ref().map(|_| "<closure>"))
+            .finish()
+    }
 }
 
 impl HoverStyle {
-    /// Width (px) of the outline stroked around the hovered
-    /// feature's projected polygons. Defaults to 1.25 when unset.
-    pub fn outline_width(mut self, width: f32) -> Self {
-        self.outline_width = Some(width);
-        self
-    }
-
-    /// Color of the outline stroke. Defaults to the theme's text
-    /// color at 0.85 alpha when unset.
-    pub fn outline_color(mut self, color: impl Into<crate::core::Color>) -> Self {
-        self.outline_color = Some(color.into());
-        self
-    }
-
-    /// Returns the configured outline width, if set.
-    pub fn outline_width_value(&self) -> Option<f32> {
-        self.outline_width
-    }
-
-    /// Returns the configured outline color, if set.
-    pub fn outline_color_value(&self) -> Option<crate::core::Color> {
-        self.outline_color
+    /// Returns the theme-derived defaults: theme text color at
+    /// 0.85 alpha, 1.25px stroke. Use as the rest of a
+    /// struct-update expression to override one or two fields:
+    ///
+    /// ```ignore
+    /// HoverStyle {
+    ///     outline_width: 2.0,
+    ///     ..HoverStyle::from_theme(design)
+    /// }
+    /// ```
+    pub fn from_theme(design: &dyn crate::design::Design) -> Self {
+        let bg = design.background_color();
+        let text = design
+            .text_color()
+            .resolve(bg, design.text_pair(), &design.seed(), None);
+        Self {
+            outline_color: crate::core::Color { a: 0.85, ..text },
+            outline_width: 1.25,
+        }
     }
 }
 
@@ -347,25 +393,34 @@ impl Choropleth {
         self
     }
 
-    /// Sets hover-time appearance overrides. Construct via
-    /// [`HoverStyle::default`] and use the chained setters to
-    /// override only the fields you care about; the rest fall back
-    /// to theme-derived defaults.
+    /// Sets a theme-aware hover style closure. The closure runs at
+    /// draw time with the chart's [`Design`](crate::design::Design)
+    /// and resolved [`palette`](crate::palette::Resolved) in scope,
+    /// matching iced's `style: impl Fn(&Theme, Status) -> Style`
+    /// pattern — theme switches automatically re-evaluate the
+    /// style.
     ///
     /// ```ignore
+    /// use hyozu::Color;
     /// use hyozu::mark::choropleth::HoverStyle;
     ///
     /// hyozu::choropleth(entries)
-    ///     .hover_style(HoverStyle::default().outline_color(Color::WHITE).outline_width(2.0))
+    ///     .hover_style(|design, _palette| HoverStyle {
+    ///         outline_width: 2.0,
+    ///         ..HoverStyle::from_theme(design)
+    ///     })
     /// ```
-    pub fn hover_style(mut self, style: HoverStyle) -> Self {
-        self.hover_style = Some(style);
+    pub fn hover_style<F>(mut self, f: F) -> Self
+    where
+        F: Fn(&dyn crate::design::Design, &crate::palette::Resolved) -> HoverStyle + Send + Sync + 'static,
+    {
+        self.hover_style = Some(Arc::new(f));
         self
     }
 
-    /// Returns the user-supplied hover style overrides, if any.
-    pub fn hover_style_config(&self) -> Option<HoverStyle> {
-        self.hover_style
+    /// Returns the user-supplied hover style closure, if any.
+    pub fn hover_style_fn(&self) -> Option<&HoverStyleFn> {
+        self.hover_style.as_ref()
     }
 
     /// Returns the entries.
