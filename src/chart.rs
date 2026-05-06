@@ -2277,7 +2277,7 @@ fn draw_choropleth_tooltip_overlay<Message>(
     // Hovered-feature outline: theme text color at moderate alpha so
     // it reads as foreground without overwhelming the polygon fill.
     let stroke_color = crate::core::Color { a: 0.85, ..text_color };
-    let stroke_width = 2.0;
+    let stroke_width = 1.25;
 
     let Some(cursor_pos) = cursor.position() else {
         return;
@@ -2330,11 +2330,11 @@ fn draw_choropleth_tooltip_overlay<Message>(
         tooltip_config
     };
 
-    renderer.with_layer(*viewport, |renderer| {
-        // Stroke the hovered polygon's rings into a frame translated to
-        // the plot bounds so coordinates match the choropleth's own
-        // draw path.
-        if tooltip_config.markers {
+    // Polygon stroke and tooltip box live on separate layers so the
+    // tooltip's text and background composite above the stroke even
+    // when the tooltip's anchor sits inside the hovered polygon.
+    if tooltip_config.markers {
+        renderer.with_layer(*viewport, |renderer| {
             let frame_size = crate::core::Size::new(plane.bounds.width, plane.bounds.height);
             let mut frame = Frame::new(renderer, frame_size);
             for re in &entries {
@@ -2358,8 +2358,10 @@ fn draw_choropleth_tooltip_overlay<Message>(
             renderer.with_translation(crate::core::Vector::new(plot_bounds.x, plot_bounds.y), |renderer| {
                 geometry::Renderer::draw_geometry(renderer, frame.into_geometry());
             });
-        }
+        });
+    }
 
+    renderer.with_layer(*viewport, |renderer| {
         draw_tooltip_box(
             renderer,
             design,
