@@ -296,6 +296,13 @@ impl Choropleth {
         &self.entries
     }
 
+    /// Returns the color-scale's value-format closure if one is
+    /// configured. Used by hover overlays to render values with the
+    /// same units the scale legend shows.
+    pub fn color_scale_format(&self) -> Option<crate::scale::Format<f64>> {
+        self.color.format.clone()
+    }
+
     /// Choropleth maps have no x-axis.
     pub fn x_axis() -> Option<crate::data::Axis> {
         None

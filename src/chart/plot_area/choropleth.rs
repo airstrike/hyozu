@@ -133,8 +133,10 @@ fn build_legend_ticks(lo: f64, hi: f64, target: usize, format: &dyn Fn(f64) -> S
 
 /// Format a legend value with human-friendly abbreviations. Used as
 /// the built-in fallback when the choropleth's legend / ColorScale /
-/// Data chain doesn't supply a closure.
-fn format_legend_value(v: f64) -> String {
+/// Data chain doesn't supply a closure. Also reused by the choropleth
+/// hover overlay so hover values pick up the same K/M/B units the
+/// legend shows.
+pub(crate) fn format_legend_value(v: f64) -> String {
     // Exact zero gets a clean "0" rather than the scientific form
     // produced by the `< 0.01` branch below — `{:.1e}` on 0.0 prints
     // "0.0e0", which is technically right and visually unacceptable.

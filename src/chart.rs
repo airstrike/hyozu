@@ -2279,6 +2279,24 @@ fn draw_choropleth_tooltip_overlay<Message>(
     let stroke_color = crate::core::Color { a: 0.85, ..text_color };
     let stroke_width = 1.25;
 
+    // Swatch color: the resolved fill the choropleth painted for this
+    // feature, snapshot at draw-time into `state.fill_colors` (aligned
+    // 1:1 with `geo_plane.filtered_ids`). Falls back to the stroke
+    // color when the snapshot is missing — only happens before the
+    // first draw, in which case the swatch reads as a neutral chip.
+    let swatch_color = {
+        let plot_area_tree = &scene_tree.children[6];
+        plot_area_tree
+            .children
+            .get(mark_idx)
+            .filter(|child| child.tag == tree::Tag::of::<plot_area::choropleth::State>())
+            .and_then(|child| {
+                let state = child.state.downcast_ref::<plot_area::choropleth::State>();
+                state.fill_colors.borrow().get(feature_idx).copied()
+            })
+            .unwrap_or(stroke_color)
+    };
+
     let Some(cursor_pos) = cursor.position() else {
         return;
     };
@@ -2292,10 +2310,10 @@ fn draw_choropleth_tooltip_overlay<Message>(
             series_name: Some(feature_name),
             series_index: 0,
             mark_index: mark_idx,
-            color: stroke_color,
+            color: swatch_color,
         },
         anchor: cursor_pos,
-        color: stroke_color,
+        color: swatch_color,
         annotation: hover::Highlight::Stroke {
             rings: std::sync::Arc::new(rings.clone()),
             color: stroke_color,
@@ -2305,19 +2323,26 @@ fn draw_choropleth_tooltip_overlay<Message>(
     let entries = [entry];
 
     // Honor the chart-level value-format chain when the user hasn't
-    // installed a custom format. With no value, show just the feature
-    // name.
+    // installed a custom format. Mirrors the choropleth legend's
+    // chain — guide-level legend override, then mark-level
+    // `ColorScale.format`, then the K/M/B abbreviation fallback —
+    // so hover values pick up the same units the legend shows.
     let chain_tooltip;
     let effective_tooltip: &crate::data::tooltip::Tooltip = if tooltip_config.format_is_default() {
-        let mark_format = scene.primary_mark_value_format(mark_idx).cloned();
+        let resolved_format = c
+            .data
+            .legend_config()
+            .and_then(|l| l.value_format_ref().cloned())
+            .or_else(|| c.data.color_scale_format())
+            .or_else(|| scene.primary_mark_value_format(mark_idx).cloned());
         chain_tooltip = tooltip_config.clone().format(move |entry: &TooltipEntry| {
             let name = entry.series_name.clone().unwrap_or_default();
             if entry.y.is_nan() {
                 return name;
             }
-            let formatted = match &mark_format {
+            let formatted = match &resolved_format {
                 Some(f) => f(&entry.y),
-                None => crate::scale::default_f64_format(entry.y),
+                None => plot_area::choropleth::format_legend_value(entry.y),
             };
             if name.is_empty() {
                 formatted
