@@ -70,7 +70,6 @@ pub enum Kind<'a, Message, Theme> {
 }
 
 /// Internal state for the chart widget.
-#[derive(Default)]
 struct State {
     generation: u64,
     is_pressed: bool,
@@ -80,9 +79,31 @@ struct State {
     /// during cursor-move handling and consumed by the annotation
     /// overlay for cursor-anchored positioning.
     last_cursor: Option<Point>,
+    /// Persisted widget tree for the annotation overlay's inner
+    /// element. iced's runtime calls [`overlay::Overlay::layout`] in
+    /// one pass and [`overlay::Overlay::draw`] in another, with a
+    /// fresh overlay instance for each — so the inner element's
+    /// per-widget state (text paragraphs, etc.) must live somewhere
+    /// stable across both. Reconciled via [`Tree::diff`] each frame
+    /// so widget identity carries forward when the user's closure
+    /// produces structurally-similar elements.
+    annotation_tree: Tree,
     /// Names of series hidden via legend click toggles. Lives with the
     /// widget state and is reset when the tree is dropped.
     hidden_series: std::collections::HashSet<String>,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self {
+            generation: 0,
+            is_pressed: false,
+            hover: None,
+            last_cursor: None,
+            annotation_tree: Tree::empty(),
+            hidden_series: std::collections::HashSet::new(),
+        }
+    }
 }
 
 /// Creates a chart widget from data.
@@ -692,18 +713,21 @@ fn build_hover_entry<'b, Message>(
 /// positioning chrome) as a floating overlay above the chart.
 ///
 /// Constructed inside [`Chart::overlay`] when a hover closure is
-/// installed and the cursor is over a hovered mark. Owns a fresh
-/// [`widget::Tree`] for the inner element — annotation content is
-/// ephemeral, so per-frame tree construction is cheaper than
-/// trying to cache one across hover changes.
-struct AnnotationOverlay<'a, Message, Theme> {
+/// installed and the cursor is over a hovered mark. The inner
+/// element's [`Tree`] is borrowed from the chart's
+/// [`State::annotation_tree`] so per-widget state (text
+/// paragraphs, button hover state, etc.) survives across the
+/// runtime's separate layout and draw passes — iced creates a
+/// fresh overlay instance for each pass, so anything owned by
+/// the overlay would be discarded between them.
+struct AnnotationOverlay<'a, 'b, Message, Theme> {
     annotation: hover::Annotation<'a, Message, Theme>,
-    tree: Tree,
+    tree: &'b mut Tree,
     cursor: Point,
     chart_bounds: Rectangle,
 }
 
-impl<Message, Theme> overlay::Overlay<Message, Theme, Renderer> for AnnotationOverlay<'_, Message, Theme>
+impl<Message, Theme> overlay::Overlay<Message, Theme, Renderer> for AnnotationOverlay<'_, '_, Message, Theme>
 where
     Theme: design::Design,
 {
@@ -720,7 +744,7 @@ where
             .annotation
             .content
             .as_widget_mut()
-            .layout(&mut self.tree, renderer, &limits);
+            .layout(self.tree, renderer, &limits);
 
         let content_size = content_layout.size();
         let pad = self.annotation.padding;
@@ -820,21 +844,16 @@ where
         );
 
         let content_layout = layout.children().next().expect("annotation has one child");
-        self.annotation.content.as_widget().draw(
-            &self.tree,
-            renderer,
-            theme,
-            defaults,
-            content_layout,
-            cursor,
-            &bounds,
-        );
+        self.annotation
+            .content
+            .as_widget()
+            .draw(self.tree, renderer, theme, defaults, content_layout, cursor, &bounds);
     }
 
     fn mouse_interaction(&self, layout: Layout<'_>, cursor: mouse::Cursor, renderer: &Renderer) -> mouse::Interaction {
         let content_layout = layout.children().next().expect("annotation has one child");
         self.annotation.content.as_widget().mouse_interaction(
-            &self.tree,
+            self.tree,
             content_layout,
             cursor,
             &layout.bounds(),
@@ -1860,37 +1879,46 @@ where
         // based annotation overlay. The default tooltip box stays on
         // the canvas-drawn path in `Chart::draw`.
         let hover_fn = self.hover_fn.as_ref()?;
-        let state = tree.state.downcast_ref::<State>();
-        let geometry = state.hover.as_ref()?;
 
-        let scene_tree = &tree.children[0];
-        let plot_area_state = scene_tree.children[6].state.downcast_ref::<plot_area::State>();
+        // Two split borrows from `tree`: the State (for hover /
+        // cursor / persisted annotation_tree) lives in `tree.state`;
+        // the per-mark plot-area state lives in `tree.children[0]`.
+        // Rust's split-borrow rules let us hold both as long as
+        // they're disjoint Tree fields.
         let plot_area = self.scene.plot_area();
-        let entry = build_hover_entry(
-            geometry,
-            plot_area,
-            &scene_tree.children[6],
-            plot_area_state.geo_plane.as_ref(),
-        )?;
-
-        // The cursor is captured in widget-tree state during cursor-
-        // move handling; for layout positioning we only need *some*
-        // anchor near the hovered mark. Fall back to the chart center
-        // when the cursor's been left out (shouldn't happen at
-        // overlay time, since `state.hover.is_some()` already implies
-        // the cursor was inside the plot area).
-        let cursor = state
-            .last_cursor
-            .unwrap_or_else(|| Point::new(layout.bounds().center_x(), layout.bounds().center_y()));
+        let entry;
+        let cursor;
+        let chart_bounds = layout.bounds();
+        let annotation_tree;
+        {
+            let scene_tree = &tree.children[0];
+            let plot_area_state = scene_tree.children[6].state.downcast_ref::<plot_area::State>();
+            let state = tree.state.downcast_mut::<State>();
+            let geometry = state.hover.as_ref()?;
+            entry = build_hover_entry(
+                geometry,
+                plot_area,
+                &scene_tree.children[6],
+                plot_area_state.geo_plane.as_ref(),
+            )?;
+            cursor = state
+                .last_cursor
+                .unwrap_or_else(|| Point::new(chart_bounds.center_x(), chart_bounds.center_y()));
+            annotation_tree = &mut state.annotation_tree;
+        }
 
         let annotation = hover_fn(&entry);
-        let inner_tree = Tree::new(&annotation.content);
+        // Reconcile the persisted tree with this frame's element.
+        // When the closure returns the same widget shape (same hover
+        // target), per-widget state survives; on shape changes the
+        // tree rebuilds.
+        annotation_tree.diff(&annotation.content);
 
         Some(overlay::Element::new(Box::new(AnnotationOverlay {
             annotation,
-            tree: inner_tree,
+            tree: annotation_tree,
             cursor,
-            chart_bounds: layout.bounds(),
+            chart_bounds,
         })))
     }
 }

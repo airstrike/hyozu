@@ -1,7 +1,8 @@
 use hyozu::mark::pie;
 use hyozu::{Color, data, donut, legend, palette};
+use iced::font::Weight;
 use iced::widget::{center, column, container, pick_list, row, space, text};
-use iced::{Border, Center, Fill, Font, Subscription, Task, Theme, keyboard};
+use iced::{Border, Center, Fill, Subscription, Task, Theme, keyboard};
 
 pub fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
@@ -158,13 +159,9 @@ impl App {
                 } => {
                     let name = label.unwrap_or("Slice").to_string();
                     let share = if *total > 0.0 { 100.0 * value / total } else { 0.0 };
-                    let semibold = Font {
-                        weight: iced::font::Weight::Semibold,
-                        ..Font::DEFAULT
-                    };
                     hyozu::hover::Annotation::new(
                         column![
-                            text(name).size(14).font(semibold),
+                            text(name).size(14).weight(Weight::Semibold),
                             text(format!("{share:.1}%  ·  ${value:.1}M")).size(12),
                         ]
                         .spacing(2),
