@@ -1,6 +1,6 @@
 pub mod donut;
 pub mod guide;
-pub(crate) mod hover;
+pub mod hover;
 pub mod legend;
 pub mod plot_area;
 pub mod scale_legend;
@@ -46,6 +46,12 @@ where
     /// animation tick and the data-change snapshot so opted-out charts
     /// don't keep requesting redraws.
     animate: bool,
+    /// Optional user-supplied hover annotation closure. When set, the
+    /// chart calls it with a [`hover::Entry`] resolved from the
+    /// hovered mark and renders the returned [`hover::Annotation`]
+    /// as an overlay above the chart. When unset, the chart falls
+    /// back to its built-in canvas-drawn tooltip box.
+    hover_fn: Option<hover::HoverFn<'a, Message, Theme>>,
     _theme: std::marker::PhantomData<Theme>,
 }
 
@@ -120,6 +126,7 @@ where
             style: Box::new(default),
             kind: Kind::Generic,
             animate: data.animate,
+            hover_fn: None,
             _theme: std::marker::PhantomData,
         }
     }
@@ -161,6 +168,7 @@ where
             style: self.style,
             kind: self.kind,
             animate: self.animate,
+            hover_fn: self.hover_fn,
             _theme: std::marker::PhantomData,
         }
     }
@@ -168,6 +176,30 @@ where
     /// Sets the action handler for the chart.
     pub fn on_action(mut self, f: impl Fn(Action) -> Message + 'a) -> Self {
         self.on_action = Some(Box::new(f));
+        self
+    }
+
+    /// Installs a hover annotation closure.
+    ///
+    /// The closure runs each time the cursor enters a new mark and
+    /// produces an [`hover::Annotation`] — an iced [`Element`] plus
+    /// chrome (position, padding, gap, viewport snapping) — that the
+    /// chart renders as an overlay above the hovered mark.
+    ///
+    /// Match on [`hover::Entry`] to dispatch by mark shape:
+    /// `Cartesian` (line/area/xy/bars), `Pie`, `Geographic`
+    /// (geo-Xy bubbles), `Choropleth` (polygon areas).
+    ///
+    /// When unset, the chart falls back to its built-in tooltip box
+    /// (resolved through [`Data::tooltip`] formatter).
+    ///
+    /// [`Element`]: crate::core::Element
+    /// [`Data::tooltip`]: crate::Data::tooltip
+    pub fn hover<F>(mut self, f: F) -> Self
+    where
+        F: Fn(&hover::Entry<'a>) -> hover::Annotation<'a, Message, Theme> + 'a,
+    {
+        self.hover_fn = Some(Box::new(f));
         self
     }
 
@@ -1688,7 +1720,7 @@ fn draw_tooltip_overlay<Message>(
 
 /// Draws the Cartesian tooltip overlay (tracking line, markers, box).
 ///
-/// Builds one [`hover::Entry`] per matched (mark, series, point) at the
+/// Builds one [`hover::Row`] per matched (mark, series, point) at the
 /// snapped data-x, draws the dashed tracking line and any per-mark
 /// annotations on a canvas frame, then composites the tooltip box via
 /// [`draw_tooltip_box`].
@@ -1737,7 +1769,7 @@ fn draw_cartesian_tooltip_overlay<Message>(
     let xy_tag = tree::Tag::of::<plot_area::xy::State>();
     let bars_tag = tree::Tag::of::<plot_area::bars::State>();
 
-    let mut entries: Vec<hover::Entry> = Vec::new();
+    let mut entries: Vec<hover::Row> = Vec::new();
 
     for &(mark_idx, series_idx, pt_idx) in cartesian_entries {
         let series = &plot_area.series[mark_idx];
@@ -1749,7 +1781,7 @@ fn draw_cartesian_tooltip_overlay<Message>(
         // bypassed. See GOG.md § 8b.
         let mut bars_resolved_color: Option<crate::core::Color> = None;
 
-        let (datum, name, explicit_color, annotation) = if child.tag == line_tag {
+        let (datum, name, explicit_color, highlight) = if child.tag == line_tag {
             if let plot_area::Series::Line(line) = series {
                 let pt = &line.data.points[pt_idx];
                 let pixel = plane.to_pixel(crate::data::Datum { x: pt.x, y: pt.y });
@@ -1828,7 +1860,7 @@ fn draw_cartesian_tooltip_overlay<Message>(
             palette.get(color_idx).resolve(background, text_pair, &seed, None)
         };
 
-        entries.push(hover::Entry {
+        entries.push(hover::Row {
             tooltip: TooltipEntry {
                 x: datum.x,
                 y: datum.y,
@@ -1839,7 +1871,7 @@ fn draw_cartesian_tooltip_overlay<Message>(
             },
             anchor,
             color: series_color,
-            annotation,
+            highlight,
         });
     }
 
@@ -1861,7 +1893,7 @@ fn draw_cartesian_tooltip_overlay<Message>(
         // Tracking line — only for continuous marks (line/area/xy), not discrete (bars)
         let has_continuous = entries
             .iter()
-            .any(|re| matches!(re.annotation, hover::Highlight::PointMarker { .. }));
+            .any(|re| matches!(re.highlight, hover::Highlight::PointMarker { .. }));
         if tooltip_config.tracking_line && has_continuous {
             let line_x = tracking_pixel_x - plane.bounds.x;
             let tracking_color = crate::core::Color { a: 0.18, ..text_color };
@@ -1882,7 +1914,7 @@ fn draw_cartesian_tooltip_overlay<Message>(
         // Ring is produced by the geographic overlay and handled there.
         if tooltip_config.markers {
             for re in &entries {
-                match &re.annotation {
+                match &re.highlight {
                     hover::Highlight::PointMarker { pixel, radius } => {
                         let cx = pixel.x - plane.bounds.x;
                         let cy = pixel.y - plane.bounds.y;
@@ -1974,7 +2006,7 @@ fn draw_pie_tooltip_overlay<Message>(
     let plot_bounds = compute_plot_bounds(chart_bounds, padding, plot_area_offset, plane);
     let flip_axis_x = plot_bounds.x + plot_bounds.width / 2.0;
 
-    let entry = hover::Entry {
+    let entry = hover::Row {
         tooltip: TooltipEntry {
             x: slice_idx as f64,
             y: slice.value(),
@@ -1985,7 +2017,7 @@ fn draw_pie_tooltip_overlay<Message>(
         },
         anchor: cursor_pos,
         color: slice_color,
-        annotation: hover::Highlight::None,
+        highlight: hover::Highlight::None,
     };
     let entries = [entry];
 
@@ -2144,7 +2176,7 @@ fn draw_geo_tooltip_overlay<Message>(
         (anchor_abs.x - radius, chart_bounds.x)
     };
 
-    let entry = hover::Entry {
+    let entry = hover::Row {
         tooltip: TooltipEntry {
             x: point.x,
             y: point.y,
@@ -2155,7 +2187,7 @@ fn draw_geo_tooltip_overlay<Message>(
         },
         anchor: anchor_abs,
         color: bubble_color,
-        annotation: hover::Highlight::Ring {
+        highlight: hover::Highlight::Ring {
             pixel,
             radius: radius + 2.0,
             color: bubble_color,
@@ -2171,7 +2203,7 @@ fn draw_geo_tooltip_overlay<Message>(
             let frame_size = crate::core::Size::new(plane.bounds.width, plane.bounds.height);
             let mut frame = Frame::new(renderer, frame_size);
             for re in &entries {
-                match &re.annotation {
+                match &re.highlight {
                     hover::Highlight::Ring {
                         pixel,
                         radius,
@@ -2303,7 +2335,7 @@ fn draw_choropleth_tooltip_overlay<Message>(
     let plot_bounds = compute_plot_bounds(chart_bounds, padding, plot_area_offset, plane);
     let flip_axis_x = plot_bounds.x + plot_bounds.width / 2.0;
 
-    let entry = hover::Entry {
+    let entry = hover::Row {
         tooltip: TooltipEntry {
             x: feature_idx as f64,
             y: entry_value.unwrap_or(f64::NAN),
@@ -2314,7 +2346,7 @@ fn draw_choropleth_tooltip_overlay<Message>(
         },
         anchor: cursor_pos,
         color: swatch_color,
-        annotation: hover::Highlight::Stroke {
+        highlight: hover::Highlight::Stroke {
             rings: std::sync::Arc::new(rings.clone()),
             color: stroke_color,
             width: stroke_width,
@@ -2363,7 +2395,7 @@ fn draw_choropleth_tooltip_overlay<Message>(
             let frame_size = crate::core::Size::new(plane.bounds.width, plane.bounds.height);
             let mut frame = Frame::new(renderer, frame_size);
             for re in &entries {
-                if let hover::Highlight::Stroke { rings, color, width } = &re.annotation {
+                if let hover::Highlight::Stroke { rings, color, width } = &re.highlight {
                     for ring in rings.iter() {
                         if ring.len() < 3 {
                             continue;
@@ -2413,7 +2445,7 @@ fn draw_tooltip_box(
     renderer: &mut Renderer,
     design: &dyn design::Design,
     tooltip_config: &crate::data::tooltip::Tooltip,
-    entries: &[hover::Entry],
+    entries: &[hover::Row],
     anchor: Point,
     flip_axis_x: f32,
     clamp_bounds: Rectangle,

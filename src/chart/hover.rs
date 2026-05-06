@@ -80,11 +80,196 @@ pub(crate) enum Geometry {
     },
 }
 
-/// A single tooltip entry ready for rendering.
-pub(crate) struct Entry {
+/// A single row in the tooltip box, fully resolved and ready for the
+/// canvas-drawn renderer to lay out (swatch, text, position).
+///
+/// One [`Row`] per visible entry — cartesian hovers may produce
+/// many (one per series at the snapped data-x), pie / geo / area
+/// hovers produce one.
+pub(crate) struct Row {
     pub tooltip: crate::data::tooltip::TooltipEntry,
     /// Anchor point for tooltip-box vertical centering.
     pub anchor: crate::core::Point,
     pub color: crate::core::Color,
-    pub annotation: Highlight,
+    pub highlight: Highlight,
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Public hover API: closure input/output types consumed by the
+// chart's overlay rendering. Wired in by the upcoming overlay
+// refactor; the types live here so callers can name them.
+// ──────────────────────────────────────────────────────────────────
+
+/// What the user's hover closure receives — the resolved data and
+/// metadata for the mark currently under the cursor.
+///
+/// Variants mirror [`Geometry`]: one per hit-test shape, not one
+/// per mark type. A single closure can match across cartesian, pie,
+/// geographic, and choropleth marks on the same chart.
+#[non_exhaustive]
+pub enum Entry<'a> {
+    /// Hover over a Cartesian mark (Line / Area / Xy / Bars).
+    Cartesian {
+        mark_idx: usize,
+        series_idx: usize,
+        point_idx: usize,
+        x: f64,
+        y: f64,
+        series_name: Option<&'a str>,
+        color: crate::core::Color,
+    },
+    /// Hover over a Pie / Donut slice.
+    Pie {
+        mark_idx: usize,
+        slice_idx: usize,
+        label: Option<&'a str>,
+        value: f64,
+        color: crate::core::Color,
+    },
+    /// Hover over a geo-projected point mark (geo-Xy bubble).
+    Geographic {
+        mark_idx: usize,
+        point_idx: usize,
+        label: Option<&'a str>,
+        value: f64,
+        color: crate::core::Color,
+    },
+    /// Hover over a choropleth polygon area.
+    Choropleth {
+        mark_idx: usize,
+        feature_idx: usize,
+        feature_id: &'a str,
+        feature_name: &'a str,
+        properties: &'a std::collections::HashMap<String, String>,
+        /// `None` when the feature has an "available, no value"
+        /// entry, or no entry at all.
+        value: Option<f64>,
+        color: crate::core::Color,
+    },
+}
+
+/// Where the annotation positions itself relative to its anchor.
+///
+/// `FollowCursor` matches the existing tooltip-box behavior — the
+/// box anchors near the cursor and flips horizontally across the
+/// chart's mid-x to stay inside the viewport. The fixed sides
+/// (`Top` / `Bottom` / `Left` / `Right`) anchor relative to the
+/// hovered mark, which is what most static-position tooltips want.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Position {
+    Top,
+    Bottom,
+    Left,
+    Right,
+    #[default]
+    FollowCursor,
+}
+
+/// A floating annotation built from an iced [`Element`] plus
+/// positioning chrome. Returned by the user's hover closure
+/// (`Chart::hover`) and rendered by the chart's overlay above the
+/// chart at hover time.
+///
+/// Trivial cases use the [`From<Element>`] impl:
+/// `column![text("hello")].into()`. Chrome customization uses the
+/// builder methods.
+///
+/// [`Element`]: crate::core::Element
+pub struct Annotation<'a, Message, Theme = crate::core::Theme> {
+    #[allow(dead_code)]
+    pub(crate) content: crate::core::Element<'a, Message, Theme, crate::widget::Renderer>,
+    pub(crate) position: Position,
+    pub(crate) padding: crate::core::Padding,
+    pub(crate) gap: f32,
+    pub(crate) snap_within_viewport: bool,
+}
+
+impl<'a, Message, Theme> Annotation<'a, Message, Theme> {
+    /// Wraps `content` in an annotation with default chrome
+    /// (cursor-following, 8px padding, 8px gap, viewport-snapped).
+    pub fn new(content: impl Into<crate::core::Element<'a, Message, Theme, crate::widget::Renderer>>) -> Self {
+        Self {
+            content: content.into(),
+            position: Position::default(),
+            padding: crate::core::Padding::new(8.0),
+            gap: 8.0,
+            snap_within_viewport: true,
+        }
+    }
+
+    /// Where the annotation sits relative to its anchor. Default
+    /// [`Position::FollowCursor`].
+    pub fn position(mut self, position: Position) -> Self {
+        self.position = position;
+        self
+    }
+
+    /// Inner padding around `content` inside the annotation's
+    /// background container. Default 8px on all sides.
+    pub fn padding(mut self, padding: impl Into<crate::core::Padding>) -> Self {
+        self.padding = padding.into();
+        self
+    }
+
+    /// Pixel gap between the anchor and the annotation's nearest
+    /// edge. Default 8.0.
+    pub fn gap(mut self, gap: f32) -> Self {
+        self.gap = gap;
+        self
+    }
+
+    /// Whether the annotation clamps within the chart's viewport
+    /// rather than overflowing past its edges. Default `true`.
+    pub fn snap_within_viewport(mut self, snap: bool) -> Self {
+        self.snap_within_viewport = snap;
+        self
+    }
+}
+
+impl<'a, Message, Theme> From<crate::core::Element<'a, Message, Theme, crate::widget::Renderer>>
+    for Annotation<'a, Message, Theme>
+{
+    fn from(element: crate::core::Element<'a, Message, Theme, crate::widget::Renderer>) -> Self {
+        Annotation::new(element)
+    }
+}
+
+/// Boxed hover annotation closure — the type [`crate::Chart::hover`]
+/// stores once installed.
+pub(crate) type HoverFn<'a, Message, Theme> = Box<dyn Fn(&Entry<'a>) -> Annotation<'a, Message, Theme> + 'a>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::Theme;
+    use crate::widget::text;
+
+    #[test]
+    fn annotation_builder_round_trip() {
+        let a: Annotation<'_, (), Theme> = Annotation::new(text("hello"))
+            .position(Position::Top)
+            .padding(crate::core::Padding::new(4.0))
+            .gap(2.0)
+            .snap_within_viewport(false);
+        assert_eq!(a.position, Position::Top);
+        assert_eq!(a.padding, crate::core::Padding::new(4.0));
+        assert_eq!(a.gap, 2.0);
+        assert!(!a.snap_within_viewport);
+    }
+
+    #[test]
+    fn annotation_default_chrome() {
+        let a: Annotation<'_, (), Theme> = Annotation::new(text("x"));
+        assert_eq!(a.position, Position::FollowCursor);
+        assert_eq!(a.padding, crate::core::Padding::new(8.0));
+        assert_eq!(a.gap, 8.0);
+        assert!(a.snap_within_viewport);
+    }
+
+    #[test]
+    fn annotation_from_element() {
+        let element: crate::core::Element<'_, (), Theme, crate::widget::Renderer> = text("x").into();
+        let a: Annotation<'_, (), Theme> = element.into();
+        assert_eq!(a.position, Position::FollowCursor);
+    }
 }

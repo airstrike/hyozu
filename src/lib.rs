@@ -28,7 +28,7 @@ use iced_widget as widget;
 pub use core::Function;
 
 // Re-export commonly used items for convenience
-pub use self::chart::{chart, donut};
+pub use self::chart::{chart, donut, hover};
 pub use color::{Color, Pair};
 pub use data::{Action, Data, Datum};
 pub use design::Design;
