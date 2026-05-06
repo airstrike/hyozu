@@ -17,6 +17,17 @@ pub(crate) enum Highlight {
         color: crate::core::Color,
         width: f32,
     },
+    /// Stroke around a polygon's projected rings. Used by the choropleth
+    /// hover overlay to outline the hovered feature. The rings are
+    /// shared with the chart's geometry cache via [`std::sync::Arc`] so
+    /// constructing this highlight on a hover change is O(1) — the
+    /// underlying `Vec<Vec<...>>` is not cloned.
+    #[allow(dead_code)]
+    Stroke {
+        rings: std::sync::Arc<Vec<Vec<(f32, f32)>>>,
+        color: crate::core::Color,
+        width: f32,
+    },
 }
 
 /// Hit-test geometry under the cursor.

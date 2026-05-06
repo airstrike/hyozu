@@ -1849,6 +1849,7 @@ fn draw_cartesian_tooltip_overlay<Message>(
                     }
                     hover::Highlight::None => {}
                     hover::Highlight::Ring { .. } => {}
+                    hover::Highlight::Stroke { .. } => {}
                 }
             }
         }
@@ -2135,6 +2136,7 @@ fn draw_geo_tooltip_overlay<Message>(
                     }
                     hover::Highlight::PointMarker { .. } => {}
                     hover::Highlight::None => {}
+                    hover::Highlight::Stroke { .. } => {}
                 }
             }
             renderer.with_translation(crate::core::Vector::new(plot_bounds.x, plot_bounds.y), |renderer| {

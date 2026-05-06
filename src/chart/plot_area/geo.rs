@@ -181,6 +181,65 @@ impl Default for Plane {
     }
 }
 
+/// Returns the index of the topmost feature whose projected polygon
+/// contains `point`, or `None` if no feature does.
+///
+/// Two-stage test: bbox prefilter against
+/// [`Plane::feature_bboxes`], then even-odd ray-cast point-in-polygon
+/// across each ring of the surviving features (so polygons with holes
+/// are handled — a point inside the outer ring but inside a hole ring
+/// has even crossings and reads as outside).
+///
+/// "Topmost" means the *last* matching feature in
+/// [`Plane::projected_polygons`], matching draw order.
+pub fn hit_test(plane: &Plane, point: Point) -> Option<usize> {
+    let (px, py) = (point.x, point.y);
+    let mut hit: Option<usize> = None;
+
+    for (idx, &(min_x, min_y, max_x, max_y)) in plane.feature_bboxes.iter().enumerate() {
+        if px < min_x || px > max_x || py < min_y || py > max_y {
+            continue;
+        }
+        let rings = &plane.projected_polygons[idx];
+        let mut inside = false;
+        for ring in rings {
+            if ring_contains(ring, px, py) {
+                inside = !inside;
+            }
+        }
+        if inside {
+            hit = Some(idx);
+        }
+    }
+
+    hit
+}
+
+/// Even-odd ray cast: counts edge crossings of a horizontal ray cast
+/// to the right from `(px, py)`. Caller xors the result across all
+/// rings of a feature to handle holes.
+fn ring_contains(ring: &[(f32, f32)], px: f32, py: f32) -> bool {
+    if ring.len() < 3 {
+        return false;
+    }
+    let mut inside = false;
+    let mut j = ring.len() - 1;
+    for i in 0..ring.len() {
+        let (xi, yi) = ring[i];
+        let (xj, yj) = ring[j];
+        let crosses = (yi > py) != (yj > py) && {
+            let t = (py - yi) / (yj - yi);
+            let x_cross = xi + t * (xj - xi);
+            px < x_cross
+        };
+        if crosses {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -263,5 +322,104 @@ mod tests {
     fn project_polygon_out_of_range_returns_none() {
         let plane = Plane::new();
         assert!(plane.project_polygon(0).is_none());
+    }
+
+    /// Builds a Plane with the given polygons (already projected) and
+    /// matching bboxes. Bypasses `ensure` so tests don't need real
+    /// GeoJSON.
+    fn plane_with(polygons: Vec<Vec<Vec<(f32, f32)>>>) -> Plane {
+        let bboxes: Vec<(f32, f32, f32, f32)> = polygons
+            .iter()
+            .map(|rings| {
+                let mut min_x = f32::INFINITY;
+                let mut min_y = f32::INFINITY;
+                let mut max_x = f32::NEG_INFINITY;
+                let mut max_y = f32::NEG_INFINITY;
+                for ring in rings {
+                    for &(x, y) in ring {
+                        min_x = min_x.min(x);
+                        min_y = min_y.min(y);
+                        max_x = max_x.max(x);
+                        max_y = max_y.max(y);
+                    }
+                }
+                (min_x, min_y, max_x, max_y)
+            })
+            .collect();
+        let mut plane = Plane::new();
+        plane.projected_polygons = polygons;
+        plane.feature_bboxes = bboxes;
+        plane
+    }
+
+    #[test]
+    fn hit_test_simple_square_hits_inside() {
+        let square = vec![vec![vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]]];
+        let plane = plane_with(square);
+        assert_eq!(hit_test(&plane, Point::new(5.0, 5.0)), Some(0));
+    }
+
+    #[test]
+    fn hit_test_misses_outside_bbox() {
+        let square = vec![vec![vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]]];
+        let plane = plane_with(square);
+        assert_eq!(hit_test(&plane, Point::new(20.0, 5.0)), None);
+        assert_eq!(hit_test(&plane, Point::new(-1.0, 5.0)), None);
+    }
+
+    #[test]
+    fn hit_test_misses_inside_bbox_but_outside_polygon() {
+        // L-shaped polygon: bbox is the bounding 10×10 square but the
+        // top-right quadrant is outside the polygon.
+        let l_shape = vec![vec![vec![
+            (0.0, 0.0),
+            (10.0, 0.0),
+            (10.0, 5.0),
+            (5.0, 5.0),
+            (5.0, 10.0),
+            (0.0, 10.0),
+        ]]];
+        let plane = plane_with(l_shape);
+        // Inside the L:
+        assert_eq!(hit_test(&plane, Point::new(2.5, 2.5)), Some(0));
+        // Inside bbox but outside L (top-right quadrant):
+        assert_eq!(hit_test(&plane, Point::new(7.5, 7.5)), None);
+    }
+
+    #[test]
+    fn hit_test_hole_reads_as_outside() {
+        // 10×10 outer ring, 4×4 hole centered at (5, 5).
+        let with_hole = vec![vec![vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)], vec![
+            (3.0, 3.0),
+            (7.0, 3.0),
+            (7.0, 7.0),
+            (3.0, 7.0),
+        ]]];
+        let plane = plane_with(with_hole);
+        // Inside outer, outside hole — hits.
+        assert_eq!(hit_test(&plane, Point::new(1.0, 1.0)), Some(0));
+        // Inside hole — even crossings, misses.
+        assert_eq!(hit_test(&plane, Point::new(5.0, 5.0)), None);
+    }
+
+    #[test]
+    fn hit_test_topmost_feature_wins_when_overlapping() {
+        // Two squares overlap; later index draws on top, so it wins.
+        let polygons = vec![vec![vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]], vec![
+            vec![(5.0, 5.0), (15.0, 5.0), (15.0, 15.0), (5.0, 15.0)],
+        ]];
+        let plane = plane_with(polygons);
+        // In overlap region:
+        assert_eq!(hit_test(&plane, Point::new(7.0, 7.0)), Some(1));
+        // Only in first:
+        assert_eq!(hit_test(&plane, Point::new(2.0, 2.0)), Some(0));
+        // Only in second:
+        assert_eq!(hit_test(&plane, Point::new(12.0, 12.0)), Some(1));
+    }
+
+    #[test]
+    fn hit_test_empty_plane_returns_none() {
+        let plane = Plane::new();
+        assert_eq!(hit_test(&plane, Point::new(5.0, 5.0)), None);
     }
 }
