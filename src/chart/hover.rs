@@ -106,6 +106,13 @@ pub(crate) struct Row {
 /// Variants mirror [`Geometry`]: one per hit-test shape, not one
 /// per mark type. A single closure can match across cartesian, pie,
 /// geographic, and choropleth marks on the same chart.
+///
+/// Theme-resolved mark colors are intentionally **not** exposed
+/// here — they live on a draw-time cache that isn't reachable from
+/// the overlay-construction path. Closures that want a colored
+/// swatch should drive it from their own palette / theme, or use
+/// `iced::widget::container::Style::styled` to pull it from the
+/// theme directly.
 #[non_exhaustive]
 pub enum Entry<'a> {
     /// Hover over a Cartesian mark (Line / Area / Xy / Bars).
@@ -116,7 +123,6 @@ pub enum Entry<'a> {
         x: f64,
         y: f64,
         series_name: Option<&'a str>,
-        color: crate::core::Color,
     },
     /// Hover over a Pie / Donut slice.
     Pie {
@@ -124,7 +130,6 @@ pub enum Entry<'a> {
         slice_idx: usize,
         label: Option<&'a str>,
         value: f64,
-        color: crate::core::Color,
     },
     /// Hover over a geo-projected point mark (geo-Xy bubble).
     Geographic {
@@ -132,7 +137,6 @@ pub enum Entry<'a> {
         point_idx: usize,
         label: Option<&'a str>,
         value: f64,
-        color: crate::core::Color,
     },
     /// Hover over a choropleth polygon area.
     Choropleth {
@@ -144,7 +148,6 @@ pub enum Entry<'a> {
         /// `None` when the feature has an "available, no value"
         /// entry, or no entry at all.
         value: Option<f64>,
-        color: crate::core::Color,
     },
 }
 
@@ -176,7 +179,6 @@ pub enum Position {
 ///
 /// [`Element`]: crate::core::Element
 pub struct Annotation<'a, Message, Theme = crate::core::Theme> {
-    #[allow(dead_code)]
     pub(crate) content: crate::core::Element<'a, Message, Theme, crate::widget::Renderer>,
     pub(crate) position: Position,
     pub(crate) padding: crate::core::Padding,
@@ -236,7 +238,13 @@ impl<'a, Message, Theme> From<crate::core::Element<'a, Message, Theme, crate::wi
 
 /// Boxed hover annotation closure — the type [`crate::Chart::hover`]
 /// stores once installed.
-pub(crate) type HoverFn<'a, Message, Theme> = Box<dyn Fn(&Entry<'a>) -> Annotation<'a, Message, Theme> + 'a>;
+///
+/// The inner [`Entry`] is HRTB-bound (`for<'b>`) because its
+/// borrowed metadata (feature names, properties, etc.) lives in
+/// the chart's widget-tree state, not in the user's `&'a Data`
+/// borrow. Closure callers `.to_string()` any short-lived strings
+/// they want to embed in their owned [`Annotation`].
+pub(crate) type HoverFn<'a, Message, Theme> = Box<dyn for<'b> Fn(&Entry<'b>) -> Annotation<'a, Message, Theme> + 'a>;
 
 #[cfg(test)]
 mod tests {

@@ -14,7 +14,8 @@ use crate::animation;
 use crate::core::time::Instant;
 use crate::core::widget::{Tree, tree};
 use crate::core::{
-    Element, Event, Layout, Length, Padding, Point, Rectangle, Shell, Size, Widget, layout, mouse, window,
+    Element, Event, Layout, Length, Padding, Point, Rectangle, Shell, Size, Vector, Widget, layout, mouse, overlay,
+    window,
 };
 use crate::data::tooltip::TooltipEntry;
 use crate::widget::Renderer;
@@ -74,6 +75,11 @@ struct State {
     generation: u64,
     is_pressed: bool,
     hover: Option<hover::Geometry>,
+    /// Last cursor position observed inside the chart's bounds, in
+    /// absolute screen coordinates. Updated alongside [`Self::hover`]
+    /// during cursor-move handling and consumed by the annotation
+    /// overlay for cursor-anchored positioning.
+    last_cursor: Option<Point>,
     /// Names of series hidden via legend click toggles. Lives with the
     /// widget state and is reset when the tree is dropped.
     hidden_series: std::collections::HashSet<String>,
@@ -197,7 +203,7 @@ where
     /// [`Data::tooltip`]: crate::Data::tooltip
     pub fn hover<F>(mut self, f: F) -> Self
     where
-        F: Fn(&hover::Entry<'a>) -> hover::Annotation<'a, Message, Theme> + 'a,
+        F: for<'b> Fn(&hover::Entry<'b>) -> hover::Annotation<'a, Message, Theme> + 'a,
     {
         self.hover_fn = Some(Box::new(f));
         self
@@ -540,6 +546,299 @@ fn find_geo_hover<Message>(
     }
 
     best.map(|(mark_idx, point_idx, _)| hover::Geometry::Geographic { mark_idx, point_idx })
+}
+
+/// Resolves a [`hover::Geometry`] into the public [`hover::Entry`]
+/// the user's hover closure consumes.
+///
+/// The returned [`Entry`] borrows from the widget tree state and
+/// from `plot_area`'s data references — both are reachable from
+/// `&'b mut Chart` inside [`Widget::overlay`], so the inferred
+/// lifetime is the reborrow lifetime, not the chart's `'a` data
+/// borrow. The closure type accepts this via HRTB.
+fn build_hover_entry<'b, Message>(
+    geometry: &'b hover::Geometry,
+    plot_area: &'b plot_area::PlotArea<'_, Message, Renderer>,
+    plot_area_tree: &'b Tree,
+    geo_plane: Option<&'b plot_area::geo::Plane>,
+) -> Option<hover::Entry<'b>> {
+    match geometry {
+        hover::Geometry::Cartesian { entries, .. } => {
+            let (mark_idx, series_idx, point_idx) = *entries.first()?;
+            let series = plot_area.series.get(mark_idx)?;
+            match series {
+                plot_area::Series::Line(line) => {
+                    let pt = line.data.points.get(point_idx)?;
+                    Some(hover::Entry::Cartesian {
+                        mark_idx,
+                        series_idx,
+                        point_idx,
+                        x: pt.x,
+                        y: pt.y,
+                        series_name: line.data.name(),
+                    })
+                }
+                plot_area::Series::Area(area) => {
+                    let ser = area.data.series.get(series_idx)?;
+                    let pt = ser.points.get(point_idx)?;
+                    Some(hover::Entry::Cartesian {
+                        mark_idx,
+                        series_idx,
+                        point_idx,
+                        x: pt.x,
+                        y: pt.y,
+                        series_name: ser.name(),
+                    })
+                }
+                plot_area::Series::Xy(xy) => {
+                    let pt = xy.data.points.get(point_idx)?;
+                    Some(hover::Entry::Cartesian {
+                        mark_idx,
+                        series_idx,
+                        point_idx,
+                        x: pt.x,
+                        y: pt.y,
+                        series_name: xy.data.name.as_deref(),
+                    })
+                }
+                plot_area::Series::Bars(bars) => {
+                    let bar_series = bars.data.series.get(series_idx)?;
+                    let pt = bar_series.points.get(point_idx)?;
+                    Some(hover::Entry::Cartesian {
+                        mark_idx,
+                        series_idx,
+                        point_idx,
+                        x: pt.x,
+                        y: pt.y,
+                        series_name: bar_series.name(),
+                    })
+                }
+                _ => None,
+            }
+        }
+        hover::Geometry::Pie { mark_idx, slice_idx } => {
+            let plot_area::Series::Pie(pie) = plot_area.series.get(*mark_idx)? else {
+                return None;
+            };
+            let slice = pie.data.slices.get(*slice_idx)?;
+            Some(hover::Entry::Pie {
+                mark_idx: *mark_idx,
+                slice_idx: *slice_idx,
+                label: slice.get_name(),
+                value: slice.value(),
+            })
+        }
+        hover::Geometry::Geographic { mark_idx, point_idx } => {
+            let plot_area::Series::Xy(xy) = plot_area.series.get(*mark_idx)? else {
+                return None;
+            };
+            let pt = xy.data.points.get(*point_idx)?;
+            // Per-point label populated by `bubble_map(...)`; absent
+            // for plain `xy(...).on_geo()`. Tooltip value channel
+            // similarly per-point when available.
+            let label = xy
+                .data
+                .labels
+                .get(*point_idx)
+                .and_then(|l| l.as_deref())
+                .or(xy.data.name.as_deref());
+            let value = xy
+                .data
+                .tooltip_values
+                .get(*point_idx)
+                .copied()
+                .flatten()
+                .unwrap_or(pt.y);
+            Some(hover::Entry::Geographic {
+                mark_idx: *mark_idx,
+                point_idx: *point_idx,
+                label,
+                value,
+            })
+        }
+        hover::Geometry::ChoroplethArea { mark_idx, feature_idx } => {
+            let plot_area::Series::Choropleth(c) = plot_area.series.get(*mark_idx)? else {
+                return None;
+            };
+            let geo_plane = geo_plane?;
+            let feature_id = geo_plane.filtered_ids.get(*feature_idx)?;
+            let feature = geo_plane.geo.as_ref()?.get(feature_id.clone())?;
+            let value = c
+                .data
+                .entries()
+                .iter()
+                .find(|e| e.id() == feature_id)
+                .and_then(|e| e.value());
+            // Touch the per-feature widget tree so the borrow checker
+            // sees `plot_area_tree` as live for the entry's lifetime.
+            // (No state to read today; placeholder for future
+            // per-feature highlight caches.)
+            let _ = plot_area_tree;
+            Some(hover::Entry::Choropleth {
+                mark_idx: *mark_idx,
+                feature_idx: *feature_idx,
+                feature_id: feature_id.as_str(),
+                feature_name: feature.name.as_str(),
+                properties: &feature.properties,
+                value,
+            })
+        }
+    }
+}
+
+/// Renders a [`hover::Annotation`] (an iced [`Element`] plus
+/// positioning chrome) as a floating overlay above the chart.
+///
+/// Constructed inside [`Chart::overlay`] when a hover closure is
+/// installed and the cursor is over a hovered mark. Owns a fresh
+/// [`widget::Tree`] for the inner element — annotation content is
+/// ephemeral, so per-frame tree construction is cheaper than
+/// trying to cache one across hover changes.
+struct AnnotationOverlay<'a, Message, Theme> {
+    annotation: hover::Annotation<'a, Message, Theme>,
+    tree: Tree,
+    cursor: Point,
+    chart_bounds: Rectangle,
+}
+
+impl<Message, Theme> overlay::Overlay<Message, Theme, Renderer> for AnnotationOverlay<'_, Message, Theme>
+where
+    Theme: design::Design,
+{
+    fn layout(&mut self, renderer: &Renderer, bounds: Size) -> layout::Node {
+        let viewport = Rectangle::with_size(bounds);
+        let limits = if self.annotation.snap_within_viewport {
+            layout::Limits::new(Size::ZERO, viewport.size())
+        } else {
+            layout::Limits::new(Size::ZERO, Size::INFINITE)
+        }
+        .shrink(self.annotation.padding);
+
+        let content_layout = self
+            .annotation
+            .content
+            .as_widget_mut()
+            .layout(&mut self.tree, renderer, &limits);
+
+        let content_size = content_layout.size();
+        let pad = self.annotation.padding;
+        let outer_size = Size::new(
+            content_size.width + pad.left + pad.right,
+            content_size.height + pad.top + pad.bottom,
+        );
+
+        // Position the outer rectangle relative to the cursor / mark
+        // anchor based on the annotation's [`Position`] knob. The
+        // chart's flavor of `FollowCursor` flips horizontally around
+        // the chart's mid-x so the box never covers the data: cursor
+        // on the left half → box extends right, cursor on the right
+        // half → box extends left.
+        let cursor = self.cursor;
+        let chart_mid_x = self.chart_bounds.x + self.chart_bounds.width / 2.0;
+        let outer_origin = match self.annotation.position {
+            hover::Position::Top => Point::new(
+                cursor.x - outer_size.width / 2.0,
+                cursor.y - outer_size.height - self.annotation.gap,
+            ),
+            hover::Position::Bottom => Point::new(cursor.x - outer_size.width / 2.0, cursor.y + self.annotation.gap),
+            hover::Position::Left => Point::new(
+                cursor.x - outer_size.width - self.annotation.gap,
+                cursor.y - outer_size.height / 2.0,
+            ),
+            hover::Position::Right => Point::new(cursor.x + self.annotation.gap, cursor.y - outer_size.height / 2.0),
+            hover::Position::FollowCursor => {
+                let on_left_half = cursor.x < chart_mid_x;
+                let x = if on_left_half {
+                    cursor.x + self.annotation.gap
+                } else {
+                    cursor.x - outer_size.width - self.annotation.gap
+                };
+                Point::new(x, cursor.y - outer_size.height / 2.0)
+            }
+        };
+
+        let mut outer = Rectangle {
+            x: outer_origin.x,
+            y: outer_origin.y,
+            width: outer_size.width,
+            height: outer_size.height,
+        };
+
+        if self.annotation.snap_within_viewport {
+            if outer.x < viewport.x {
+                outer.x = viewport.x;
+            } else if viewport.x + viewport.width < outer.x + outer.width {
+                outer.x = viewport.x + viewport.width - outer.width;
+            }
+            if outer.y < viewport.y {
+                outer.y = viewport.y;
+            } else if viewport.y + viewport.height < outer.y + outer.height {
+                outer.y = viewport.y + viewport.height - outer.height;
+            }
+        }
+
+        layout::Node::with_children(outer.size(), vec![
+            content_layout.translate(Vector::new(self.annotation.padding.left, self.annotation.padding.top)),
+        ])
+        .translate(Vector::new(outer.x, outer.y))
+    }
+
+    fn draw(
+        &self,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        defaults: &crate::core::renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+    ) {
+        use crate::core::renderer::Renderer as _;
+
+        let bounds = layout.bounds();
+        let background = theme.background_color();
+        let text_pair = theme.text_pair();
+        let seed = theme.seed();
+        let divider_color = theme.divider_color().resolve(background, text_pair, &seed, None);
+
+        // Solid background so text on top of any underlying chart
+        // content remains readable. The 1px border picks up the
+        // theme's divider color, matching the canvas-drawn default
+        // tooltip box for visual continuity.
+        let box_bg = crate::core::Color { a: 1.0, ..background };
+        renderer.fill_quad(
+            crate::core::renderer::Quad {
+                bounds,
+                border: crate::core::Border {
+                    width: 1.0,
+                    radius: 4.0.into(),
+                    color: divider_color,
+                },
+                ..Default::default()
+            },
+            box_bg,
+        );
+
+        let content_layout = layout.children().next().expect("annotation has one child");
+        self.annotation.content.as_widget().draw(
+            &self.tree,
+            renderer,
+            theme,
+            defaults,
+            content_layout,
+            cursor,
+            &bounds,
+        );
+    }
+
+    fn mouse_interaction(&self, layout: Layout<'_>, cursor: mouse::Cursor, renderer: &Renderer) -> mouse::Interaction {
+        let content_layout = layout.children().next().expect("annotation has one child");
+        self.annotation.content.as_widget().mouse_interaction(
+            &self.tree,
+            content_layout,
+            cursor,
+            &layout.bounds(),
+            renderer,
+        )
+    }
 }
 
 /// Hit-test the cursor against the choropleth's projected polygons.
@@ -1255,6 +1554,7 @@ where
                     let changed = state.hover != new_hover;
 
                     state.hover = new_hover;
+                    state.last_cursor = cursor.position();
                     if changed {
                         shell.request_redraw();
                     }
@@ -1262,12 +1562,14 @@ where
                 None => {
                     if state.hover.is_some() {
                         state.hover = None;
+                        state.last_cursor = None;
                         shell.request_redraw();
                     }
                 }
             },
             Event::Mouse(mouse::Event::CursorLeft) if state.hover.is_some() => {
                 state.hover = None;
+                state.last_cursor = None;
                 shell.request_redraw();
             }
 
@@ -1485,6 +1787,11 @@ where
 
         // Tooltip overlay draws last so hover annotations composite above
         // every other element, including the donut center overlay.
+        // Highlights (tracking line, point markers, polygon stroke,
+        // bubble outline) always render. The tooltip box itself is
+        // suppressed when a user-installed hover closure is present —
+        // [`Chart::overlay`] takes over the box's role with a widget-
+        // based annotation.
         if let Some(hover) = &state.hover
             && let Some(tooltip_config) = self.scene.tooltip()
         {
@@ -1504,6 +1811,7 @@ where
                     scene_tree,
                     viewport,
                     cursor,
+                    self.hover_fn.is_none(),
                 );
             }
         }
@@ -1536,6 +1844,52 @@ where
             }
         }
         mouse::Interaction::None
+    }
+
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut Tree,
+        layout: Layout<'b>,
+        _renderer: &Renderer,
+        _viewport: &Rectangle,
+        _translation: Vector,
+    ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
+        // Only the user-installed hover closure drives the widget-
+        // based annotation overlay. The default tooltip box stays on
+        // the canvas-drawn path in `Chart::draw`.
+        let hover_fn = self.hover_fn.as_ref()?;
+        let state = tree.state.downcast_ref::<State>();
+        let geometry = state.hover.as_ref()?;
+
+        let scene_tree = &tree.children[0];
+        let plot_area_state = scene_tree.children[6].state.downcast_ref::<plot_area::State>();
+        let plot_area = self.scene.plot_area();
+        let entry = build_hover_entry(
+            geometry,
+            plot_area,
+            &scene_tree.children[6],
+            plot_area_state.geo_plane.as_ref(),
+        )?;
+
+        // The cursor is captured in widget-tree state during cursor-
+        // move handling; for layout positioning we only need *some*
+        // anchor near the hovered mark. Fall back to the chart center
+        // when the cursor's been left out (shouldn't happen at
+        // overlay time, since `state.hover.is_some()` already implies
+        // the cursor was inside the plot area).
+        let cursor = state
+            .last_cursor
+            .unwrap_or_else(|| Point::new(layout.bounds().center_x(), layout.bounds().center_y()));
+
+        let annotation = hover_fn(&entry);
+        let inner_tree = Tree::new(&annotation.content);
+
+        Some(overlay::Element::new(Box::new(AnnotationOverlay {
+            annotation,
+            tree: inner_tree,
+            cursor,
+            chart_bounds: layout.bounds(),
+        })))
     }
 }
 
@@ -1642,6 +1996,12 @@ pub fn draw_background(renderer: &mut Renderer, style: &Style, bounds: Rectangle
 ///
 /// Wrapped layering, color resolution, and box layout all live in the
 /// inner functions; this just routes Cartesian vs. Pie hovers.
+///
+/// `draw_box` controls whether the canvas-drawn tooltip box renders
+/// at the end of each path. Highlights (tracking line, point
+/// markers, polygon strokes, bubble outlines) always render —
+/// they're the visual indicator of *what* is hovered, independent
+/// of how the data card is presented.
 #[allow(clippy::too_many_arguments)]
 fn draw_tooltip_overlay<Message>(
     renderer: &mut Renderer,
@@ -1656,6 +2016,7 @@ fn draw_tooltip_overlay<Message>(
     scene_tree: &Tree,
     viewport: &Rectangle,
     cursor: mouse::Cursor,
+    draw_box: bool,
 ) {
     match hover {
         hover::Geometry::Cartesian { data_x, entries } => draw_cartesian_tooltip_overlay(
@@ -1671,6 +2032,7 @@ fn draw_tooltip_overlay<Message>(
             scene,
             scene_tree,
             viewport,
+            draw_box,
         ),
         hover::Geometry::Pie { mark_idx, slice_idx } => draw_pie_tooltip_overlay(
             renderer,
@@ -1685,6 +2047,7 @@ fn draw_tooltip_overlay<Message>(
             scene,
             viewport,
             cursor,
+            draw_box,
         ),
         hover::Geometry::Geographic { mark_idx, point_idx } => draw_geo_tooltip_overlay(
             renderer,
@@ -1699,6 +2062,7 @@ fn draw_tooltip_overlay<Message>(
             scene,
             scene_tree,
             viewport,
+            draw_box,
         ),
         hover::Geometry::ChoroplethArea { mark_idx, feature_idx } => draw_choropleth_tooltip_overlay(
             renderer,
@@ -1714,6 +2078,7 @@ fn draw_tooltip_overlay<Message>(
             scene_tree,
             viewport,
             cursor,
+            draw_box,
         ),
     }
 }
@@ -1738,6 +2103,7 @@ fn draw_cartesian_tooltip_overlay<Message>(
     scene: &scene::Scene<'_, Message, Renderer>,
     scene_tree: &Tree,
     viewport: &Rectangle,
+    draw_box: bool,
 ) {
     use crate::core::renderer::Renderer as _;
     use crate::widget::canvas::{Frame, Path, Stroke};
@@ -1940,17 +2306,19 @@ fn draw_cartesian_tooltip_overlay<Message>(
         });
 
         let flip_axis_x = plot_bounds.x + plane.bounds.width / 2.0;
-        draw_tooltip_box(
-            renderer,
-            design,
-            tooltip_config,
-            &entries,
-            Point::new(anchor_x, anchor_y),
-            flip_axis_x,
-            chart_bounds,
-            text_color,
-            viewport,
-        );
+        if draw_box {
+            draw_tooltip_box(
+                renderer,
+                design,
+                tooltip_config,
+                &entries,
+                Point::new(anchor_x, anchor_y),
+                flip_axis_x,
+                chart_bounds,
+                text_color,
+                viewport,
+            );
+        }
     });
 }
 
@@ -1975,6 +2343,7 @@ fn draw_pie_tooltip_overlay<Message>(
     scene: &scene::Scene<'_, Message, Renderer>,
     viewport: &Rectangle,
     cursor: mouse::Cursor,
+    draw_box: bool,
 ) {
     use crate::core::renderer::Renderer as _;
 
@@ -2043,19 +2412,21 @@ fn draw_pie_tooltip_overlay<Message>(
         tooltip_config
     };
 
-    renderer.with_layer(*viewport, |renderer| {
-        draw_tooltip_box(
-            renderer,
-            design,
-            effective_tooltip,
-            &entries,
-            cursor_pos,
-            flip_axis_x,
-            chart_bounds,
-            text_color,
-            viewport,
-        );
-    });
+    if draw_box {
+        renderer.with_layer(*viewport, |renderer| {
+            draw_tooltip_box(
+                renderer,
+                design,
+                effective_tooltip,
+                &entries,
+                cursor_pos,
+                flip_axis_x,
+                chart_bounds,
+                text_color,
+                viewport,
+            );
+        });
+    }
 }
 
 /// Draws the geographic hover overlay — a stroke ring around the
@@ -2079,6 +2450,7 @@ fn draw_geo_tooltip_overlay<Message>(
     scene: &scene::Scene<'_, Message, Renderer>,
     scene_tree: &Tree,
     viewport: &Rectangle,
+    draw_box: bool,
 ) {
     use crate::core::renderer::Renderer as _;
     use crate::widget::canvas::{Frame, Path, Stroke};
@@ -2225,18 +2597,20 @@ fn draw_geo_tooltip_overlay<Message>(
             });
         }
 
-        let box_anchor = Point::new(box_anchor_x, anchor_abs.y);
-        draw_tooltip_box(
-            renderer,
-            design,
-            effective_tooltip,
-            &entries,
-            box_anchor,
-            flip_axis_x,
-            chart_bounds,
-            text_color,
-            viewport,
-        );
+        if draw_box {
+            let box_anchor = Point::new(box_anchor_x, anchor_abs.y);
+            draw_tooltip_box(
+                renderer,
+                design,
+                effective_tooltip,
+                &entries,
+                box_anchor,
+                flip_axis_x,
+                chart_bounds,
+                text_color,
+                viewport,
+            );
+        }
     });
 }
 
@@ -2262,6 +2636,7 @@ fn draw_choropleth_tooltip_overlay<Message>(
     scene_tree: &Tree,
     viewport: &Rectangle,
     cursor: mouse::Cursor,
+    draw_box: bool,
 ) {
     use crate::core::renderer::Renderer as _;
     use crate::widget::canvas::{Frame, Path, Stroke};
@@ -2418,19 +2793,21 @@ fn draw_choropleth_tooltip_overlay<Message>(
         });
     }
 
-    renderer.with_layer(*viewport, |renderer| {
-        draw_tooltip_box(
-            renderer,
-            design,
-            effective_tooltip,
-            &entries,
-            cursor_pos,
-            flip_axis_x,
-            chart_bounds,
-            text_color,
-            viewport,
-        );
-    });
+    if draw_box {
+        renderer.with_layer(*viewport, |renderer| {
+            draw_tooltip_box(
+                renderer,
+                design,
+                effective_tooltip,
+                &entries,
+                cursor_pos,
+                flip_axis_x,
+                chart_bounds,
+                text_color,
+                viewport,
+            );
+        });
+    }
 }
 
 /// Render the tooltip box body (background, swatches, text rows).
