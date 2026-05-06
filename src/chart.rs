@@ -1708,7 +1708,7 @@ fn draw_cartesian_tooltip_overlay<Message>(
                     crate::data::Datum { x: pt.x, y: pt.y },
                     line.data.name().map(|s| s.to_string()),
                     line.data.color,
-                    hover::Annotation::PointMarker { pixel, radius: 4.0 },
+                    hover::Highlight::PointMarker { pixel, radius: 4.0 },
                 )
             } else {
                 continue;
@@ -1722,7 +1722,7 @@ fn draw_cartesian_tooltip_overlay<Message>(
                     crate::data::Datum { x: pt.x, y: pt.y },
                     ser.name().map(|s| s.to_string()),
                     ser.color,
-                    hover::Annotation::PointMarker { pixel, radius: 4.0 },
+                    hover::Highlight::PointMarker { pixel, radius: 4.0 },
                 )
             } else {
                 continue;
@@ -1735,7 +1735,7 @@ fn draw_cartesian_tooltip_overlay<Message>(
                     crate::data::Datum { x: pt.x, y: pt.y },
                     xy.data.name.as_deref().map(|s| s.to_string()),
                     None,
-                    hover::Annotation::PointMarker { pixel, radius: 4.0 },
+                    hover::Highlight::PointMarker { pixel, radius: 4.0 },
                 )
             } else {
                 continue;
@@ -1757,7 +1757,7 @@ fn draw_cartesian_tooltip_overlay<Message>(
                     crate::data::Datum { x: pt.x, y: pt.y },
                     bar_series.name().map(|s| s.to_string()),
                     None,
-                    hover::Annotation::None,
+                    hover::Highlight::None,
                 )
             } else {
                 continue;
@@ -1812,7 +1812,7 @@ fn draw_cartesian_tooltip_overlay<Message>(
         // Tracking line — only for continuous marks (line/area/xy), not discrete (bars)
         let has_continuous = entries
             .iter()
-            .any(|re| matches!(re.annotation, hover::Annotation::PointMarker { .. }));
+            .any(|re| matches!(re.annotation, hover::Highlight::PointMarker { .. }));
         if tooltip_config.tracking_line && has_continuous {
             let line_x = tracking_pixel_x - plane.bounds.x;
             let tracking_color = crate::core::Color { a: 0.18, ..text_color };
@@ -1834,7 +1834,7 @@ fn draw_cartesian_tooltip_overlay<Message>(
         if tooltip_config.markers {
             for re in &entries {
                 match &re.annotation {
-                    hover::Annotation::PointMarker { pixel, radius } => {
+                    hover::Highlight::PointMarker { pixel, radius } => {
                         let cx = pixel.x - plane.bounds.x;
                         let cy = pixel.y - plane.bounds.y;
 
@@ -1847,8 +1847,8 @@ fn draw_cartesian_tooltip_overlay<Message>(
                             Stroke::default().with_width(1.5).with_color(crate::core::Color::WHITE),
                         );
                     }
-                    hover::Annotation::None => {}
-                    hover::Annotation::Ring { .. } => {}
+                    hover::Highlight::None => {}
+                    hover::Highlight::Ring { .. } => {}
                 }
             }
         }
@@ -1935,7 +1935,7 @@ fn draw_pie_tooltip_overlay<Message>(
         },
         anchor: cursor_pos,
         color: slice_color,
-        annotation: hover::Annotation::None,
+        annotation: hover::Highlight::None,
     };
     let entries = [entry];
 
@@ -2105,7 +2105,7 @@ fn draw_geo_tooltip_overlay<Message>(
         },
         anchor: anchor_abs,
         color: bubble_color,
-        annotation: hover::Annotation::Ring {
+        annotation: hover::Highlight::Ring {
             pixel,
             radius: radius + 2.0,
             color: bubble_color,
@@ -2122,7 +2122,7 @@ fn draw_geo_tooltip_overlay<Message>(
             let mut frame = Frame::new(renderer, frame_size);
             for re in &entries {
                 match &re.annotation {
-                    hover::Annotation::Ring {
+                    hover::Highlight::Ring {
                         pixel,
                         radius,
                         color,
@@ -2133,8 +2133,8 @@ fn draw_geo_tooltip_overlay<Message>(
                         let path = Path::circle(Point::new(cx, cy), *radius);
                         frame.stroke(&path, Stroke::default().with_width(*width).with_color(*color));
                     }
-                    hover::Annotation::PointMarker { .. } => {}
-                    hover::Annotation::None => {}
+                    hover::Highlight::PointMarker { .. } => {}
+                    hover::Highlight::None => {}
                 }
             }
             renderer.with_translation(crate::core::Vector::new(plot_bounds.x, plot_bounds.y), |renderer| {

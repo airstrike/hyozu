@@ -1,10 +1,10 @@
-/// Visual annotation drawn at a hovered data point.
+/// Visual highlight drawn at a hovered data point.
 ///
 /// Each mark type produces a default variant when building tooltip
 /// entries. The renderer matches exhaustively — adding a variant
 /// forces handling at every consumer.
 #[non_exhaustive]
-pub(crate) enum Annotation {
+pub(crate) enum Highlight {
     /// Filled circle + white ring. Default for Line, Area, Xy.
     PointMarker { pixel: crate::core::Point, radius: f32 },
     /// No visual at the data point. Default for Bars.
@@ -66,5 +66,5 @@ pub(crate) struct Entry {
     /// Anchor point for tooltip-box vertical centering.
     pub anchor: crate::core::Point,
     pub color: crate::core::Color,
-    pub annotation: Annotation,
+    pub annotation: Highlight,
 }
