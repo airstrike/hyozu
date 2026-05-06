@@ -1,7 +1,7 @@
 use hyozu::mark::pie;
 use hyozu::{Color, data, donut, legend, palette};
 use iced::widget::{center, column, container, pick_list, row, space, text};
-use iced::{Border, Center, Fill, Subscription, Task, Theme, keyboard};
+use iced::{Border, Center, Fill, Font, Subscription, Task, Theme, keyboard};
 
 pub fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
@@ -151,7 +151,27 @@ impl App {
                 column![text(total_text).size(48), text("FY 2026").size(13)]
                     .spacing(2)
                     .align_x(Center),
-            ));
+            ))
+            .hover(|entry| match entry {
+                hyozu::hover::Entry::Pie {
+                    label, value, total, ..
+                } => {
+                    let name = label.unwrap_or("Slice").to_string();
+                    let share = if *total > 0.0 { 100.0 * value / total } else { 0.0 };
+                    let semibold = Font {
+                        weight: iced::font::Weight::Semibold,
+                        ..Font::DEFAULT
+                    };
+                    hyozu::hover::Annotation::new(
+                        column![
+                            text(name).size(14).font(semibold),
+                            text(format!("{share:.1}%  ·  ${value:.1}M")).size(12),
+                        ]
+                        .spacing(2),
+                    )
+                }
+                _ => hyozu::hover::Annotation::new(text("")),
+            });
 
         let card = container(column![header, donut_widget].spacing(16))
             .padding(24)

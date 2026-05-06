@@ -82,31 +82,57 @@ pub struct Choropleth {
     /// whose entry is absent from the data. When `None`, the renderer
     /// falls back to the theme's [`Design::missing_fill`](crate::Design::missing_fill).
     pub(crate) missing_color: Option<crate::core::Color>,
-    /// Optional override for the hover outline drawn around the
-    /// hovered feature's projected polygons. `None` leaves the
-    /// renderer to pick a sensible default (theme text color at
-    /// 0.85 alpha, 1.25px).
-    pub(crate) hover_outline: Option<HoverOutline>,
+    /// Optional hover-time appearance overrides. `None` leaves the
+    /// renderer to pick theme-derived defaults; setting any field
+    /// on [`HoverStyle`] overrides just that field.
+    pub(crate) hover_style: Option<HoverStyle>,
 }
 
-/// Stroke style for the hover outline drawn around a hovered
-/// choropleth feature. Matches the canvas `Stroke` shape used
-/// elsewhere — width in pixels, color resolved by the renderer.
-#[derive(Debug, Clone, Copy)]
-pub struct HoverOutline {
-    pub(crate) width: f32,
-    pub(crate) color: crate::core::Color,
+/// Hover-time appearance overrides for a [`Choropleth`].
+///
+/// Built via [`HoverStyle::default`] + chained setters — only
+/// the fields you set override the theme-derived defaults.
+/// Mirrors the struct-shaped style pattern iced uses for
+/// `container::Style`, `button::Style`, etc.
+///
+/// ```ignore
+/// use hyozu::mark::choropleth::HoverStyle;
+///
+/// // Just the stroke color, default width:
+/// HoverStyle::default().outline_color(Color::WHITE)
+///
+/// // Heavier stroke + custom color:
+/// HoverStyle::default().outline_width(2.5).outline_color(Color::WHITE)
+/// ```
+#[derive(Debug, Clone, Copy, Default)]
+pub struct HoverStyle {
+    pub(crate) outline_width: Option<f32>,
+    pub(crate) outline_color: Option<crate::core::Color>,
 }
 
-impl HoverOutline {
-    /// Stroke width in pixels.
-    pub fn width(&self) -> f32 {
-        self.width
+impl HoverStyle {
+    /// Width (px) of the outline stroked around the hovered
+    /// feature's projected polygons. Defaults to 1.25 when unset.
+    pub fn outline_width(mut self, width: f32) -> Self {
+        self.outline_width = Some(width);
+        self
     }
 
-    /// Stroke color (already-resolved RGBA).
-    pub fn color(&self) -> crate::core::Color {
-        self.color
+    /// Color of the outline stroke. Defaults to the theme's text
+    /// color at 0.85 alpha when unset.
+    pub fn outline_color(mut self, color: impl Into<crate::core::Color>) -> Self {
+        self.outline_color = Some(color.into());
+        self
+    }
+
+    /// Returns the configured outline width, if set.
+    pub fn outline_width_value(&self) -> Option<f32> {
+        self.outline_width
+    }
+
+    /// Returns the configured outline color, if set.
+    pub fn outline_color_value(&self) -> Option<crate::core::Color> {
+        self.outline_color
     }
 }
 
@@ -135,7 +161,7 @@ impl<const N: usize> IntoChoropleth for [ChoroplethEntry; N] {
             legend: default_legend(),
             selected: None,
             missing_color: None,
-            hover_outline: None,
+            hover_style: None,
         }
     }
 }
@@ -151,7 +177,7 @@ impl IntoChoropleth for Vec<ChoroplethEntry> {
             legend: default_legend(),
             selected: None,
             missing_color: None,
-            hover_outline: None,
+            hover_style: None,
         }
     }
 }
@@ -177,7 +203,7 @@ where
             legend: default_legend(),
             selected: None,
             missing_color: None,
-            hover_outline: None,
+            hover_style: None,
         }
     }
 }
@@ -203,7 +229,7 @@ where
             legend: default_legend(),
             selected: None,
             missing_color: None,
-            hover_outline: None,
+            hover_style: None,
         }
     }
 }
@@ -321,23 +347,25 @@ impl Choropleth {
         self
     }
 
-    /// Sets the stroke drawn around the hovered feature's projected
-    /// polygons. Default is the theme's text color at 0.85 alpha and
-    /// 1.25px — calling this overrides both. Use a heavier stroke
-    /// for editorial maps where the highlight needs to read as a
-    /// clear callout, or a thinner one when the hovered area is
-    /// already visually distinct from neighbours.
-    pub fn hover_outline(mut self, width: f32, color: impl Into<crate::core::Color>) -> Self {
-        self.hover_outline = Some(HoverOutline {
-            width,
-            color: color.into(),
-        });
+    /// Sets hover-time appearance overrides. Construct via
+    /// [`HoverStyle::default`] and use the chained setters to
+    /// override only the fields you care about; the rest fall back
+    /// to theme-derived defaults.
+    ///
+    /// ```ignore
+    /// use hyozu::mark::choropleth::HoverStyle;
+    ///
+    /// hyozu::choropleth(entries)
+    ///     .hover_style(HoverStyle::default().outline_color(Color::WHITE).outline_width(2.0))
+    /// ```
+    pub fn hover_style(mut self, style: HoverStyle) -> Self {
+        self.hover_style = Some(style);
         self
     }
 
-    /// Returns the user-supplied hover outline override, if any.
-    pub fn hover_outline_config(&self) -> Option<HoverOutline> {
-        self.hover_outline
+    /// Returns the user-supplied hover style overrides, if any.
+    pub fn hover_style_config(&self) -> Option<HoverStyle> {
+        self.hover_style
     }
 
     /// Returns the entries.

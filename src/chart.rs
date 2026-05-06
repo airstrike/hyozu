@@ -2683,13 +2683,15 @@ fn draw_choropleth_tooltip_overlay<Message>(
     let seed = design.seed();
     let text_color = design.text_color().resolve(background, text_pair, &seed, None);
 
-    // Hovered-feature outline: user override on the mark wins;
-    // otherwise theme text color at moderate alpha so it reads as
-    // foreground without overwhelming the polygon fill.
-    let (stroke_color, stroke_width) = match c.data.hover_outline_config() {
-        Some(o) => (o.color(), o.width()),
-        None => (crate::core::Color { a: 0.85, ..text_color }, 1.25),
-    };
+    // Hovered-feature outline: per-field override on the mark's
+    // [`HoverStyle`] wins; otherwise theme text color at moderate
+    // alpha so it reads as foreground without overwhelming the
+    // polygon fill.
+    let style = c.data.hover_style_config();
+    let stroke_color = style
+        .and_then(|s| s.outline_color_value())
+        .unwrap_or(crate::core::Color { a: 0.85, ..text_color });
+    let stroke_width = style.and_then(|s| s.outline_width_value()).unwrap_or(1.25);
 
     // Swatch color: the resolved fill the choropleth painted for this
     // feature, snapshot at draw-time into `state.fill_colors` (aligned
