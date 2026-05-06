@@ -2466,7 +2466,7 @@ fn draw_pie_tooltip_overlay<Message>(
 /// dashed crosshair across longitudes would carry no useful meaning
 /// on a projected map. The tooltip box anchors at the bubble center
 /// and clamps to the chart bounds via the existing flip-axis logic.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::unit_arg)]
 fn draw_geo_tooltip_overlay<Message>(
     renderer: &mut Renderer,
     design: &dyn design::Design,
@@ -2651,7 +2651,7 @@ fn draw_geo_tooltip_overlay<Message>(
 /// is the visual focus. The tooltip box anchors at the cursor and
 /// flips left/right around the chart's mid-x via the same logic
 /// [`draw_tooltip_box`] uses for cartesian charts.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::unit_arg)]
 fn draw_choropleth_tooltip_overlay<Message>(
     renderer: &mut Renderer,
     design: &dyn design::Design,
