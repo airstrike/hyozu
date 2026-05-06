@@ -621,11 +621,13 @@ fn build_hover_entry<'b, Message>(
                 return None;
             };
             let slice = pie.data.slices.get(*slice_idx)?;
+            let total: f64 = pie.data.slices.iter().map(|s| s.value()).sum();
             Some(hover::Entry::Pie {
                 mark_idx: *mark_idx,
                 slice_idx: *slice_idx,
                 label: slice.get_name(),
                 value: slice.value(),
+                total,
             })
         }
         hover::Geometry::Geographic { mark_idx, point_idx } => {
@@ -2681,10 +2683,13 @@ fn draw_choropleth_tooltip_overlay<Message>(
     let seed = design.seed();
     let text_color = design.text_color().resolve(background, text_pair, &seed, None);
 
-    // Hovered-feature outline: theme text color at moderate alpha so
-    // it reads as foreground without overwhelming the polygon fill.
-    let stroke_color = crate::core::Color { a: 0.85, ..text_color };
-    let stroke_width = 1.25;
+    // Hovered-feature outline: user override on the mark wins;
+    // otherwise theme text color at moderate alpha so it reads as
+    // foreground without overwhelming the polygon fill.
+    let (stroke_color, stroke_width) = match c.data.hover_outline_config() {
+        Some(o) => (o.color(), o.width()),
+        None => (crate::core::Color { a: 0.85, ..text_color }, 1.25),
+    };
 
     // Swatch color: the resolved fill the choropleth painted for this
     // feature, snapshot at draw-time into `state.fill_colors` (aligned

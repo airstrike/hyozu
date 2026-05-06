@@ -82,6 +82,32 @@ pub struct Choropleth {
     /// whose entry is absent from the data. When `None`, the renderer
     /// falls back to the theme's [`Design::missing_fill`](crate::Design::missing_fill).
     pub(crate) missing_color: Option<crate::core::Color>,
+    /// Optional override for the hover outline drawn around the
+    /// hovered feature's projected polygons. `None` leaves the
+    /// renderer to pick a sensible default (theme text color at
+    /// 0.85 alpha, 1.25px).
+    pub(crate) hover_outline: Option<HoverOutline>,
+}
+
+/// Stroke style for the hover outline drawn around a hovered
+/// choropleth feature. Matches the canvas `Stroke` shape used
+/// elsewhere — width in pixels, color resolved by the renderer.
+#[derive(Debug, Clone, Copy)]
+pub struct HoverOutline {
+    pub(crate) width: f32,
+    pub(crate) color: crate::core::Color,
+}
+
+impl HoverOutline {
+    /// Stroke width in pixels.
+    pub fn width(&self) -> f32 {
+        self.width
+    }
+
+    /// Stroke color (already-resolved RGBA).
+    pub fn color(&self) -> crate::core::Color {
+        self.color
+    }
 }
 
 fn default_legend() -> Option<legend::Config> {
@@ -109,6 +135,7 @@ impl<const N: usize> IntoChoropleth for [ChoroplethEntry; N] {
             legend: default_legend(),
             selected: None,
             missing_color: None,
+            hover_outline: None,
         }
     }
 }
@@ -124,6 +151,7 @@ impl IntoChoropleth for Vec<ChoroplethEntry> {
             legend: default_legend(),
             selected: None,
             missing_color: None,
+            hover_outline: None,
         }
     }
 }
@@ -149,6 +177,7 @@ where
             legend: default_legend(),
             selected: None,
             missing_color: None,
+            hover_outline: None,
         }
     }
 }
@@ -174,6 +203,7 @@ where
             legend: default_legend(),
             selected: None,
             missing_color: None,
+            hover_outline: None,
         }
     }
 }
@@ -289,6 +319,25 @@ impl Choropleth {
     pub fn missing_color(mut self, color: impl Into<crate::core::Color>) -> Self {
         self.missing_color = Some(color.into());
         self
+    }
+
+    /// Sets the stroke drawn around the hovered feature's projected
+    /// polygons. Default is the theme's text color at 0.85 alpha and
+    /// 1.25px — calling this overrides both. Use a heavier stroke
+    /// for editorial maps where the highlight needs to read as a
+    /// clear callout, or a thinner one when the hovered area is
+    /// already visually distinct from neighbours.
+    pub fn hover_outline(mut self, width: f32, color: impl Into<crate::core::Color>) -> Self {
+        self.hover_outline = Some(HoverOutline {
+            width,
+            color: color.into(),
+        });
+        self
+    }
+
+    /// Returns the user-supplied hover outline override, if any.
+    pub fn hover_outline_config(&self) -> Option<HoverOutline> {
+        self.hover_outline
     }
 
     /// Returns the entries.

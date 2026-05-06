@@ -130,6 +130,10 @@ pub enum Entry<'a> {
         slice_idx: usize,
         label: Option<&'a str>,
         value: f64,
+        /// Sum of every slice's value in this pie. Pre-computed so
+        /// closures can derive `value / total` for the share without
+        /// re-walking the slice list on every hover change.
+        total: f64,
     },
     /// Hover over a geo-projected point mark (geo-Xy bubble).
     Geographic {
