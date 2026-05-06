@@ -77,7 +77,7 @@ where
     Message: 'a,
     Renderer: text::Renderer + geometry::Renderer,
 {
-    pub(super) data: &'a crate::mark::choropleth::Choropleth,
+    pub(crate) data: &'a crate::mark::choropleth::Choropleth,
     /// Whether the mount/data-change sweep runs. Mirrors
     /// [`crate::Data::animate`] (the chart-level toggle); `false` makes
     /// `draw` snap to the laid-out fill colors.

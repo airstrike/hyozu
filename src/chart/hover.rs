@@ -22,7 +22,6 @@ pub(crate) enum Highlight {
     /// shared with the chart's geometry cache via [`std::sync::Arc`] so
     /// constructing this highlight on a hover change is O(1) — the
     /// underlying `Vec<Vec<...>>` is not cloned.
-    #[allow(dead_code)]
     Stroke {
         rings: std::sync::Arc<Vec<Vec<(f32, f32)>>>,
         color: crate::core::Color,
@@ -42,6 +41,8 @@ pub(crate) enum Highlight {
 /// - `Geographic` — geo-projected point marks (geo-Xy bubbles, future
 ///   geo-aware point overlays). Hit-tested by Euclidean proximity to
 ///   the projected pixel center.
+/// - `ChoroplethArea` — geo-projected polygon marks (Choropleth).
+///   Hit-tested by point-in-polygon over the cached projected rings.
 ///
 /// Future readers should NOT try to make the variant set 1:1 with
 /// [`crate::Mark`]. Several marks legitimately share one variant.
@@ -68,6 +69,14 @@ pub(crate) enum Geometry {
         mark_idx: usize,
         /// Index of the point within `state.pixel_points`.
         point_idx: usize,
+    },
+    /// Hover over a choropleth polygon area.
+    ChoroplethArea {
+        /// Index of the `Mark::Choropleth` in the marks list.
+        mark_idx: usize,
+        /// Index of the feature within `Plane::projected_polygons` /
+        /// `Plane::filtered_ids`.
+        feature_idx: usize,
     },
 }
 

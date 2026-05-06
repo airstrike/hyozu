@@ -244,12 +244,18 @@ fn find_nearest_hover<Message>(
     plot_area_tree: &Tree,
     plot_area: &plot_area::PlotArea<'_, Message, Renderer>,
     plane: &plot_area::Plane,
+    geo_plane: Option<&plot_area::geo::Plane>,
 ) -> Option<hover::Geometry> {
     if let Some(pie_hover) = find_pie_hover(local, plot_area_tree) {
         return Some(pie_hover);
     }
     if let Some(geo_hover) = find_geo_hover(local, plot_area_tree, plot_area) {
         return Some(geo_hover);
+    }
+    if let Some(geo_plane) = geo_plane
+        && let Some(choropleth_hover) = find_choropleth_hover(local, plot_area, geo_plane)
+    {
+        return Some(choropleth_hover);
     }
     find_nearest_cartesian_hover(local, plot_area_tree, plot_area, plane)
 }
@@ -502,6 +508,33 @@ fn find_geo_hover<Message>(
     }
 
     best.map(|(mark_idx, point_idx, _)| hover::Geometry::Geographic { mark_idx, point_idx })
+}
+
+/// Hit-test the cursor against the choropleth's projected polygons.
+///
+/// Walks every `Series::Choropleth` and runs
+/// [`plot_area::geo::hit_test`] against the chart-level
+/// [`plot_area::Plane`] (which holds the projected rings + bboxes
+/// shared across geo-aware marks). Returns `None` when the cursor is
+/// over no polygon — the caller falls through to the cartesian snap.
+///
+/// In practice a chart only carries one choropleth mark at a time, so
+/// the first match wins; the loop is structured to accommodate future
+/// multi-choropleth layers without ordering surprises.
+fn find_choropleth_hover<Message>(
+    local: Point,
+    plot_area: &plot_area::PlotArea<'_, Message, Renderer>,
+    geo_plane: &plot_area::geo::Plane,
+) -> Option<hover::Geometry> {
+    for (mark_idx, series) in plot_area.series.iter().enumerate() {
+        if !matches!(series, plot_area::Series::Choropleth(_)) {
+            continue;
+        }
+        if let Some(feature_idx) = plot_area::geo::hit_test(geo_plane, local) {
+            return Some(hover::Geometry::ChoroplethArea { mark_idx, feature_idx });
+        }
+    }
+    None
 }
 
 /// Returns a mutable handle to the [`animation::Tick`] hosted on
@@ -1180,6 +1213,7 @@ where
                         plot_area_tree,
                         self.scene.plot_area(),
                         plane,
+                        plot_area_state.geo_plane.as_ref(),
                     );
 
                     // `data_x` is snapped to a discrete pixel-x of an actual data
@@ -1633,6 +1667,21 @@ fn draw_tooltip_overlay<Message>(
             scene,
             scene_tree,
             viewport,
+        ),
+        hover::Geometry::ChoroplethArea { mark_idx, feature_idx } => draw_choropleth_tooltip_overlay(
+            renderer,
+            design,
+            chart_bounds,
+            padding,
+            plot_area_offset,
+            plane,
+            *mark_idx,
+            *feature_idx,
+            tooltip_config,
+            scene,
+            scene_tree,
+            viewport,
+            cursor,
         ),
     }
 }
@@ -2151,6 +2200,172 @@ fn draw_geo_tooltip_overlay<Message>(
             effective_tooltip,
             &entries,
             box_anchor,
+            flip_axis_x,
+            chart_bounds,
+            text_color,
+            viewport,
+        );
+    });
+}
+
+/// Draws the choropleth hover overlay — a stroke around the hovered
+/// polygon's projected rings and a cursor-anchored tooltip box.
+///
+/// The hovered area carries no point-marker concept; the polygon itself
+/// is the visual focus. The tooltip box anchors at the cursor and
+/// flips left/right around the chart's mid-x via the same logic
+/// [`draw_tooltip_box`] uses for cartesian charts.
+#[allow(clippy::too_many_arguments)]
+fn draw_choropleth_tooltip_overlay<Message>(
+    renderer: &mut Renderer,
+    design: &dyn design::Design,
+    chart_bounds: Rectangle,
+    padding: Padding,
+    plot_area_offset: Point,
+    plane: &plot_area::Plane,
+    mark_idx: usize,
+    feature_idx: usize,
+    tooltip_config: &crate::data::tooltip::Tooltip,
+    scene: &scene::Scene<'_, Message, Renderer>,
+    scene_tree: &Tree,
+    viewport: &Rectangle,
+    cursor: mouse::Cursor,
+) {
+    use crate::core::renderer::Renderer as _;
+    use crate::widget::canvas::{Frame, Path, Stroke};
+    use crate::widget::renderer::geometry;
+
+    let plot_area_state = scene_tree.children[6].state.downcast_ref::<plot_area::State>();
+    let Some(geo_plane) = &plot_area_state.geo_plane else {
+        return;
+    };
+    let plot_area = scene.plot_area();
+    let plot_area::Series::Choropleth(c) = &plot_area.series[mark_idx] else {
+        return;
+    };
+    let Some(feature_id) = geo_plane.filtered_ids.get(feature_idx).cloned() else {
+        return;
+    };
+    let Some(rings) = geo_plane.projected_polygons.get(feature_idx) else {
+        return;
+    };
+
+    // Look up the entry value (None when the feature has an
+    // "available, no value" entry, or no entry at all).
+    let entry_value = c
+        .data
+        .entries()
+        .iter()
+        .find(|e| e.id() == &feature_id)
+        .and_then(|e| e.value());
+
+    // Look up the human-readable feature name from the GeoData. Falls
+    // back to the id when the feature has no `name` property.
+    let feature_name = geo_plane
+        .geo
+        .as_ref()
+        .and_then(|geo| geo.get(feature_id.clone()))
+        .map(|f| f.name.clone())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| feature_id.to_string());
+
+    let background = design.background_color();
+    let text_pair = design.text_pair();
+    let seed = design.seed();
+    let text_color = design.text_color().resolve(background, text_pair, &seed, None);
+
+    // Hovered-feature outline: theme text color at moderate alpha so
+    // it reads as foreground without overwhelming the polygon fill.
+    let stroke_color = crate::core::Color { a: 0.85, ..text_color };
+    let stroke_width = 2.0;
+
+    let Some(cursor_pos) = cursor.position() else {
+        return;
+    };
+    let plot_bounds = compute_plot_bounds(chart_bounds, padding, plot_area_offset, plane);
+    let flip_axis_x = plot_bounds.x + plot_bounds.width / 2.0;
+
+    let entry = hover::Entry {
+        tooltip: TooltipEntry {
+            x: feature_idx as f64,
+            y: entry_value.unwrap_or(f64::NAN),
+            series_name: Some(feature_name),
+            series_index: 0,
+            mark_index: mark_idx,
+            color: stroke_color,
+        },
+        anchor: cursor_pos,
+        color: stroke_color,
+        annotation: hover::Highlight::Stroke {
+            rings: std::sync::Arc::new(rings.clone()),
+            color: stroke_color,
+            width: stroke_width,
+        },
+    };
+    let entries = [entry];
+
+    // Honor the chart-level value-format chain when the user hasn't
+    // installed a custom format. With no value, show just the feature
+    // name.
+    let chain_tooltip;
+    let effective_tooltip: &crate::data::tooltip::Tooltip = if tooltip_config.format_is_default() {
+        let mark_format = scene.primary_mark_value_format(mark_idx).cloned();
+        chain_tooltip = tooltip_config.clone().format(move |entry: &TooltipEntry| {
+            let name = entry.series_name.clone().unwrap_or_default();
+            if entry.y.is_nan() {
+                return name;
+            }
+            let formatted = match &mark_format {
+                Some(f) => f(&entry.y),
+                None => crate::scale::default_f64_format(entry.y),
+            };
+            if name.is_empty() {
+                formatted
+            } else {
+                format!("{name}: {formatted}")
+            }
+        });
+        &chain_tooltip
+    } else {
+        tooltip_config
+    };
+
+    renderer.with_layer(*viewport, |renderer| {
+        // Stroke the hovered polygon's rings into a frame translated to
+        // the plot bounds so coordinates match the choropleth's own
+        // draw path.
+        if tooltip_config.markers {
+            let frame_size = crate::core::Size::new(plane.bounds.width, plane.bounds.height);
+            let mut frame = Frame::new(renderer, frame_size);
+            for re in &entries {
+                if let hover::Highlight::Stroke { rings, color, width } = &re.annotation {
+                    for ring in rings.iter() {
+                        if ring.len() < 3 {
+                            continue;
+                        }
+                        let path = Path::new(|builder| {
+                            let (x0, y0) = ring[0];
+                            builder.move_to(Point::new(x0 - plane.bounds.x, y0 - plane.bounds.y));
+                            for &(x, y) in &ring[1..] {
+                                builder.line_to(Point::new(x - plane.bounds.x, y - plane.bounds.y));
+                            }
+                            builder.close();
+                        });
+                        frame.stroke(&path, Stroke::default().with_width(*width).with_color(*color));
+                    }
+                }
+            }
+            renderer.with_translation(crate::core::Vector::new(plot_bounds.x, plot_bounds.y), |renderer| {
+                geometry::Renderer::draw_geometry(renderer, frame.into_geometry());
+            });
+        }
+
+        draw_tooltip_box(
+            renderer,
+            design,
+            effective_tooltip,
+            &entries,
+            cursor_pos,
             flip_axis_x,
             chart_bounds,
             text_color,
