@@ -59,6 +59,19 @@ impl Indicator {
         }
     }
 
+    /// Compact value string for the hover annotation. The data
+    /// values are stored in the indicator's natural units
+    /// (trillions, thousands, millions, percent), so the suffix
+    /// is constant per indicator.
+    fn format_hover_value(&self, value: f64) -> String {
+        match self {
+            Indicator::Gdp => format!("${value:.1}T"),
+            Indicator::GdpPerCapita => format!("${value:.0}K"),
+            Indicator::Population => format!("{value:.0}M"),
+            Indicator::GdpGrowth => format!("{value:.1}%"),
+        }
+    }
+
     fn data(&self) -> Vec<(&'static str, f64)> {
         match self {
             // GDP in trillions USD (2023 estimates, World Bank / IMF)
@@ -1065,9 +1078,31 @@ impl App {
 
         let toolbar = self.view_toolbar();
         let region_bar = self.view_region_bar();
+        let indicator = self.indicator;
         let chart = hyozu::chart(&self.chart_data)
             .height(Fill)
-            .on_action(Message::ChartAction);
+            .on_action(Message::ChartAction)
+            .hover(move |entry| match entry {
+                hyozu::hover::Entry::Choropleth {
+                    feature_name, value, ..
+                } => {
+                    let name = text(feature_name.to_string()).size(14).font(Font {
+                        weight: iced::font::Weight::Semibold,
+                        ..Font::DEFAULT
+                    });
+                    let detail = match value {
+                        Some(v) => text(format!(
+                            "{}: {}",
+                            indicator.short_label(),
+                            indicator.format_hover_value(*v)
+                        ))
+                        .size(12),
+                        None => text("no data".to_string()).size(12),
+                    };
+                    hyozu::hover::Annotation::new(column![name, detail].spacing(2))
+                }
+                _ => hyozu::hover::Annotation::new(text("")),
+            });
 
         column![toolbar, region_bar, chart].width(Fill).height(Fill).into()
     }
