@@ -2429,6 +2429,12 @@ fn draw_tooltip_box(
     let swatch_size: f32 = 8.0;
     let swatch_gap: f32 = 6.0;
     let box_padding: f32 = 8.0;
+    // Asymmetric right padding: the swatch circle has built-in
+    // whitespace around its glyph mass, so the eye reads the left
+    // gap as ~10px even though `box_padding` is 8. Match that on
+    // the right by widening the right margin past the rightmost
+    // glyph, since text bounds are flush to the digit's right edge.
+    let box_padding_right: f32 = box_padding + 4.0;
     let box_gap: f32 = 8.0;
 
     let formatted: Vec<String> = entries.iter().map(|re| (tooltip_config.format)(&re.tooltip)).collect();
@@ -2444,7 +2450,7 @@ fn draw_tooltip_box(
     } else {
         0.0
     };
-    let box_width = box_padding * 2.0 + swatch_space + max_text_width;
+    let box_width = box_padding + swatch_space + max_text_width + box_padding_right;
     let box_height = box_padding * 2.0 + entries.len() as f32 * line_height_px;
 
     // Position tooltip box: right of anchor if to the left of flip_axis_x, else left
