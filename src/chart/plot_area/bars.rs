@@ -21,6 +21,12 @@ fn push_bar_path(
 ) {
     let w = rect.width;
     let h = rect.height;
+    // NaN is the gap convention: a non-finite coordinate or dimension means
+    // "missing value, draw nothing." Without this guard, NaN slips past the
+    // `<=` comparison (NaN compares false) and into the lyon tessellator.
+    if !rect.x.is_finite() || !rect.y.is_finite() || !w.is_finite() || !h.is_finite() {
+        return;
+    }
     if w <= 0.0 || h <= 0.0 {
         return;
     }
@@ -578,6 +584,9 @@ where
                     .zip(series.points.iter())
                     .enumerate()
                     .map(|(bar_idx, (rect, point))| {
+                        if !point.y.is_finite() {
+                            return None;
+                        }
                         let text = (label_config.format)(point.y);
                         if text.is_empty() {
                             return None;
@@ -798,6 +807,9 @@ where
                 let is_horizontal = self.data.direction == crate::mark::bar::Direction::Horizontal;
 
                 for (bar_idx, (rect, point)) in rects.iter().zip(series.points.iter()).enumerate() {
+                    if !point.y.is_finite() {
+                        continue;
+                    }
                     // Format the label text
                     let label_text = (label_config.format)(point.y);
 
@@ -922,7 +934,9 @@ where
 
             for (series_idx, rects) in state.series_rects.iter().enumerate() {
                 for (bar_idx, rect) in rects.iter().enumerate() {
-                    if should_highlight(series_idx, bar_idx) {
+                    let rect_finite =
+                        rect.x.is_finite() && rect.y.is_finite() && rect.width.is_finite() && rect.height.is_finite();
+                    if should_highlight(series_idx, bar_idx) && rect_finite {
                         // Outer white stroke on expanded rect
                         let outer_rect = Rectangle {
                             x: rect.x - 1.0,

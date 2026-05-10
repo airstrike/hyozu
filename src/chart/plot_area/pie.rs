@@ -12,6 +12,14 @@ use crate::widget::renderer::geometry;
 /// Number of line segments per full circle for arc approximation.
 const ARC_SEGMENTS_PER_TAU: usize = 64;
 
+/// Treats non-finite slice values (NaN, ±∞) as the gap convention:
+/// the slice contributes nothing to the total and renders a zero-sweep
+/// arc, so a stray `+∞` doesn't propagate into `proportion = ∞/∞ = NaN`
+/// and crash the tessellator. See `feedback_nan_as_gap.md`.
+fn finite_or_zero(v: f64) -> f64 {
+    if v.is_finite() { v.max(0.0) } else { 0.0 }
+}
+
 /// Padding reserved around the pie when any visible slice has an outside label.
 const OUTSIDE_LABEL_PAD: f32 = 24.0;
 
@@ -146,7 +154,7 @@ where
     pub fn layout(&self, tree: &mut Tree, _renderer: &Renderer, limits: &Limits, _plane: &Plane) -> Node {
         let state = tree.state.downcast_mut::<State>();
 
-        let total: f64 = self.data.slices.iter().map(|s| s.value.max(0.0)).sum();
+        let total: f64 = self.data.slices.iter().map(|s| finite_or_zero(s.value)).sum();
 
         if total == 0.0 {
             state.slice_angles.clear();
@@ -177,7 +185,7 @@ where
             .slices
             .iter()
             .map(|slice| {
-                let proportion = (slice.value.max(0.0) / total) as f32;
+                let proportion = (finite_or_zero(slice.value) / total) as f32;
                 let sweep = proportion * std::f32::consts::TAU;
                 let start = current_angle;
                 let end = current_angle + sweep;
@@ -198,7 +206,7 @@ where
                 let label = slice.label.as_ref()?;
 
                 let mid = (start + end) / 2.0;
-                let pct = slice.value.max(0.0) / total;
+                let pct = finite_or_zero(slice.value) / total;
                 let text = self.format_label(label, slice.value, pct);
                 if text.is_empty() {
                     return None;
@@ -258,7 +266,7 @@ where
         let layout_bounds = layout.bounds();
         let mut frame = Frame::new(renderer, layout_bounds.size());
 
-        let total: f64 = self.data.slices.iter().map(|s| s.value.max(0.0)).sum();
+        let total: f64 = self.data.slices.iter().map(|s| finite_or_zero(s.value)).sum();
         let visibility = if total > 0.0 {
             compute_visibility(self.data, total)
         } else {
@@ -362,7 +370,7 @@ where
                 let end = *end_angle;
                 let mid = (start + end) / 2.0;
 
-                let pct = slice.value.max(0.0) / total;
+                let pct = finite_or_zero(slice.value) / total;
                 let label_text = self.format_label(label, slice.value, pct);
                 if label_text.is_empty() {
                     continue;
@@ -573,21 +581,27 @@ where
 fn compute_visibility(pie: &crate::mark::pie::Pie, total: f64) -> Vec<bool> {
     pie.slices
         .iter()
-        .map(|s| match s.label.as_ref().map(|l| l.show) {
-            None => true,
-            Some(Show::All) => true,
-            Some(Show::Threshold(t)) => {
-                let frac = (s.value.max(0.0) / total) as f32;
-                frac >= t.clamp(0.0, 1.0)
+        .map(|s| {
+            // Non-finite slice values are gaps — no slice arc, no label.
+            if !s.value.is_finite() {
+                return false;
             }
-            Some(Show::Top(n)) => {
-                if n == 0 {
-                    return false;
+            match s.label.as_ref().map(|l| l.show) {
+                None => true,
+                Some(Show::All) => true,
+                Some(Show::Threshold(t)) => {
+                    let frac = (finite_or_zero(s.value) / total) as f32;
+                    frac >= t.clamp(0.0, 1.0)
                 }
-                let mut values: Vec<f64> = pie.slices.iter().map(|s| s.value.max(0.0)).collect();
-                values.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
-                let cutoff = values.get(n.saturating_sub(1)).copied().unwrap_or(f64::INFINITY);
-                s.value.max(0.0) >= cutoff && s.value.max(0.0) > 0.0
+                Some(Show::Top(n)) => {
+                    if n == 0 {
+                        return false;
+                    }
+                    let mut values: Vec<f64> = pie.slices.iter().map(|s| finite_or_zero(s.value)).collect();
+                    values.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+                    let cutoff = values.get(n.saturating_sub(1)).copied().unwrap_or(f64::INFINITY);
+                    finite_or_zero(s.value) >= cutoff && finite_or_zero(s.value) > 0.0
+                }
             }
         })
         .collect()
