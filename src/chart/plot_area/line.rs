@@ -148,6 +148,12 @@ where
             let segments: Vec<(Point, Point)> = state.pixel_points.windows(2).map(|w| (w[0], w[1])).collect();
 
             for (idx, (pixel_point, data_point)) in state.pixel_points.iter().zip(self.data.points.iter()).enumerate() {
+                // Non-finite coordinates are gaps — no label, no placement
+                // search (which would otherwise let a NaN rect bypass the
+                // bounds check and crash `fill_text`).
+                if !pixel_point.x.is_finite() || !pixel_point.y.is_finite() {
+                    continue;
+                }
                 // Check if this point should show a label
                 let should_show = match label_config.show {
                     Show::Any => true,
@@ -481,6 +487,11 @@ pub(super) fn draw_markers<R>(
     };
 
     for (idx, point) in pixel_points.iter().enumerate() {
+        // Non-finite pixel = gap; skip the marker rather than feeding NaN
+        // coordinates into the shape path.
+        if !point.x.is_finite() || !point.y.is_finite() {
+            continue;
+        }
         let visible = match config.show {
             Show::Any => true,
             Show::FirstOnly => idx == 0,

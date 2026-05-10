@@ -139,10 +139,20 @@ where
                     for (i, point) in series.points.iter().enumerate() {
                         if i < num_points {
                             let base_y = cumulative_y[i];
-                            let new_y = base_y + point.y;
+                            // NaN/non-finite contribution doesn't poison the
+                            // cumulative chain — subsequent series still see a
+                            // finite baseline. The gap is signalled by emitting
+                            // a NaN-y upper pixel so the polygon splits at this
+                            // index instead of pinching to the baseline.
+                            let inc = if point.y.is_finite() { point.y } else { 0.0 };
+                            let new_y = base_y + inc;
 
                             let base_pixel = plane.to_pixel(Datum::new(point.x, base_y));
-                            let upper_pixel = plane.to_pixel(Datum::new(point.x, new_y));
+                            let upper_pixel = if point.y.is_finite() {
+                                plane.to_pixel(Datum::new(point.x, new_y))
+                            } else {
+                                Point::new(base_pixel.x, f32::NAN)
+                            };
 
                             baseline.push(base_pixel);
                             upper.push(upper_pixel);
@@ -226,6 +236,9 @@ where
             };
 
             for (idx, pixel_point) in upper.iter().enumerate() {
+                if !pixel_point.x.is_finite() || !pixel_point.y.is_finite() {
+                    continue;
+                }
                 let should_show = match label_config.show {
                     Show::Any => true,
                     Show::FirstOnly => idx == 0,
@@ -371,17 +384,36 @@ where
                 ..base_color
             };
 
+            // Build the closed envelope as one or more sub-polygons,
+            // splitting at any non-finite vertex so NaN data renders as a
+            // gap instead of crashing the tessellator. Each contiguous run
+            // of finite (upper, baseline) pairs becomes its own closed
+            // polygon: forward along upper, reverse along baseline.
             let fill_path = Path::new(|builder| {
-                if let Some(first) = upper.first() {
-                    builder.move_to(*first);
+                let n = upper.len().min(baseline.len());
+                let finite = |p: &Point| p.x.is_finite() && p.y.is_finite();
+                let mut run_start: Option<usize> = None;
+                for i in 0..n {
+                    if finite(&upper[i]) && finite(&baseline[i]) {
+                        if run_start.is_none() {
+                            run_start = Some(i);
+                            builder.move_to(upper[i]);
+                        } else {
+                            builder.line_to(upper[i]);
+                        }
+                    } else if let Some(start) = run_start.take() {
+                        for j in (start..i).rev() {
+                            builder.line_to(baseline[j]);
+                        }
+                        builder.close();
+                    }
                 }
-                for p in upper.iter().skip(1) {
-                    builder.line_to(*p);
+                if let Some(start) = run_start.take() {
+                    for j in (start..n).rev() {
+                        builder.line_to(baseline[j]);
+                    }
+                    builder.close();
                 }
-                for p in baseline.iter().rev() {
-                    builder.line_to(*p);
-                }
-                builder.close();
             });
 
             if self.data.gradient {
@@ -403,12 +435,22 @@ where
             }
 
             if let Some(stroke_width) = series.stroke {
+                // Mirror line.rs: break the stroke at any non-finite vertex
+                // so a NaN-y upper produces a real gap rather than a NaN
+                // line_to into the tessellator.
                 let stroke_path = Path::new(|builder| {
-                    if let Some(first) = upper.first() {
-                        builder.move_to(*first);
-                    }
-                    for p in upper.iter().skip(1) {
-                        builder.line_to(*p);
+                    let mut in_segment = false;
+                    for p in upper {
+                        if !p.x.is_finite() || !p.y.is_finite() {
+                            in_segment = false;
+                            continue;
+                        }
+                        if in_segment {
+                            builder.line_to(*p);
+                        } else {
+                            builder.move_to(*p);
+                            in_segment = true;
+                        }
                     }
                 });
                 let segments = dash_segments(&series.style);

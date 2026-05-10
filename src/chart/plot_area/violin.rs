@@ -228,6 +228,18 @@ where
             if entry_layout.right_points.is_empty() {
                 continue;
             }
+            // Silhouette must be entirely finite — a single NaN point breaks
+            // the closed mirrored polygon. Drop the entry rather than render
+            // a half-formed shape.
+            let silhouette_finite = entry_layout
+                .right_points
+                .iter()
+                .chain(entry_layout.left_points.iter())
+                .all(|p| p.x.is_finite() && p.y.is_finite())
+                && entry_layout.center_x.is_finite();
+            if !silhouette_finite {
+                continue;
+            }
 
             let base_color = if let Some(c) = entry_data.color {
                 c.resolve(background, text_pair, &seed, None)
@@ -260,7 +272,13 @@ where
             stroke_frame.stroke(&shape, Stroke::default().with_width(1.0).with_color(base_color));
 
             // Mini box plot overlay
-            if let Some(box_layout) = &entry_layout.box_layout {
+            if let Some(box_layout) = &entry_layout.box_layout
+                && box_layout.min_y.is_finite()
+                && box_layout.q1_y.is_finite()
+                && box_layout.median_y.is_finite()
+                && box_layout.q3_y.is_finite()
+                && box_layout.max_y.is_finite()
+            {
                 let box_half = 3.0; // thin box
                 let cx = entry_layout.center_x;
 

@@ -126,6 +126,21 @@ where
             let bar_center_x = plane.to_pixel(Datum::x(i as f64)).x;
             let x = bar_center_x - bar_width / 2.0;
 
+            // Non-finite entry value = gap: don't poison the running total
+            // and don't emit a renderable rect. The sentinel NaN rect is
+            // skipped by the bar/label/connector loops in `draw`.
+            if !entry.value.is_finite() {
+                state.rects.push(Rectangle {
+                    x: f32::NAN,
+                    y: f32::NAN,
+                    width: f32::NAN,
+                    height: f32::NAN,
+                });
+                state.tops.push(f32::NAN);
+                state.kinds.push(entry.kind);
+                continue;
+            }
+
             match entry.kind {
                 EntryKind::Total => {
                     running_total = entry.value;
@@ -331,6 +346,10 @@ where
             };
             bar_colors.push(color);
 
+            if !rect.x.is_finite() || !rect.y.is_finite() || !rect.width.is_finite() || !rect.height.is_finite() {
+                continue;
+            }
+
             let path = Path::new(|builder| {
                 builder.rectangle(
                     crate::core::Point::new(rect.x, rect.y),
@@ -355,6 +374,12 @@ where
                 let to_rect = &animated_rects[i + 1];
                 let y = animated_tops[i];
 
+                // Skip connectors that touch a gap entry (NaN rect or top).
+                if !y.is_finite() || !from_rect.x.is_finite() || !from_rect.width.is_finite() || !to_rect.x.is_finite()
+                {
+                    continue;
+                }
+
                 let path = Path::new(|builder| {
                     builder.move_to(crate::core::Point::new(from_rect.x + from_rect.width, y));
                     builder.line_to(crate::core::Point::new(to_rect.x, y));
@@ -372,6 +397,9 @@ where
 
         if !animating {
             for (i, (rect, entry)) in state.rects.iter().zip(self.data.entries.iter()).enumerate() {
+                if !rect.x.is_finite() || !rect.y.is_finite() || !rect.width.is_finite() || !rect.height.is_finite() {
+                    continue;
+                }
                 let LabelDraw {
                     text: label_text,
                     position,

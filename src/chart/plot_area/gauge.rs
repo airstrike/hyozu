@@ -87,13 +87,16 @@ where
         let state = tree.state.downcast_mut::<State>();
 
         let range = self.data.max - self.data.min;
-        let proportion = if range > 0.0 {
+        // Treat non-finite value/min/range as a 0 proportion so a stray NaN
+        // doesn't propagate into the value angle and panic the tessellator.
+        let proportion = if range > 0.0 && self.data.value.is_finite() && self.data.min.is_finite() {
             ((self.data.value - self.data.min) / range).clamp(0.0, 1.0) as f32
         } else {
             0.0
         };
 
-        state.sweep_rad = self.data.sweep.to_radians();
+        let sweep_rad = self.data.sweep.to_radians();
+        state.sweep_rad = if sweep_rad.is_finite() { sweep_rad } else { 0.0 };
         state.value_angle = proportion * state.sweep_rad;
 
         Node::new(Size::ZERO)
@@ -772,6 +775,18 @@ fn draw_arc_segment<R: geometry::Renderer>(
     end_angle: f32,
     color: crate::core::Color,
 ) {
+    // Non-finite inputs (NaN value, NaN zone bound, ±∞ sweep) propagate
+    // through cos/sin and panic the tessellator. Bail at the rendering
+    // boundary so any caller is shielded.
+    if !cx.is_finite()
+        || !cy.is_finite()
+        || !inner_radius.is_finite()
+        || !outer_radius.is_finite()
+        || !start_angle.is_finite()
+        || !end_angle.is_finite()
+    {
+        return;
+    }
     let path = Path::new(|builder| {
         // Start at inner radius
         let inner_start = crate::core::Point::new(

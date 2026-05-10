@@ -190,7 +190,14 @@ where
 
         // Per-point sizes were resolved in layout and cached on state.
         for (i, pixel_point) in state.pixel_points.iter().enumerate() {
+            // Non-finite pixel or size = gap; skip the marker.
+            if !pixel_point.x.is_finite() || !pixel_point.y.is_finite() {
+                continue;
+            }
             let cur_size = state.resolved_sizes.get(i).copied().unwrap_or(marker_config.size);
+            if !cur_size.is_finite() {
+                continue;
+            }
             let (center, size) = if has_prev {
                 let prev_pt = state.previous_pixel_points.get(i).copied().unwrap_or(prev_anchor);
                 let prev_size = state.previous_resolved_sizes.get(i).copied().unwrap_or(0.0);

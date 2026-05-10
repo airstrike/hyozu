@@ -296,6 +296,12 @@ where
         seed: &crate::palette::Seed,
     ) {
         for (i, (entry, (el, outlier_radii))) in self.data.entries.iter().zip(animated.iter()).enumerate() {
+            // Box quartiles are interrelated — if any is non-finite, drop
+            // the entry entirely rather than render a half-formed shape.
+            // Outliers are per-point and handled below.
+            if !entry_is_finite(el) {
+                continue;
+            }
             // Resolve color
             let base_color = if let Some(entry_color) = entry.color {
                 entry_color.resolve(background, text_pair, seed, None)
@@ -365,7 +371,7 @@ where
 
             // Outliers
             for (&oy, &radius) in el.outlier_ys.iter().zip(outlier_radii.iter()) {
-                if radius <= 0.0 {
+                if radius <= 0.0 || !oy.is_finite() {
                     continue;
                 }
                 let outlier_path = Path::new(|b| {
@@ -388,6 +394,9 @@ where
         seed: &crate::palette::Seed,
     ) {
         for (i, (entry, (el, outlier_radii))) in self.data.entries.iter().zip(animated.iter()).enumerate() {
+            if !entry_is_finite(el) {
+                continue;
+            }
             // Resolve color
             let base_color = if let Some(entry_color) = entry.color {
                 entry_color.resolve(background, text_pair, seed, None)
@@ -466,7 +475,7 @@ where
 
             // Outliers
             for (&ox, &radius) in el.outlier_ys.iter().zip(outlier_radii.iter()) {
-                if radius <= 0.0 {
+                if radius <= 0.0 || !ox.is_finite() {
                     continue;
                 }
                 let outlier_path = Path::new(|b| {
@@ -476,6 +485,19 @@ where
             }
         }
     }
+}
+
+/// Whether all the box-defining coordinates of an entry are finite. Outlier
+/// coordinates are excluded — they're checked individually so a single NaN
+/// outlier doesn't suppress the whole entry.
+fn entry_is_finite(el: &EntryLayout) -> bool {
+    el.center_x.is_finite()
+        && el.min_y.is_finite()
+        && el.q1_y.is_finite()
+        && el.median_y.is_finite()
+        && el.q3_y.is_finite()
+        && el.max_y.is_finite()
+        && el.box_width.is_finite()
 }
 
 /// Computes the on-screen entry layout at the current sweep progress

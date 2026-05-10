@@ -235,7 +235,14 @@ where
                 let col = idx % cols;
                 let value = self.data.get(row, col);
                 let t = transform.map_to_unit(value, v_min, v_max).clamp(0.0, 1.0) as f32;
-                crate::palette::sample_gradient(&stops, t)
+                // Non-finite value or domain produces a NaN `t`, which the
+                // gradient sampler can propagate into the fill color. Treat
+                // the cell as a gap (transparent) instead.
+                if t.is_finite() {
+                    crate::palette::sample_gradient(&stops, t)
+                } else {
+                    Color::TRANSPARENT
+                }
             })
             .collect();
 
@@ -273,7 +280,7 @@ where
 
                 // Labels suppressed mid-sweep so they don't pop in over
                 // cells that haven't reached their final color yet.
-                if self.data.show_labels && !animating {
+                if self.data.show_labels && !animating && value.is_finite() {
                     let label_text = (self.data.label_format)(value);
 
                     let label_color =

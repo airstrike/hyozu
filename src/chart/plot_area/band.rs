@@ -183,9 +183,13 @@ where
 
         // Optional label at the near edge (top for horizontal, left for vertical).
         // Suppressed mid-sweep so it doesn't pop in over edges that
-        // haven't reached their final positions yet.
+        // haven't reached their final positions yet. Also gated on the
+        // anchor being finite — a non-finite `data.lower`/`data.upper`
+        // produces a NaN `ry`/`rx` that crashes `fill_text`.
         if let Some(label_text) = &self.data.label
             && !animating
+            && rx.is_finite()
+            && ry.is_finite()
         {
             let label_size = 11.0_f32;
             let (position, align_x, align_y) = match self.data.orientation {

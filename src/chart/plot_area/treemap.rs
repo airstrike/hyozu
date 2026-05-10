@@ -111,13 +111,16 @@ where
 
         let gap = self.data.gap;
 
-        // Sort items by value (descending) for squarified algorithm, keeping track of original indices
+        // Sort items by value (descending) for squarified algorithm, keeping track of original indices.
+        // Non-finite values (NaN, +∞) are filtered out: NaN already fails `>
+        // 0.0`, but +∞ would survive and poison the total → NaN proportions
+        // for every other item. Finite check covers both.
         let mut indexed_items: Vec<(usize, f32)> = self
             .data
             .items
             .iter()
             .enumerate()
-            .filter(|(_, item)| item.value > 0.0)
+            .filter(|(_, item)| item.value.is_finite() && item.value > 0.0)
             .map(|(i, item)| (i, item.value))
             .collect();
         indexed_items.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));

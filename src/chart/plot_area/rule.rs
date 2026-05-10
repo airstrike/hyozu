@@ -86,6 +86,13 @@ where
     {
         let state = tree.state.downcast_ref::<State>();
 
+        // Non-finite `data.value` propagates through `plane.to_pixel` to a
+        // NaN position; the line path and label both crash the tessellator.
+        // Treat as a gap.
+        if !state.position.is_finite() {
+            return;
+        }
+
         let background = theme.background_color();
         let text_pair = theme.text_pair();
         let seed = theme.seed();
