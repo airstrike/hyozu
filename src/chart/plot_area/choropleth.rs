@@ -484,8 +484,8 @@ where
         // Ocean color comes from the theme so a host wrapper can match
         // the choropleth's painted background via `theme.ocean_fill()`
         // without hardcoding an RGB constant that drifts when the theme
-        // changes.
-        let ocean_color = theme.ocean_fill();
+        // changes. A per-mark override on the data wins when set.
+        let ocean_color = self.data.ocean_color.unwrap_or_else(|| theme.ocean_fill());
 
         let ocean = Path::new(|builder| {
             builder.rectangle(

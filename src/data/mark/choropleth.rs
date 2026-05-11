@@ -83,6 +83,11 @@ pub struct Choropleth {
     /// whose entry is absent from the data. When `None`, the renderer
     /// falls back to the theme's [`Design::missing_fill`](crate::Design::missing_fill).
     pub(crate) missing_color: Option<crate::core::Color>,
+    /// Optional override for the "ocean" — the decorative background
+    /// painted under the map outside any feature's polygon. When `None`,
+    /// the renderer falls back to the theme's
+    /// [`Design::ocean_fill`](crate::Design::ocean_fill).
+    pub(crate) ocean_color: Option<crate::core::Color>,
     /// Optional hover-time appearance closure. `None` leaves the
     /// renderer to use [`HoverStyle::from_theme`]; otherwise the
     /// closure runs at draw time with the resolved [`Design`] and
@@ -154,6 +159,7 @@ impl std::fmt::Debug for Choropleth {
             .field("legend", &self.legend)
             .field("selected", &self.selected)
             .field("missing_color", &self.missing_color)
+            .field("ocean_color", &self.ocean_color)
             .field("hover_style", &self.hover_style.as_ref().map(|_| "<closure>"))
             .finish()
     }
@@ -207,6 +213,7 @@ impl<const N: usize> IntoChoropleth for [ChoroplethEntry; N] {
             legend: default_legend(),
             selected: None,
             missing_color: None,
+            ocean_color: None,
             hover_style: None,
         }
     }
@@ -223,6 +230,7 @@ impl IntoChoropleth for Vec<ChoroplethEntry> {
             legend: default_legend(),
             selected: None,
             missing_color: None,
+            ocean_color: None,
             hover_style: None,
         }
     }
@@ -249,6 +257,7 @@ where
             legend: default_legend(),
             selected: None,
             missing_color: None,
+            ocean_color: None,
             hover_style: None,
         }
     }
@@ -275,6 +284,7 @@ where
             legend: default_legend(),
             selected: None,
             missing_color: None,
+            ocean_color: None,
             hover_style: None,
         }
     }
@@ -390,6 +400,15 @@ impl Choropleth {
     /// missing/no-data needs a specific brand color.
     pub fn missing_color(mut self, color: impl Into<crate::core::Color>) -> Self {
         self.missing_color = Some(color.into());
+        self
+    }
+
+    /// Sets the fill color used for the "ocean" — the decorative background
+    /// painted under the map in regions that are outside any feature's
+    /// polygon. Overrides the theme's
+    /// [`Design::ocean_fill`](crate::Design::ocean_fill) default.
+    pub fn ocean_color(mut self, color: impl Into<crate::core::Color>) -> Self {
+        self.ocean_color = Some(color.into());
         self
     }
 
