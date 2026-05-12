@@ -348,11 +348,16 @@ fn find_nearest_cartesian_hover<Message>(
     let mut best_dist = f32::INFINITY;
     let mut best_pixel_x = 0.0f32;
 
-    // Pass 1: find globally nearest pixel_x
+    // Pass 1: find globally nearest pixel_x. Treat non-finite pixel points
+    // as gaps (NaN-as-gap policy) so a `(finite_x, NaN_y)` datum can't
+    // become a hover target and feed a NaN center into the tessellator.
     for (mark_idx, child) in plot_area_tree.children.iter().enumerate() {
         if child.tag == line_tag {
             let s = child.state.downcast_ref::<plot_area::line::State>();
             for pt in &s.pixel_points {
+                if !pt.x.is_finite() || !pt.y.is_finite() {
+                    continue;
+                }
                 let d = (pt.x - local.x).abs();
                 if d < best_dist {
                     best_dist = d;
@@ -363,6 +368,9 @@ fn find_nearest_cartesian_hover<Message>(
             let s = child.state.downcast_ref::<plot_area::area::State>();
             for sub in &s.series_points {
                 for pt in sub {
+                    if !pt.x.is_finite() || !pt.y.is_finite() {
+                        continue;
+                    }
                     let d = (pt.x - local.x).abs();
                     if d < best_dist {
                         best_dist = d;
@@ -376,6 +384,9 @@ fn find_nearest_cartesian_hover<Message>(
             }
             let s = child.state.downcast_ref::<plot_area::xy::State>();
             for pt in &s.pixel_points {
+                if !pt.x.is_finite() || !pt.y.is_finite() {
+                    continue;
+                }
                 let d = (pt.x - local.x).abs();
                 if d < best_dist {
                     best_dist = d;
@@ -386,6 +397,10 @@ fn find_nearest_cartesian_hover<Message>(
             let s = child.state.downcast_ref::<plot_area::bars::State>();
             for rects in &s.series_rects {
                 for rect in rects {
+                    if !rect.x.is_finite() || !rect.y.is_finite() || !rect.width.is_finite() || !rect.height.is_finite()
+                    {
+                        continue;
+                    }
                     let center_x = rect.x + rect.width / 2.0;
                     let d = (center_x - local.x).abs();
                     if d < best_dist {
@@ -418,6 +433,9 @@ fn find_nearest_cartesian_hover<Message>(
         if child.tag == line_tag {
             let s = child.state.downcast_ref::<plot_area::line::State>();
             for (pt_idx, pt) in s.pixel_points.iter().enumerate() {
+                if !pt.x.is_finite() || !pt.y.is_finite() {
+                    continue;
+                }
                 if (pt.x - best_pixel_x).abs() <= tolerance {
                     entries.push((mark_idx, 0, pt_idx));
                     break; // one entry per line series
@@ -427,6 +445,9 @@ fn find_nearest_cartesian_hover<Message>(
             let s = child.state.downcast_ref::<plot_area::area::State>();
             for (ser_idx, sub) in s.series_points.iter().enumerate() {
                 for (pt_idx, pt) in sub.iter().enumerate() {
+                    if !pt.x.is_finite() || !pt.y.is_finite() {
+                        continue;
+                    }
                     if (pt.x - best_pixel_x).abs() <= tolerance {
                         entries.push((mark_idx, ser_idx, pt_idx));
                         break;
@@ -439,6 +460,9 @@ fn find_nearest_cartesian_hover<Message>(
             }
             let s = child.state.downcast_ref::<plot_area::xy::State>();
             for (pt_idx, pt) in s.pixel_points.iter().enumerate() {
+                if !pt.x.is_finite() || !pt.y.is_finite() {
+                    continue;
+                }
                 if (pt.x - best_pixel_x).abs() <= tolerance {
                     entries.push((mark_idx, 0, pt_idx));
                     break;
@@ -448,6 +472,10 @@ fn find_nearest_cartesian_hover<Message>(
             let s = child.state.downcast_ref::<plot_area::bars::State>();
             for (ser_idx, rects) in s.series_rects.iter().enumerate() {
                 for (bar_idx, rect) in rects.iter().enumerate() {
+                    if !rect.x.is_finite() || !rect.y.is_finite() || !rect.width.is_finite() || !rect.height.is_finite()
+                    {
+                        continue;
+                    }
                     let center_x = rect.x + rect.width / 2.0;
                     if (center_x - best_pixel_x).abs() <= bar_tolerance {
                         entries.push((mark_idx, ser_idx, bar_idx));
@@ -2242,6 +2270,13 @@ fn draw_cartesian_tooltip_overlay<Message>(
         } else {
             continue;
         };
+
+        // Defense in depth: even if a non-finite datum slipped through
+        // hover detection, refuse to build a circle / box anchor at NaN —
+        // lyon's tessellator panics on PositionIsNaN.
+        if !datum.x.is_finite() || !datum.y.is_finite() {
+            continue;
+        }
 
         let anchor = plane.to_pixel(datum);
 
