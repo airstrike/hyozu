@@ -680,8 +680,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::{Color, color};
     use crate::feature::Id;
     use crate::mark::choropleth::{choropleth_entry, choropleth_entry_available};
+    use crate::palette::{Seed, sample_gradient, sequential, to_oklch};
     use crate::scale::Transform;
 
     fn id(s: &str) -> Id {
@@ -763,6 +765,50 @@ mod tests {
         assert!((blended.g - 0.45).abs() < 1e-6);
         assert!((blended.b - 0.2).abs() < 1e-6);
         assert!((blended.a - 0.8).abs() < 1e-6);
+    }
+
+    #[test]
+    fn sequential_palette_produces_distinct_samples_across_t() {
+        // End-to-end check for the path a caller hits when they pass a
+        // single-hue palette (e.g. `palette::sequential(brand_blue)`)
+        // through the chart's color scale. The renderer discretizes the
+        // sequential palette to N stops via `palette_to_continuous_stops`,
+        // then samples it with `sample_gradient` at each feature's `t`.
+        // Adjacent t values must produce perceptibly distinct colors —
+        // otherwise the choropleth flattens to a single shade.
+        //
+        // Property: samples at t ∈ {0.0, 0.5, 1.0} span ≥ 0.40 OKLch L on
+        // both light and dark backgrounds. Lower than `generate_sequential`'s
+        // own 0.45 span asserted in `palette.rs` because the sqrt domain
+        // mapping squeezes the visible band slightly; 0.40 leaves headroom
+        // without becoming a meaningless guard.
+        let blue = color!(0x3366cc);
+        let palette = sequential(blue);
+
+        for (label, background) in [("light", Color::WHITE), ("dark", Color::BLACK)] {
+            let seed = Seed {
+                primary: blue,
+                secondary: blue,
+                success: blue,
+                warning: blue,
+                danger: blue,
+                background,
+            };
+            let stops = palette_to_continuous_stops(&palette, &seed);
+            let samples: Vec<Color> = [0.0, 0.5, 1.0]
+                .into_iter()
+                .map(|t| sample_gradient(&stops, t))
+                .collect();
+            let lightnesses: Vec<f32> = samples.iter().map(|c| to_oklch(*c).l).collect();
+            let l_min = lightnesses.iter().copied().fold(f32::INFINITY, f32::min);
+            let l_max = lightnesses.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            assert!(
+                l_max - l_min >= 0.40,
+                "{label} bg: sequential samples at t=0/0.5/1.0 should span ≥ 0.40 OKLch L, got {l_max} - {l_min} = {} ({:?})",
+                l_max - l_min,
+                lightnesses
+            );
+        }
     }
 
     #[test]
