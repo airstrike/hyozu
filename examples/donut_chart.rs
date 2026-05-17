@@ -1,4 +1,5 @@
 use hyozu::mark::pie;
+use hyozu::widget::fit_text;
 use hyozu::{Color, data, donut, legend, palette};
 use iced::font::Weight;
 use iced::widget::{center, column, container, pick_list, row, space, text};
@@ -148,11 +149,21 @@ impl App {
             .hole(0.6)
             .design(&self.theme)
             .padding(8)
-            .center(center(
-                column![text(total_text).size(48), text("FY 2026").size(13)]
-                    .spacing(2)
-                    .align_x(Center),
-            ))
+            .center_inset(
+                column![
+                    fit_text(total_text)
+                        .max_size(48.0)
+                        .min_size(12.0)
+                        .width(Fill)
+                        .height(Fill)
+                        .center(),
+                    text("FY 2026").size(13),
+                ]
+                .spacing(2)
+                .align_x(Center)
+                .width(Fill)
+                .height(Fill),
+            )
             .hover(|entry| match entry {
                 hyozu::hover::Entry::Pie {
                     label, value, total, ..

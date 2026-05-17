@@ -12,6 +12,7 @@ serde_json = { version = "1", optional = true }
 tatami = { git = "https://github.com/airstrike/tatami", branch = "master", optional = true }
 
 [features]
+advanced = []
 geojson = ["dep:serde", "dep:serde_json"]
 # Enables the `hyozu::tatami` adapter module — converters from tatami OLAP
 # cube query results into hyozu marks and iced widgets. Pull in with

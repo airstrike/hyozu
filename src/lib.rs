@@ -19,10 +19,11 @@ pub mod target;
 pub mod tatami;
 pub mod text;
 pub mod theme;
+pub mod widget;
 
 // Make our imports look like iced's built-in widgets
-use iced_core as core;
-use iced_widget as widget;
+#[doc(hidden)]
+pub use iced_core as core;
 
 // Re-export iced::Function for `.with()` partial application
 pub use core::Function;
