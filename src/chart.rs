@@ -2103,6 +2103,7 @@ fn draw_tooltip_overlay<Message>(
             *slice_idx,
             tooltip_config,
             scene,
+            scene_tree,
             viewport,
             cursor,
             draw_box,
@@ -2205,15 +2206,19 @@ fn draw_cartesian_tooltip_overlay<Message>(
         // bypassed. See GOG.md § 8b.
         let mut bars_resolved_color: Option<crate::core::Color> = None;
 
-        let (datum, name, explicit_color, highlight) = if child.tag == line_tag {
+        let (datum, name, explicit_color, highlight, anchor) = if child.tag == line_tag {
             if let plot_area::Series::Line(line) = series {
                 let pt = &line.data.points[pt_idx];
-                let pixel = plane.to_pixel(crate::data::Datum { x: pt.x, y: pt.y });
+                let line_state = child.state.downcast_ref::<plot_area::line::State>();
+                let Some(pixel) = line_state.pixel_points.get(pt_idx).copied() else {
+                    continue;
+                };
                 (
                     crate::data::Datum { x: pt.x, y: pt.y },
                     line.data.name().map(|s| s.to_string()),
                     line.data.color,
                     hover::Highlight::PointMarker { pixel, radius: 4.0 },
+                    pixel,
                 )
             } else {
                 continue;
@@ -2222,12 +2227,21 @@ fn draw_cartesian_tooltip_overlay<Message>(
             if let plot_area::Series::Area(area) = series {
                 let ser = &area.data.series[series_idx];
                 let pt = &ser.points[pt_idx];
-                let pixel = plane.to_pixel(crate::data::Datum { x: pt.x, y: pt.y });
+                let area_state = child.state.downcast_ref::<plot_area::area::State>();
+                let Some(pixel) = area_state
+                    .series_points
+                    .get(series_idx)
+                    .and_then(|points| points.get(pt_idx))
+                    .copied()
+                else {
+                    continue;
+                };
                 (
                     crate::data::Datum { x: pt.x, y: pt.y },
                     ser.name().map(|s| s.to_string()),
                     ser.color,
                     hover::Highlight::PointMarker { pixel, radius: 4.0 },
+                    pixel,
                 )
             } else {
                 continue;
@@ -2235,12 +2249,16 @@ fn draw_cartesian_tooltip_overlay<Message>(
         } else if child.tag == xy_tag {
             if let plot_area::Series::Xy(xy) = series {
                 let pt = &xy.data.points[pt_idx];
-                let pixel = plane.to_pixel(crate::data::Datum { x: pt.x, y: pt.y });
+                let xy_state = child.state.downcast_ref::<plot_area::xy::State>();
+                let Some(pixel) = xy_state.pixel_points.get(pt_idx).copied() else {
+                    continue;
+                };
                 (
                     crate::data::Datum { x: pt.x, y: pt.y },
                     xy.data.name.as_deref().map(|s| s.to_string()),
                     None,
                     hover::Highlight::PointMarker { pixel, radius: 4.0 },
+                    pixel,
                 )
             } else {
                 continue;
@@ -2249,6 +2267,13 @@ fn draw_cartesian_tooltip_overlay<Message>(
             if let plot_area::Series::Bars(bars) = series {
                 let bar_series = &bars.data.series[series_idx];
                 let pt = &bar_series.points[pt_idx];
+                let bars_state = child.state.downcast_ref::<plot_area::bars::State>();
+                let anchor = bars_state
+                    .series_rects
+                    .get(series_idx)
+                    .and_then(|rects| rects.get(pt_idx))
+                    .map(|rect| Point::new(rect.x + rect.width / 2.0, rect.y))
+                    .unwrap_or_else(|| plane.to_pixel(crate::data::Datum { x: pt.x, y: pt.y }));
 
                 // Resolve the bar's displayed color via the full priority
                 // chain (point_colors > color_by > series.color > palette)
@@ -2263,6 +2288,7 @@ fn draw_cartesian_tooltip_overlay<Message>(
                     bar_series.name().map(|s| s.to_string()),
                     None,
                     hover::Highlight::None,
+                    anchor,
                 )
             } else {
                 continue;
@@ -2277,8 +2303,6 @@ fn draw_cartesian_tooltip_overlay<Message>(
         if !datum.x.is_finite() || !datum.y.is_finite() {
             continue;
         }
-
-        let anchor = plane.to_pixel(datum);
 
         // Resolve series color: bars pre-compute through the priority chain;
         // other marks use explicit mark color if set, else palette fallback.
@@ -2325,7 +2349,8 @@ fn draw_cartesian_tooltip_overlay<Message>(
         let has_continuous = entries
             .iter()
             .any(|re| matches!(re.highlight, hover::Highlight::PointMarker { .. }));
-        if tooltip_config.tracking_line && has_continuous {
+        let has_discrete = entries.iter().any(|re| matches!(re.highlight, hover::Highlight::None));
+        if tooltip_config.tracking_line && has_continuous && !has_discrete {
             let line_x = tracking_pixel_x - plane.bounds.x;
             let tracking_color = crate::core::Color { a: 0.18, ..text_color };
             let path = Path::line(Point::new(line_x, 0.0), Point::new(line_x, plane.bounds.height));
@@ -2389,8 +2414,8 @@ fn draw_cartesian_tooltip_overlay<Message>(
 
 /// Draws the pie hover tooltip — a single-row box anchored at the cursor.
 ///
-/// Unlike Cartesian tooltips, pie hover has no tracking line or marker:
-/// the hovered slice is the visual annotation. The synthesized
+/// Unlike Cartesian tooltips, pie hover has no tracking line or point
+/// marker: the hovered slice outline is the visual annotation. The synthesized
 /// [`TooltipEntry`] uses `x = slice_idx as f64` and `y = slice.value`
 /// so any user-supplied `tooltip_config.format` closure can read the
 /// slice value uniformly with line/bar entries.
@@ -2406,13 +2431,17 @@ fn draw_pie_tooltip_overlay<Message>(
     slice_idx: usize,
     tooltip_config: &crate::data::tooltip::Tooltip,
     scene: &scene::Scene<'_, Message, Renderer>,
+    scene_tree: &Tree,
     viewport: &Rectangle,
     cursor: mouse::Cursor,
     draw_box: bool,
 ) {
     use crate::core::renderer::Renderer as _;
+    use crate::widget::canvas::{Frame, Stroke};
+    use crate::widget::renderer::geometry;
 
     let plot_area = scene.plot_area();
+    let plot_area_tree = &scene_tree.children[6];
 
     let plot_area::Series::Pie(pie) = &plot_area.series[mark_idx] else {
         return;
@@ -2420,6 +2449,13 @@ fn draw_pie_tooltip_overlay<Message>(
     let Some(slice) = pie.data.slices.get(slice_idx) else {
         return;
     };
+    let Some(child) = plot_area_tree.children.get(mark_idx) else {
+        return;
+    };
+    if child.tag != tree::Tag::of::<plot_area::pie::State>() {
+        return;
+    }
+    let pie_state = child.state.downcast_ref::<plot_area::pie::State>();
 
     let background = design.background_color();
     let text_pair = design.text_pair();
@@ -2476,21 +2512,111 @@ fn draw_pie_tooltip_overlay<Message>(
     } else {
         tooltip_config
     };
+    let effective_tooltip = effective_tooltip.clone().swatch(false);
 
-    if draw_box {
+    if tooltip_config.markers || draw_box {
         renderer.with_layer(*viewport, |renderer| {
-            draw_tooltip_box(
-                renderer,
-                design,
-                effective_tooltip,
-                &entries,
-                cursor_pos,
-                flip_axis_x,
-                chart_bounds,
-                text_color,
-                viewport,
-            );
+            if tooltip_config.markers
+                && let Some(path) = pie_hover_outline_path(
+                    pie_state,
+                    slice_idx,
+                    pie.data.gap > 0.0 && pie.data.slices.len() > 1,
+                    pie.data.gap / 2.0,
+                )
+            {
+                let frame_size = crate::core::Size::new(plane.bounds.width, plane.bounds.height);
+                let mut frame = Frame::new(renderer, frame_size);
+                frame.stroke(
+                    &path,
+                    Stroke::default().with_color(crate::core::Color::WHITE).with_width(3.0),
+                );
+                frame.stroke(
+                    &path,
+                    Stroke::default().with_color(crate::core::Color::BLACK).with_width(1.25),
+                );
+                renderer.with_translation(crate::core::Vector::new(plot_bounds.x, plot_bounds.y), |renderer| {
+                    geometry::Renderer::draw_geometry(renderer, frame.into_geometry());
+                });
+            }
+
+            if draw_box {
+                draw_tooltip_box(
+                    renderer,
+                    design,
+                    &effective_tooltip,
+                    &entries,
+                    cursor_pos,
+                    flip_axis_x,
+                    chart_bounds,
+                    text_color,
+                    viewport,
+                );
+            }
         });
+    }
+}
+
+const PIE_HOVER_ARC_SEGMENTS_PER_TAU: usize = 64;
+
+fn pie_hover_outline_path(
+    state: &plot_area::pie::State,
+    slice_idx: usize,
+    has_gap: bool,
+    gap_offset: f32,
+) -> Option<crate::widget::canvas::Path> {
+    let (start, end) = *state.slice_angles.get(slice_idx)?;
+    if (end - start).abs() <= f32::EPSILON {
+        return None;
+    }
+
+    let (mut cx, mut cy) = state.center;
+    if has_gap {
+        let mid = (start + end) / 2.0;
+        cx += gap_offset * mid.cos();
+        cy += gap_offset * mid.sin();
+    }
+    let inner_radius = state.inner_radius;
+    let outer_radius = state.outer_radius;
+
+    Some(crate::widget::canvas::Path::new(|builder| {
+        if inner_radius > 0.0 {
+            let inner_start = Point::new(cx + inner_radius * start.cos(), cy + inner_radius * start.sin());
+            let outer_start = Point::new(cx + outer_radius * start.cos(), cy + outer_radius * start.sin());
+
+            builder.move_to(inner_start);
+            builder.line_to(outer_start);
+            trace_hover_arc(builder, cx, cy, outer_radius, start, end);
+
+            let inner_end = Point::new(cx + inner_radius * end.cos(), cy + inner_radius * end.sin());
+            builder.line_to(inner_end);
+            trace_hover_arc(builder, cx, cy, inner_radius, end, start);
+            builder.close();
+        } else {
+            builder.move_to(Point::new(cx, cy));
+            let outer_start = Point::new(cx + outer_radius * start.cos(), cy + outer_radius * start.sin());
+            builder.line_to(outer_start);
+            trace_hover_arc(builder, cx, cy, outer_radius, start, end);
+            builder.close();
+        }
+    }))
+}
+
+fn trace_hover_arc(
+    builder: &mut crate::widget::canvas::path::Builder,
+    cx: f32,
+    cy: f32,
+    radius: f32,
+    start_angle: f32,
+    end_angle: f32,
+) {
+    let sweep = end_angle - start_angle;
+    let segments = ((sweep.abs() / std::f32::consts::TAU) * PIE_HOVER_ARC_SEGMENTS_PER_TAU as f32).ceil() as usize;
+    let segments = segments.max(1);
+
+    for i in 1..=segments {
+        let t = i as f32 / segments as f32;
+        let angle = start_angle + sweep * t;
+        builder.line_to(Point::new(cx + radius * angle.cos(), cy + radius * angle.sin()));
     }
 }
 
