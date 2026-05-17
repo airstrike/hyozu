@@ -4580,7 +4580,6 @@ dependencies = [
  "iced_core",
  "iced_runtime",
  "iced_widget",
- "smallvec",
  "unicode-segmentation",
 ]
 
