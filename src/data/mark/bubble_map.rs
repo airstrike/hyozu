@@ -164,6 +164,7 @@ pub fn bubble_map(points: impl IntoIterator<Item = MapPoint>) -> Xy {
     let datums: Vec<Datum> = entries.iter().map(|e| Datum::new(e.lon, e.lat)).collect();
     let labels: Vec<Option<String>> = entries.iter().map(|e| e.label.clone()).collect();
     let tooltip_values: Vec<Option<f64>> = entries.iter().map(|e| Some(e.value)).collect();
+    let feature_ids: Vec<Option<crate::feature::Id>> = entries.iter().map(|e| e.id.clone()).collect();
 
     let size_encoding = encoding::size_by(move |i, _d| {
         // The closure returns the desired pixel diameter directly. The
@@ -199,6 +200,7 @@ pub fn bubble_map(points: impl IntoIterator<Item = MapPoint>) -> Xy {
         opacity: 0.7,
         labels,
         tooltip_values,
+        feature_ids,
     }
 }
 
@@ -289,4 +291,17 @@ fn compute_value_range(points: &[MapPoint]) -> (f64, f64) {
         v_hi = v_lo + 1.0;
     }
     (v_lo, v_hi)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bubble_map_carries_point_feature_ids_into_xy_mark() {
+        let bubbles = bubble_map([map_point(42.0, -72.0, 10.0).id("REG-NE"), map_point(34.0, -118.0, 20.0)]);
+
+        assert_eq!(bubbles.feature_id_at(0).map(|id| id.as_str()), Some("REG-NE"));
+        assert!(bubbles.feature_id_at(1).is_none());
+    }
 }

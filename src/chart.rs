@@ -597,6 +597,32 @@ fn find_geo_hover<Message>(
     best.map(|(mark_idx, point_idx, _)| hover::Geometry::Geographic { mark_idx, point_idx })
 }
 
+fn find_geo_feature_click<Message>(
+    local: Point,
+    plot_area_tree: &Tree,
+    plot_area: &plot_area::PlotArea<'_, Message, Renderer>,
+) -> Option<crate::target::Target> {
+    let hover::Geometry::Geographic { mark_idx, point_idx } = find_geo_hover(local, plot_area_tree, plot_area)? else {
+        return None;
+    };
+    let plot_area::Series::Xy(xy) = plot_area.series.get(mark_idx)? else {
+        return None;
+    };
+    geo_feature_target_for_point(xy.data, mark_idx, point_idx)
+}
+
+fn geo_feature_target_for_point(
+    xy: &crate::mark::xy::Xy,
+    mark_idx: usize,
+    point_idx: usize,
+) -> Option<crate::target::Target> {
+    if xy.coord_kind != crate::mark::xy::CoordKind::Geo {
+        return None;
+    }
+    let id = xy.feature_id_at(point_idx)?.clone();
+    Some(crate::target::Target::Feature { mark: mark_idx, id })
+}
+
 /// Resolves a [`hover::Geometry`] into the public [`hover::Entry`]
 /// the user's hover closure consumes.
 ///
@@ -1687,6 +1713,11 @@ where
                                 }
                             }
                         }
+                    }
+
+                    if let Some(target) = find_geo_feature_click(local, plot_area_tree, self.scene.plot_area()) {
+                        shell.publish(on_action(Action::Clicked(target)));
+                        return;
                     }
 
                     // Second pass: hit-test shapes
@@ -3212,5 +3243,36 @@ pub fn filled(design: &dyn design::Design) -> Style {
                 .divider_color()
                 .resolve(design.background_color(), design.text_pair(), &design.seed(), None),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn geo_point_feature_target_requires_geo_xy_with_id() {
+        let bubbles = crate::bubble_map([
+            crate::map_point(42.0, -72.0, 10.0).id("REG-NE"),
+            crate::map_point(34.0, -118.0, 20.0),
+        ]);
+
+        assert_eq!(
+            geo_feature_target_for_point(&bubbles, 1, 0),
+            Some(crate::target::Target::Feature {
+                mark: 1,
+                id: "REG-NE".into(),
+            }),
+        );
+        assert!(
+            geo_feature_target_for_point(&bubbles, 1, 1).is_none(),
+            "geo bubbles without ids remain click-silent",
+        );
+
+        let cartesian = crate::xy([(0.0, 0.0)]);
+        assert!(
+            geo_feature_target_for_point(&cartesian, 1, 0).is_none(),
+            "cartesian xy marks do not emit geo feature targets",
+        );
     }
 }

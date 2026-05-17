@@ -3,6 +3,7 @@ use crate::data::axis::{self, Axis, Kind, Orientation, Placement};
 use crate::data::mark::line::marker;
 use crate::data::{Datum, IntoDatums};
 use crate::encoding::{Encoding, channel};
+use crate::feature;
 
 pub use marker::Marker;
 
@@ -57,6 +58,12 @@ pub struct Xy {
     /// `MapPoint::value` so geo bubbles report their original magnitude
     /// instead of latitude.
     pub(crate) tooltip_values: Vec<Option<f64>>,
+    /// Optional per-point feature ids used by geographic point marks.
+    /// Either empty (non-addressable points) or aligned 1:1 with
+    /// [`Self::points`]. Populated by [`crate::bubble_map`] from each
+    /// `MapPoint::id` so map clicks can emit the same
+    /// [`crate::target::Target::Feature`] shape as choropleths.
+    pub(crate) feature_ids: Vec<Option<feature::Id>>,
 }
 
 /// Creates an XY scatter chart from point data.
@@ -83,6 +90,7 @@ pub fn xy(data: impl IntoDatums) -> Xy {
         opacity: 1.0,
         labels: Vec::new(),
         tooltip_values: Vec::new(),
+        feature_ids: Vec::new(),
     }
 }
 
@@ -232,6 +240,12 @@ impl Xy {
     /// Returns the points.
     pub fn points(&self) -> &[Datum] {
         &self.points
+    }
+
+    /// Returns the feature id for a point, if this XY mark carries
+    /// addressable geographic points.
+    pub fn feature_id_at(&self, index: usize) -> Option<&feature::Id> {
+        self.feature_ids.get(index).and_then(Option::as_ref)
     }
 
     /// Creates the appropriate x-axis for a scatter chart (scalar).
