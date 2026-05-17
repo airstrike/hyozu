@@ -79,6 +79,14 @@ pub struct Choropleth {
     /// while remaining clickable. When `None`, every value-bearing
     /// feature renders at full saturation (no selection mode).
     pub(crate) selected: Option<HashSet<feature::Id>>,
+    /// Optional override for decorative land features with no entry in
+    /// the data. When `None`, the renderer derives a muted neutral from
+    /// the chart background.
+    pub(crate) land_color: Option<crate::core::Color>,
+    /// Optional override for entries that are in scope but carry no
+    /// value. When `None`, the renderer derives a slightly stronger
+    /// neutral from `land_color`.
+    pub(crate) available_color: Option<crate::core::Color>,
     /// Optional override for the fill color used on in-scope features
     /// whose entry is absent from the data. When `None`, the renderer
     /// falls back to the theme's [`Design::missing_fill`](crate::Design::missing_fill).
@@ -158,6 +166,8 @@ impl std::fmt::Debug for Choropleth {
             .field("legend_title", &self.legend_title)
             .field("legend", &self.legend)
             .field("selected", &self.selected)
+            .field("land_color", &self.land_color)
+            .field("available_color", &self.available_color)
             .field("missing_color", &self.missing_color)
             .field("ocean_color", &self.ocean_color)
             .field("hover_style", &self.hover_style.as_ref().map(|_| "<closure>"))
@@ -212,6 +222,8 @@ impl<const N: usize> IntoChoropleth for [ChoroplethEntry; N] {
             legend_title: None,
             legend: default_legend(),
             selected: None,
+            land_color: None,
+            available_color: None,
             missing_color: None,
             ocean_color: None,
             hover_style: None,
@@ -229,6 +241,8 @@ impl IntoChoropleth for Vec<ChoroplethEntry> {
             legend_title: None,
             legend: default_legend(),
             selected: None,
+            land_color: None,
+            available_color: None,
             missing_color: None,
             ocean_color: None,
             hover_style: None,
@@ -256,6 +270,8 @@ where
             legend_title: None,
             legend: default_legend(),
             selected: None,
+            land_color: None,
+            available_color: None,
             missing_color: None,
             ocean_color: None,
             hover_style: None,
@@ -283,6 +299,8 @@ where
             legend_title: None,
             legend: default_legend(),
             selected: None,
+            land_color: None,
+            available_color: None,
             missing_color: None,
             ocean_color: None,
             hover_style: None,
@@ -391,6 +409,20 @@ impl Choropleth {
     /// Returns the active selection set, if any.
     pub fn selected_ids(&self) -> Option<&HashSet<feature::Id>> {
         self.selected.as_ref()
+    }
+
+    /// Sets the fill color used for decorative land features that do
+    /// not have a choropleth entry.
+    pub fn land_color(mut self, color: impl Into<crate::core::Color>) -> Self {
+        self.land_color = Some(color.into());
+        self
+    }
+
+    /// Sets the fill color used for features that have an explicit
+    /// available/no-value entry.
+    pub fn available_color(mut self, color: impl Into<crate::core::Color>) -> Self {
+        self.available_color = Some(color.into());
+        self
     }
 
     /// Sets the fill color used for in-scope features whose entry is

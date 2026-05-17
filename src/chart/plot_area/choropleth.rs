@@ -458,19 +458,23 @@ where
         let color_stops: Vec<crate::core::Color> = palette_to_continuous_stops(&palette, &seed);
 
         // ── Derived colors ───────────────────────────────────────
-        let land_fill = crate::core::Color {
+        let default_land_fill = crate::core::Color {
             r: background.r * 0.92 + 0.08 * 0.7,
             g: background.g * 0.92 + 0.08 * 0.72,
             b: background.b * 0.92 + 0.08 * 0.74,
             a: 1.0,
         };
+        let land_fill = self.data.land_color.unwrap_or(default_land_fill);
         // "In scope, clickable, but no value to encode" tint — same neutral
         // hue family as `land_fill`, nudged one OKLch lightness pass toward
         // the foreground so the eye reads it as a distinct interactive
         // affordance rather than as decorative background. Stays clear of
         // the gradient's red/yellow/green channel which carries value
         // semantics.
-        let available_fill = crate::palette::shift_lightness(land_fill, background, 2);
+        let available_fill = self
+            .data
+            .available_color
+            .unwrap_or_else(|| crate::palette::shift_lightness(land_fill, background, 2));
         // "In-scope feature with no entry" — distinct slot from
         // `land_fill` (which paints purely out-of-scope decoration).
         // User override on the mark wins; otherwise fall back to the
