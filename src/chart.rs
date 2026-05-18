@@ -2414,64 +2414,71 @@ fn draw_cartesian_tooltip_overlay<Message>(
     let anchor_x = plot_bounds.x + tracking_pixel_x - plane.bounds.x;
     let anchor_y = plot_bounds.y + mean_y - plane.bounds.y;
 
-    // Wrap everything in a layer so it composites above chart content
-    renderer.with_layer(*viewport, |renderer| {
-        // --- Draw tracking line and markers via canvas Frame ---
-        let frame_size = crate::core::Size::new(plane.bounds.width, plane.bounds.height);
-        let mut frame = Frame::new(renderer, frame_size);
+    // Canvas geometry and renderer quads are bucketed separately inside
+    // a layer. Keep focus chrome and the tooltip box in distinct layers
+    // so the box can truly composite above tracking lines and markers.
+    let has_continuous = entries
+        .iter()
+        .any(|re| matches!(re.highlight, hover::Highlight::PointMarker { .. }));
+    let has_discrete = entries.iter().any(|re| matches!(re.highlight, hover::Highlight::None));
+    let draw_tracking_line = tooltip_config.tracking_line && has_continuous && !has_discrete;
+    if draw_tracking_line || tooltip_config.markers {
+        renderer.with_layer(*viewport, |renderer| {
+            // --- Draw tracking line and markers via canvas Frame ---
+            let frame_size = crate::core::Size::new(plane.bounds.width, plane.bounds.height);
+            let mut frame = Frame::new(renderer, frame_size);
 
-        // Tracking line — only for continuous marks (line/area/xy), not discrete (bars)
-        let has_continuous = entries
-            .iter()
-            .any(|re| matches!(re.highlight, hover::Highlight::PointMarker { .. }));
-        let has_discrete = entries.iter().any(|re| matches!(re.highlight, hover::Highlight::None));
-        if tooltip_config.tracking_line && has_continuous && !has_discrete {
-            let line_x = tracking_pixel_x - plane.bounds.x;
-            let tracking_color = crate::core::Color { a: 0.18, ..text_color };
-            let path = Path::line(Point::new(line_x, 0.0), Point::new(line_x, plane.bounds.height));
-            let dash_pattern: [f32; 2] = [4.0, 3.0];
-            let stroke = Stroke {
-                line_dash: crate::widget::canvas::LineDash {
-                    segments: &dash_pattern,
-                    offset: 0,
-                },
-                ..Stroke::default().with_width(1.0).with_color(tracking_color)
-            };
-            frame.stroke(&path, stroke);
-        }
+            // Tracking line — only for continuous marks (line/area/xy), not discrete (bars)
+            if draw_tracking_line {
+                let line_x = tracking_pixel_x - plane.bounds.x;
+                let tracking_color = crate::core::Color { a: 0.18, ..text_color };
+                let path = Path::line(Point::new(line_x, 0.0), Point::new(line_x, plane.bounds.height));
+                let dash_pattern: [f32; 2] = [4.0, 3.0];
+                let stroke = Stroke {
+                    line_dash: crate::widget::canvas::LineDash {
+                        segments: &dash_pattern,
+                        offset: 0,
+                    },
+                    ..Stroke::default().with_width(1.0).with_color(tracking_color)
+                };
+                frame.stroke(&path, stroke);
+            }
 
-        // Hover annotations — each mark type declares its own visual.
-        // The cartesian overlay only emits PointMarker / None entries;
-        // Ring is produced by the geographic overlay and handled there.
-        if tooltip_config.markers {
-            for re in &entries {
-                match &re.highlight {
-                    hover::Highlight::PointMarker { pixel, radius } => {
-                        let cx = pixel.x - plane.bounds.x;
-                        let cy = pixel.y - plane.bounds.y;
+            // Hover annotations — each mark type declares its own visual.
+            // The cartesian overlay only emits PointMarker / None entries;
+            // Ring is produced by the geographic overlay and handled there.
+            if tooltip_config.markers {
+                for re in &entries {
+                    match &re.highlight {
+                        hover::Highlight::PointMarker { pixel, radius } => {
+                            let cx = pixel.x - plane.bounds.x;
+                            let cy = pixel.y - plane.bounds.y;
 
-                        let circle = Path::circle(Point::new(cx, cy), *radius);
-                        frame.fill(&circle, re.color);
+                            let circle = Path::circle(Point::new(cx, cy), *radius);
+                            frame.fill(&circle, re.color);
 
-                        let ring = Path::circle(Point::new(cx, cy), *radius);
-                        frame.stroke(
-                            &ring,
-                            Stroke::default().with_width(1.5).with_color(crate::core::Color::WHITE),
-                        );
+                            let ring = Path::circle(Point::new(cx, cy), *radius);
+                            frame.stroke(
+                                &ring,
+                                Stroke::default().with_width(1.5).with_color(crate::core::Color::WHITE),
+                            );
+                        }
+                        hover::Highlight::None => {}
+                        hover::Highlight::Ring { .. } => {}
+                        hover::Highlight::Stroke { .. } => {}
                     }
-                    hover::Highlight::None => {}
-                    hover::Highlight::Ring { .. } => {}
-                    hover::Highlight::Stroke { .. } => {}
                 }
             }
-        }
 
-        renderer.with_translation(crate::core::Vector::new(plot_bounds.x, plot_bounds.y), |renderer| {
-            geometry::Renderer::draw_geometry(renderer, frame.into_geometry());
+            renderer.with_translation(crate::core::Vector::new(plot_bounds.x, plot_bounds.y), |renderer| {
+                geometry::Renderer::draw_geometry(renderer, frame.into_geometry());
+            });
         });
+    }
 
+    if draw_box {
         let flip_axis_x = plot_bounds.x + plane.bounds.width / 2.0;
-        if draw_box {
+        renderer.with_layer(*viewport, |renderer| {
             draw_tooltip_box(
                 renderer,
                 design,
@@ -2483,8 +2490,8 @@ fn draw_cartesian_tooltip_overlay<Message>(
                 text_color,
                 viewport,
             );
-        }
-    });
+        });
+    }
 }
 
 /// Draws the pie hover tooltip — a single-row box anchored at the cursor.
@@ -2592,49 +2599,55 @@ fn draw_pie_tooltip_overlay<Message>(
     };
     let effective_tooltip = effective_tooltip.clone().swatch(false);
 
-    if tooltip_config.markers || draw_box {
+    if tooltip_config.markers {
         renderer.with_layer(*viewport, |renderer| {
-            if tooltip_config.markers
-                && let Some(path) = pie_hover_outline_path(
-                    pie_state,
-                    slice_idx,
-                    pie.data.gap > 0.0 && pie.data.slices.len() > 1,
-                    pie.data.gap / 2.0,
-                )
-            {
+            if let Some(path) = pie_hover_outline_path(
+                pie_state,
+                slice_idx,
+                pie.data.gap > 0.0 && pie.data.slices.len() > 1,
+                pie.data.gap / 2.0,
+            ) {
                 let frame_size = crate::core::Size::new(plane.bounds.width, plane.bounds.height);
                 let mut frame = Frame::new(renderer, frame_size);
                 frame.stroke(
                     &path,
-                    Stroke::default().with_color(crate::core::Color::WHITE).with_width(3.0),
-                );
-                frame.stroke(
-                    &path,
-                    Stroke::default().with_color(crate::core::Color::BLACK).with_width(1.25),
+                    Stroke::default()
+                        .with_color(pie_hover_stroke(background))
+                        .with_width(1.0),
                 );
                 renderer.with_translation(crate::core::Vector::new(plot_bounds.x, plot_bounds.y), |renderer| {
                     geometry::Renderer::draw_geometry(renderer, frame.into_geometry());
                 });
             }
+        });
+    }
 
-            if draw_box {
-                draw_tooltip_box(
-                    renderer,
-                    design,
-                    &effective_tooltip,
-                    &entries,
-                    cursor_pos,
-                    flip_axis_x,
-                    chart_bounds,
-                    text_color,
-                    viewport,
-                );
-            }
+    if draw_box {
+        renderer.with_layer(*viewport, |renderer| {
+            draw_tooltip_box(
+                renderer,
+                design,
+                &effective_tooltip,
+                &entries,
+                cursor_pos,
+                flip_axis_x,
+                chart_bounds,
+                text_color,
+                viewport,
+            );
         });
     }
 }
 
 const PIE_HOVER_ARC_SEGMENTS_PER_TAU: usize = 64;
+
+fn pie_hover_stroke(background: crate::core::Color) -> crate::core::Color {
+    if crate::palette::is_dark_background(background) {
+        crate::core::Color::from_rgba(1.0, 1.0, 1.0, 0.5)
+    } else {
+        crate::core::Color::from_rgba(0.0, 0.0, 0.0, 0.5)
+    }
+}
 
 fn pie_hover_outline_path(
     state: &plot_area::pie::State,
@@ -2840,10 +2853,10 @@ fn draw_geo_tooltip_overlay<Message>(
     };
     let entries = [entry];
 
-    renderer.with_layer(*viewport, |renderer| {
-        // Ring around the hovered bubble. Drawn on a frame translated
-        // to the plot bounds so coordinates match the cartesian path.
-        if tooltip_config.markers {
+    if tooltip_config.markers {
+        renderer.with_layer(*viewport, |renderer| {
+            // Ring around the hovered bubble. Drawn on a frame translated
+            // to the plot bounds so coordinates match the cartesian path.
             let frame_size = crate::core::Size::new(plane.bounds.width, plane.bounds.height);
             let mut frame = Frame::new(renderer, frame_size);
             for re in &entries {
@@ -2867,9 +2880,11 @@ fn draw_geo_tooltip_overlay<Message>(
             renderer.with_translation(crate::core::Vector::new(plot_bounds.x, plot_bounds.y), |renderer| {
                 geometry::Renderer::draw_geometry(renderer, frame.into_geometry());
             });
-        }
+        });
+    }
 
-        if draw_box {
+    if draw_box {
+        renderer.with_layer(*viewport, |renderer| {
             let box_anchor = Point::new(box_anchor_x, anchor_abs.y);
             draw_tooltip_box(
                 renderer,
@@ -2882,8 +2897,8 @@ fn draw_geo_tooltip_overlay<Message>(
                 text_color,
                 viewport,
             );
-        }
-    });
+        });
+    }
 }
 
 /// Draws the choropleth hover overlay — a stroke around the hovered
@@ -3044,8 +3059,8 @@ fn draw_choropleth_tooltip_overlay<Message>(
         tooltip_config
     };
 
-    renderer.with_layer(*viewport, |renderer| {
-        if tooltip_config.markers {
+    if tooltip_config.markers {
+        renderer.with_layer(*viewport, |renderer| {
             let frame_size = crate::core::Size::new(plane.bounds.width, plane.bounds.height);
             let mut frame = Frame::new(renderer, frame_size);
             for re in &entries {
@@ -3069,9 +3084,11 @@ fn draw_choropleth_tooltip_overlay<Message>(
             renderer.with_translation(crate::core::Vector::new(plot_bounds.x, plot_bounds.y), |renderer| {
                 geometry::Renderer::draw_geometry(renderer, frame.into_geometry());
             });
-        }
+        });
+    }
 
-        if draw_box {
+    if draw_box {
+        renderer.with_layer(*viewport, |renderer| {
             draw_tooltip_box(
                 renderer,
                 design,
@@ -3083,8 +3100,8 @@ fn draw_choropleth_tooltip_overlay<Message>(
                 text_color,
                 viewport,
             );
-        }
-    });
+        });
+    }
 }
 
 /// Render the tooltip box body (background, swatches, text rows).
