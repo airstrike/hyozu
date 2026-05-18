@@ -288,7 +288,7 @@ where
         // primary first, then secondary — so series on different axes
         // don't both resolve to slot 0 and collide. This matches the
         // convention in ggplot / plotly / matplotlib / vega / d3: one
-        // global categorical color cycle, indexed in draw order,
+        // global data-color cycle, indexed in draw order,
         // regardless of which axis a series belongs to.
         let primary_marks = data.primary.marks();
         let secondary_marks = data.secondary.marks();
@@ -296,9 +296,9 @@ where
         let palette_strategy = data.palette.clone().unwrap_or_else(|| {
             let total_marks = primary_marks.len() + secondary_marks.len();
             if total_marks >= 2 {
-                // Two or more marks → categorical, same rule the
+                // Two or more marks → tonal, same rule the
                 // multi-mark branch of `Palette::default_for` applies.
-                Palette::Categorical
+                Palette::TONAL
             } else if primary_marks.is_empty() {
                 Palette::default_for(secondary_marks)
             } else {

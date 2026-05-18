@@ -60,7 +60,7 @@ pub(crate) type FillLookup = Arc<dyn Fn(&str) -> Option<Color> + Send + Sync>;
 pub enum FillKind {
     /// Assign successive palette slots to keys in order of first appearance.
     /// The `source` decides whether those slots come from a seed-derived
-    /// palette (theme-driven, default [`Palette::Categorical`]) or from an
+    /// palette (theme-driven, default [`Palette::TONAL`]) or from an
     /// explicit user-provided color list.
     Ordinal { source: OrdinalSource },
     /// Explicit lookup table. Missing keys fall through the resolution chain.
@@ -76,7 +76,7 @@ pub enum FillKind {
 pub enum OrdinalSource {
     /// Build the palette from the design seed at draw time with the given
     /// flavor. `None` means "inherit from the chart's `Data::palette`
-    /// setting, or fall back to [`Palette::Categorical`] if the chart
+    /// setting, or fall back to [`Palette::TONAL`] if the chart
     /// didn't set one." `Some(p)` means "always use `p`, regardless of
     /// the chart's setting." See D17 for the inheritance story.
     Seed(Option<Palette>),

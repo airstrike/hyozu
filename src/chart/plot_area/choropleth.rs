@@ -215,7 +215,8 @@ pub(super) fn compute_value_range(entries: &[crate::mark::choropleth::Choropleth
 /// For [`Palette::Gradient`], stops resolve through their seed slots one
 /// by one — preserving the original stop count so a 3-stop "success →
 /// warning → danger" gradient samples to its midpoint at `t = 0.5`. For
-/// [`Palette::Sequential`] and [`Palette::Categorical`], the palette is
+/// [`Palette::Sequential`], [`Palette::Tonal`], and
+/// [`Palette::Categorical`], the palette is
 /// discretized through [`crate::palette::Resolved::resolve`] with a
 /// fixed sample count and the wrapper colors are then resolved against
 /// the same seed.
@@ -232,7 +233,12 @@ pub(super) fn palette_to_continuous_stops(
     const DISCRETE_SAMPLES: usize = 8;
     match palette {
         crate::palette::Palette::Gradient(stops) => stops.iter().map(|c| c.resolve_seed(seed)).collect(),
-        crate::palette::Palette::Sequential(_) | crate::palette::Palette::Categorical => {
+        crate::palette::Palette::Diverging { low, mid, high } => {
+            [*low, *mid, *high].into_iter().map(|c| c.resolve_seed(seed)).collect()
+        }
+        crate::palette::Palette::Sequential(_)
+        | crate::palette::Palette::Tonal(_)
+        | crate::palette::Palette::Categorical => {
             let resolved = crate::palette::Resolved::resolve(palette, seed, DISCRETE_SAMPLES);
             resolved.colors().iter().map(|c| c.resolve_seed(seed)).collect()
         }

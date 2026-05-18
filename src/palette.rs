@@ -10,6 +10,11 @@ pub use scheme::Scheme;
 pub enum Palette {
     /// Distinct hues for categorical data (pie, multi-series).
     Categorical,
+    /// Brand-tonal slots from a single hue. Slot 0 is the hue exactly;
+    /// later slots vary lightness/chroma without rotating hue. This is
+    /// the right default for branded dashboards where "more colors"
+    /// should not mean "more unrelated hues."
+    Tonal(Color),
     /// Shades of a single hue. The inner [`Color`] picks which hue:
     /// pass [`Color::Primary`] (the historical default) for shades of
     /// the theme's primary, [`Color::Success`] for a green sequence,
@@ -18,6 +23,10 @@ pub enum Palette {
     /// don't carry a meaningful single hue and fall back to the theme's
     /// primary at resolve time.
     Sequential(Color),
+    /// Low-mid-high diverging ramp. Stops resolve against the active
+    /// seed and interpolate in OKLch, with a single requested color
+    /// resolving to the neutral midpoint.
+    Diverging { low: Color, mid: Color, high: Color },
     /// Interpolate between 2+ color stops in OKLch. Each stop can be a
     /// fixed RGB value or a semantic seed reference (e.g.
     /// `[Color::Success, Color::Danger]` interpolates from the theme's
@@ -27,10 +36,29 @@ pub enum Palette {
 }
 
 impl Palette {
+    /// Default brand-tonal palette. Slot 0 is the theme primary.
+    pub const TONAL: Palette = Palette::Tonal(Color::Primary);
+
     /// Convenience constant for the historical default sequential
     /// palette: shades of the theme's primary color. Equivalent to
     /// `Palette::Sequential(Color::Primary)`.
     pub const SEQUENTIAL: Palette = Palette::Sequential(Color::Primary);
+}
+
+/// Convenience constructor for [`Palette::Tonal`]. Accepts any value
+/// that can be converted into a [`Color`]. Slot 0 resolves to this hue
+/// exactly; additional slots are same-hue tonal variants.
+///
+/// # Examples
+///
+/// ```
+/// use hyozu::{palette, Color};
+///
+/// let p = palette::tonal(Color::Primary);
+/// let p = palette::tonal(0x3570B0);
+/// ```
+pub fn tonal(hue: impl Into<Color>) -> Palette {
+    Palette::Tonal(hue.into())
 }
 
 /// Convenience constructor for [`Palette::Sequential`]. Accepts any value
@@ -53,6 +81,29 @@ impl Palette {
 /// ```
 pub fn sequential(hue: impl Into<Color>) -> Palette {
     Palette::Sequential(hue.into())
+}
+
+/// Convenience constructor for [`Palette::Diverging`]. Use for
+/// positive/negative or below/neutral/above encodings.
+///
+/// # Examples
+///
+/// ```
+/// use hyozu::{palette, Color};
+///
+/// let p = palette::diverging(Color::Danger, 0xffffff, Color::Success);
+/// ```
+pub fn diverging<L, M, H>(low: L, mid: M, high: H) -> Palette
+where
+    L: Into<Color>,
+    M: Into<Color>,
+    H: Into<Color>,
+{
+    Palette::Diverging {
+        low: low.into(),
+        mid: mid.into(),
+        high: high.into(),
+    }
 }
 
 /// Convenience constructor for [`Palette::Categorical`]. Symmetric counterpart
@@ -130,10 +181,15 @@ impl Resolved {
         let n = n.max(1);
         let colors = match palette {
             Palette::Categorical => generate_categorical(seed, n),
+            Palette::Tonal(source) => {
+                let hue = source.resolve_seed(seed);
+                generate_tonal(hue, seed.background, n)
+            }
             Palette::Sequential(source) => {
                 let hue = source.resolve_seed(seed);
                 generate_sequential(hue, seed.background, n)
             }
+            Palette::Diverging { low, mid, high } => generate_diverging(*low, *mid, *high, seed, n),
             Palette::Gradient(stops) => generate_gradient(stops, seed, n),
         };
         Self { colors }
@@ -168,35 +224,35 @@ impl Palette {
             return match &marks[0] {
                 Mark::Area(area) => {
                     if area.series.len() >= 3 {
-                        Palette::Categorical
+                        Palette::TONAL
                     } else {
                         Palette::SEQUENTIAL
                     }
                 }
-                Mark::Pie(_) => Palette::Categorical,
+                Mark::Pie(_) => Palette::TONAL,
                 Mark::Gauge(_) => Palette::SEQUENTIAL,
                 Mark::Waterfall(_) => Palette::SEQUENTIAL,
                 Mark::Bars(bars) => {
                     if bars.series.len() >= 3 {
-                        Palette::Categorical
+                        Palette::TONAL
                     } else {
                         Palette::SEQUENTIAL
                     }
                 }
                 Mark::BoxPlot(bp) => {
                     if bp.entries.len() >= 3 {
-                        Palette::Categorical
+                        Palette::TONAL
                     } else {
                         Palette::SEQUENTIAL
                     }
                 }
-                Mark::Treemap(_) => Palette::Categorical,
+                Mark::Treemap(_) => Palette::TONAL,
                 Mark::Choropleth(_) => Palette::SEQUENTIAL,
                 Mark::Line(_) | Mark::Xy(_) => Palette::SEQUENTIAL,
                 Mark::Heatmap(_) => Palette::SEQUENTIAL,
                 Mark::Violin(v) => {
                     if v.entries.len() >= 3 {
-                        Palette::Categorical
+                        Palette::TONAL
                     } else {
                         Palette::SEQUENTIAL
                     }
@@ -213,8 +269,8 @@ impl Palette {
             };
         }
 
-        // Multiple marks: use categorical for distinct series
-        Palette::Categorical
+        // Multiple marks: use same-hue brand tonal slots by default.
+        Palette::TONAL
     }
 }
 
@@ -361,6 +417,57 @@ fn generate_categorical(seed: &Seed, n: usize) -> Vec<Color> {
     colors
 }
 
+/// Generate brand-tonal colors: same hue, slot 0 exactly the source.
+fn generate_tonal(primary: crate::core::Color, background: crate::core::Color, n: usize) -> Vec<Color> {
+    if n == 1 {
+        return vec![Color::Fixed(primary)];
+    }
+
+    let base = to_oklch(primary);
+    let dark_bg = is_dark_background(background);
+    let offsets: &[(f32, f32)] = if dark_bg {
+        &[
+            (0.0, 1.0),
+            (0.18, 0.82),
+            (-0.10, 0.92),
+            (0.32, 0.52),
+            (-0.20, 0.72),
+            (0.42, 0.34),
+        ]
+    } else {
+        &[
+            (0.0, 1.0),
+            (0.18, 0.82),
+            (-0.12, 0.92),
+            (0.32, 0.52),
+            (-0.24, 0.72),
+            (0.42, 0.34),
+        ]
+    };
+
+    (0..n)
+        .map(|i| {
+            if i == 0 {
+                return Color::Fixed(primary);
+            }
+            let (dl, chroma_mult) = offsets[i % offsets.len()];
+            let pass = i / offsets.len();
+            let pass_shift = if dark_bg {
+                pass as f32 * 0.08
+            } else {
+                -(pass as f32 * 0.08)
+            };
+            let l = (base.l + dl + pass_shift).clamp(0.24, 0.94);
+            Color::Fixed(from_oklch(Oklch {
+                l,
+                c: base.c * chroma_mult,
+                h: base.h,
+                a: base.a,
+            }))
+        })
+        .collect()
+}
+
 /// Generate sequential colors: shades of one hue.
 ///
 /// Targets the same perceptual envelope as ColorBrewer-class single-hue
@@ -474,6 +581,25 @@ fn generate_gradient(stops: &[Color], seed: &Seed, n: usize) -> Vec<Color> {
         .collect()
 }
 
+/// Generate a low-mid-high diverging palette.
+fn generate_diverging(low: Color, mid: Color, high: Color, seed: &Seed, n: usize) -> Vec<Color> {
+    let low = low.resolve_seed(seed);
+    let mid = mid.resolve_seed(seed);
+    let high = high.resolve_seed(seed);
+
+    if n == 1 {
+        return vec![Color::Fixed(mid)];
+    }
+
+    let stops = [low, mid, high];
+    (0..n)
+        .map(|i| {
+            let t = i as f32 / (n - 1).max(1) as f32;
+            Color::Fixed(sample_gradient(&stops, t))
+        })
+        .collect()
+}
+
 /// Interpolate between two hue angles (radians) via shortest arc.
 fn interpolate_hue(h1: f32, h2: f32, t: f32) -> f32 {
     let mut diff = h2 - h1;
@@ -527,6 +653,36 @@ mod tests {
         let seed = test_seed();
         let resolved = Resolved::resolve(&Palette::SEQUENTIAL, &seed, 1);
         assert_eq!(resolved.len(), 1);
+    }
+
+    #[test]
+    fn tonal_first_slot_is_exact_source_hue() {
+        let seed = test_seed();
+        let resolved = Resolved::resolve(&Palette::TONAL, &seed, 4);
+        let Color::Fixed(first) = resolved.get(0) else {
+            panic!("expected Fixed color");
+        };
+
+        assert_eq!(first, seed.primary);
+    }
+
+    #[test]
+    fn tonal_slots_keep_hue_family_without_circus_colors() {
+        let seed = test_seed();
+        let resolved = Resolved::resolve(&Palette::TONAL, &seed, 5);
+        let base = to_oklch(seed.primary);
+
+        for i in 1..resolved.len() {
+            let Color::Fixed(color) = resolved.get(i) else {
+                panic!("expected Fixed color");
+            };
+            let tonal = to_oklch(color);
+            let hue_delta = (tonal.h - base.h).abs();
+            assert!(
+                hue_delta < 0.10,
+                "tonal slot {i} should preserve source hue; got Δh={hue_delta}"
+            );
+        }
     }
 
     #[test]
@@ -641,8 +797,40 @@ mod tests {
     }
 
     #[test]
+    fn helper_tonal_wraps_into_color() {
+        assert_eq!(tonal(Color::Success), Palette::Tonal(Color::Success));
+        let blue_hex: u32 = 0x27_5f_a3;
+        assert_eq!(tonal(blue_hex), Palette::Tonal(Color::from(blue_hex)));
+    }
+
+    #[test]
     fn helper_categorical_returns_unit_variant() {
         assert_eq!(categorical(), Palette::Categorical);
+    }
+
+    #[test]
+    fn diverging_uses_midpoint_for_single_sample() {
+        let seed = test_seed();
+        let palette = Palette::Diverging {
+            low: Color::Danger,
+            mid: Color::Fixed(crate::core::Color::WHITE),
+            high: Color::Success,
+        };
+        let resolved = Resolved::resolve(&palette, &seed, 1);
+        let Color::Fixed(only) = resolved.get(0) else {
+            panic!("expected Fixed color");
+        };
+
+        assert_eq!(only, crate::core::Color::WHITE);
+    }
+
+    #[test]
+    fn helper_diverging_builds_low_mid_high_palette() {
+        assert_eq!(diverging(Color::Danger, 0xffffff, Color::Success), Palette::Diverging {
+            low: Color::Danger,
+            mid: Color::from(0xffffff),
+            high: Color::Success,
+        });
     }
 
     #[test]
@@ -688,10 +876,10 @@ mod tests {
     }
 
     #[test]
-    fn default_for_pie_is_categorical() {
+    fn default_for_pie_is_tonal() {
         let pie = crate::pie([1.0, 2.0]);
         let marks = vec![Mark::Pie(pie)];
-        assert!(matches!(Palette::default_for(&marks), Palette::Categorical));
+        assert!(matches!(Palette::default_for(&marks), Palette::Tonal(Color::Primary)));
     }
 
     #[test]

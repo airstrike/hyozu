@@ -409,8 +409,14 @@ impl App {
         // Palette and theme
         let on_palette = |p: String| {
             let palette = match p.as_str() {
+                "Tonal" => Palette::TONAL,
                 "Categorical" => Palette::Categorical,
                 "Sequential" => Palette::SEQUENTIAL,
+                "Diverging" => Palette::Diverging {
+                    low: hyozu::Color::Danger,
+                    mid: hyozu::Color::Fixed(iced::Color::WHITE),
+                    high: hyozu::Color::Success,
+                },
                 _ => return Message::Set(item::Palette(Palette::Categorical)),
             };
             Message::Set(item::Palette(palette))
@@ -418,7 +424,9 @@ impl App {
 
         let current_palette = match data.get_palette() {
             Some(Palette::Categorical) => "Categorical",
+            Some(Palette::Tonal(_)) => "Tonal",
             Some(Palette::Sequential(_)) => "Sequential",
+            Some(Palette::Diverging { .. }) => "Diverging",
             Some(Palette::Gradient(_)) => "Gradient",
             None => "Auto",
         };
@@ -427,7 +435,13 @@ impl App {
             text("Palette").size(14),
             pick_list(
                 Some(current_palette.to_string()),
-                vec!["Auto".to_string(), "Categorical".to_string(), "Sequential".to_string(),],
+                vec![
+                    "Auto".to_string(),
+                    "Tonal".to_string(),
+                    "Categorical".to_string(),
+                    "Sequential".to_string(),
+                    "Diverging".to_string(),
+                ],
                 |s: &String| s.clone(),
             )
             .on_select(on_palette)

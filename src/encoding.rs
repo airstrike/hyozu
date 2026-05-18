@@ -167,10 +167,10 @@ impl Encoding<Fill> {
     /// The palette is generated from the design's `PaletteSeed` at draw time,
     /// so it follows the theme.
     ///
-    /// Default is [`Palette::Categorical`] (distinct hues). Use
-    /// [`Palette::SEQUENTIAL`] for shades of the theme's primary color, or
-    /// [`Palette::Gradient`] with explicit stops for a custom interpolated
-    /// gradient.
+    /// Default is [`Palette::TONAL`] (brand-tonal slots). Use
+    /// [`Palette::Categorical`] for distinct hues, [`Palette::SEQUENTIAL`]
+    /// for a quantitative ramp, or [`Palette::Gradient`] with explicit
+    /// stops for a custom interpolated gradient.
     ///
     /// Mutually exclusive with [`range`](Self::range): calling `.palette(...)`
     /// replaces any prior `.range(...)` configuration, and vice versa.
@@ -367,14 +367,14 @@ impl FillPlan {
             } => {
                 // Same flavor-resolution chain as the original resolve_fill:
                 // explicit Range > encoding `.palette()` override > chart
-                // `Data::palette` inheritance (D17) > Categorical fallback.
+                // `Data::palette` inheritance (D17) > Tonal fallback.
                 let palette_colors: Vec<Color> = match source {
                     OrdinalSource::Range(explicit) => explicit.clone(),
                     OrdinalSource::Seed(override_flavor) => {
                         let flavor: Palette = override_flavor
                             .clone()
                             .or_else(|| chart_default.cloned())
-                            .unwrap_or(Palette::Categorical);
+                            .unwrap_or(Palette::TONAL);
                         let n = (*distinct).max(1);
                         Resolved::resolve(&flavor, seed, n).colors().to_vec()
                     }
