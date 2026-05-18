@@ -2107,6 +2107,10 @@ fn draw_tooltip_overlay<Message>(
     cursor: mouse::Cursor,
     draw_box: bool,
 ) {
+    if !hover_mark_indices_are_current(hover, scene.plot_area().series.len()) {
+        return;
+    }
+
     match hover {
         hover::Geometry::Cartesian { data_x, entries } => draw_cartesian_tooltip_overlay(
             renderer,
@@ -2173,6 +2177,17 @@ fn draw_tooltip_overlay<Message>(
     }
 }
 
+fn hover_mark_indices_are_current(hover: &hover::Geometry, mark_count: usize) -> bool {
+    match hover {
+        hover::Geometry::Cartesian { entries, .. } => {
+            !entries.is_empty() && entries.iter().all(|(mark_idx, _, _)| *mark_idx < mark_count)
+        }
+        hover::Geometry::Pie { mark_idx, .. }
+        | hover::Geometry::Geographic { mark_idx, .. }
+        | hover::Geometry::ChoroplethArea { mark_idx, .. } => *mark_idx < mark_count,
+    }
+}
+
 /// Draws the Cartesian tooltip overlay (tracking line, markers, box).
 ///
 /// Builds one [`hover::Row`] per matched (mark, series, point) at the
@@ -2228,8 +2243,12 @@ fn draw_cartesian_tooltip_overlay<Message>(
     let mut entries: Vec<hover::Row> = Vec::new();
 
     for &(mark_idx, series_idx, pt_idx) in cartesian_entries {
-        let series = &plot_area.series[mark_idx];
-        let child = &plot_area_tree.children[mark_idx];
+        let Some(series) = plot_area.series.get(mark_idx) else {
+            continue;
+        };
+        let Some(child) = plot_area_tree.children.get(mark_idx) else {
+            continue;
+        };
 
         // Bars resolve their color through the full priority chain
         // (point_colors > color_by > series.color > palette). When this is
@@ -2239,7 +2258,9 @@ fn draw_cartesian_tooltip_overlay<Message>(
 
         let (datum, name, explicit_color, highlight, anchor) = if child.tag == line_tag {
             if let plot_area::Series::Line(line) = series {
-                let pt = &line.data.points[pt_idx];
+                let Some(pt) = line.data.points.get(pt_idx) else {
+                    continue;
+                };
                 let line_state = child.state.downcast_ref::<plot_area::line::State>();
                 let Some(pixel) = line_state.pixel_points.get(pt_idx).copied() else {
                     continue;
@@ -2256,8 +2277,12 @@ fn draw_cartesian_tooltip_overlay<Message>(
             }
         } else if child.tag == area_tag {
             if let plot_area::Series::Area(area) = series {
-                let ser = &area.data.series[series_idx];
-                let pt = &ser.points[pt_idx];
+                let Some(ser) = area.data.series.get(series_idx) else {
+                    continue;
+                };
+                let Some(pt) = ser.points.get(pt_idx) else {
+                    continue;
+                };
                 let area_state = child.state.downcast_ref::<plot_area::area::State>();
                 let Some(pixel) = area_state
                     .series_points
@@ -2279,7 +2304,9 @@ fn draw_cartesian_tooltip_overlay<Message>(
             }
         } else if child.tag == xy_tag {
             if let plot_area::Series::Xy(xy) = series {
-                let pt = &xy.data.points[pt_idx];
+                let Some(pt) = xy.data.points.get(pt_idx) else {
+                    continue;
+                };
                 let xy_state = child.state.downcast_ref::<plot_area::xy::State>();
                 let Some(pixel) = xy_state.pixel_points.get(pt_idx).copied() else {
                     continue;
@@ -2296,8 +2323,12 @@ fn draw_cartesian_tooltip_overlay<Message>(
             }
         } else if child.tag == bars_tag {
             if let plot_area::Series::Bars(bars) = series {
-                let bar_series = &bars.data.series[series_idx];
-                let pt = &bar_series.points[pt_idx];
+                let Some(bar_series) = bars.data.series.get(series_idx) else {
+                    continue;
+                };
+                let Some(pt) = bar_series.points.get(pt_idx) else {
+                    continue;
+                };
                 let bars_state = child.state.downcast_ref::<plot_area::bars::State>();
                 let anchor = bars_state
                     .series_rects
@@ -2474,7 +2505,10 @@ fn draw_pie_tooltip_overlay<Message>(
     let plot_area = scene.plot_area();
     let plot_area_tree = &scene_tree.children[6];
 
-    let plot_area::Series::Pie(pie) = &plot_area.series[mark_idx] else {
+    let Some(series) = plot_area.series.get(mark_idx) else {
+        return;
+    };
+    let plot_area::Series::Pie(pie) = series else {
         return;
     };
     let Some(slice) = pie.data.slices.get(slice_idx) else {
@@ -2681,7 +2715,10 @@ fn draw_geo_tooltip_overlay<Message>(
     let plot_area = scene.plot_area();
     let plot_area_tree = &scene_tree.children[6];
 
-    let plot_area::Series::Xy(xy) = &plot_area.series[mark_idx] else {
+    let Some(series) = plot_area.series.get(mark_idx) else {
+        return;
+    };
+    let plot_area::Series::Xy(xy) = series else {
         return;
     };
     let Some(child) = plot_area_tree.children.get(mark_idx) else {
@@ -2869,7 +2906,10 @@ fn draw_choropleth_tooltip_overlay<Message>(
         return;
     };
     let plot_area = scene.plot_area();
-    let plot_area::Series::Choropleth(c) = &plot_area.series[mark_idx] else {
+    let Some(series) = plot_area.series.get(mark_idx) else {
+        return;
+    };
+    let plot_area::Series::Choropleth(c) = series else {
         return;
     };
     let Some(feature_id) = geo_plane.filtered_ids.get(feature_idx).cloned() else {
@@ -3274,5 +3314,55 @@ mod tests {
             geo_feature_target_for_point(&cartesian, 1, 0).is_none(),
             "cartesian xy marks do not emit geo feature targets",
         );
+    }
+
+    #[test]
+    fn stale_hover_mark_indices_are_rejected_after_mark_set_changes() {
+        assert!(!hover_mark_indices_are_current(
+            &hover::Geometry::Geographic {
+                mark_idx: 1,
+                point_idx: 0,
+            },
+            1,
+        ));
+        assert!(!hover_mark_indices_are_current(
+            &hover::Geometry::ChoroplethArea {
+                mark_idx: 1,
+                feature_idx: 0,
+            },
+            1,
+        ));
+        assert!(!hover_mark_indices_are_current(
+            &hover::Geometry::Pie {
+                mark_idx: 1,
+                slice_idx: 0,
+            },
+            1,
+        ));
+        assert!(!hover_mark_indices_are_current(
+            &hover::Geometry::Cartesian {
+                data_x: 0.0,
+                entries: vec![(0, 0, 0), (1, 0, 0)],
+            },
+            1,
+        ));
+    }
+
+    #[test]
+    fn current_hover_mark_indices_are_accepted() {
+        assert!(hover_mark_indices_are_current(
+            &hover::Geometry::Geographic {
+                mark_idx: 1,
+                point_idx: 0,
+            },
+            2,
+        ));
+        assert!(hover_mark_indices_are_current(
+            &hover::Geometry::Cartesian {
+                data_x: 0.0,
+                entries: vec![(0, 0, 0), (1, 0, 0)],
+            },
+            2,
+        ));
     }
 }
