@@ -933,14 +933,27 @@ fn find_choropleth_hover<Message>(
     geo_plane: &plot_area::geo::Plane,
 ) -> Option<hover::Geometry> {
     for (mark_idx, series) in plot_area.series.iter().enumerate() {
-        if !matches!(series, plot_area::Series::Choropleth(_)) {
+        let plot_area::Series::Choropleth(c) = series else {
             continue;
-        }
-        if let Some(feature_idx) = plot_area::geo::hit_test(geo_plane, local) {
+        };
+        if let Some(feature_idx) = plot_area::geo::hit_test(geo_plane, local)
+            && let Some(feature_id) = geo_plane.filtered_ids.get(feature_idx)
+            && choropleth_feature_has_hover_value(c.data, feature_id)
+        {
             return Some(hover::Geometry::ChoroplethArea { mark_idx, feature_idx });
         }
     }
     None
+}
+
+fn choropleth_feature_has_hover_value(
+    choropleth: &crate::mark::choropleth::Choropleth,
+    feature_id: &crate::feature::Id,
+) -> bool {
+    choropleth
+        .entries()
+        .iter()
+        .any(|entry| entry.id() == feature_id && entry.value().is_some_and(f64::is_finite))
 }
 
 /// Returns a mutable handle to the [`animation::Tick`] hosted on
@@ -3031,11 +3044,8 @@ fn draw_choropleth_tooltip_overlay<Message>(
         tooltip_config
     };
 
-    // Polygon stroke and tooltip box live on separate layers so the
-    // tooltip's text and background composite above the stroke even
-    // when the tooltip's anchor sits inside the hovered polygon.
-    if tooltip_config.markers {
-        renderer.with_layer(*viewport, |renderer| {
+    renderer.with_layer(*viewport, |renderer| {
+        if tooltip_config.markers {
             let frame_size = crate::core::Size::new(plane.bounds.width, plane.bounds.height);
             let mut frame = Frame::new(renderer, frame_size);
             for re in &entries {
@@ -3059,11 +3069,9 @@ fn draw_choropleth_tooltip_overlay<Message>(
             renderer.with_translation(crate::core::Vector::new(plot_bounds.x, plot_bounds.y), |renderer| {
                 geometry::Renderer::draw_geometry(renderer, frame.into_geometry());
             });
-        });
-    }
+        }
 
-    if draw_box {
-        renderer.with_layer(*viewport, |renderer| {
+        if draw_box {
             draw_tooltip_box(
                 renderer,
                 design,
@@ -3075,8 +3083,8 @@ fn draw_choropleth_tooltip_overlay<Message>(
                 text_color,
                 viewport,
             );
-        });
-    }
+        }
+    });
 }
 
 /// Render the tooltip box body (background, swatches, text rows).
@@ -3314,6 +3322,27 @@ mod tests {
             geo_feature_target_for_point(&cartesian, 1, 0).is_none(),
             "cartesian xy marks do not emit geo feature targets",
         );
+    }
+
+    #[test]
+    fn choropleth_hover_requires_finite_value_entry() {
+        let entries = vec![
+            crate::choropleth_entry("CA", 10.0),
+            crate::choropleth_entry_available("TX"),
+            crate::choropleth_entry("NY", f64::NAN),
+        ];
+        let choropleth = crate::choropleth(entries);
+
+        assert!(choropleth_feature_has_hover_value(&choropleth, &"CA".into()));
+        assert!(
+            !choropleth_feature_has_hover_value(&choropleth, &"TX".into()),
+            "available/no-value features should not show hover chrome"
+        );
+        assert!(
+            !choropleth_feature_has_hover_value(&choropleth, &"NY".into()),
+            "non-finite values render as available and should not hover"
+        );
+        assert!(!choropleth_feature_has_hover_value(&choropleth, &"WA".into()));
     }
 
     #[test]

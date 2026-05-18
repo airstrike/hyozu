@@ -65,6 +65,10 @@ const GRADIENT_SEGMENTS: usize = 64;
 const HORIZONTAL_BAR_LENGTH: f32 = 200.0;
 /// Target bar length along the flow axis for vertical legends.
 const VERTICAL_BAR_LENGTH: f32 = 140.0;
+/// Extra room above and below vertical gradient bars so endpoint labels
+/// do not crowd the title or panel edge when labels are vertically
+/// centered on their ticks.
+const VERTICAL_BAR_END_PADDING: f32 = 8.0;
 /// Minimum chart width (horizontal) or height (vertical) below which the
 /// scale legend is suppressed to avoid cramping the plot area.
 const MIN_CHART_EXTENT: f32 = 300.0;
@@ -158,10 +162,10 @@ fn panel_for_overlay(legend: &Config, title: Option<&str>, plot_bounds: Rectangl
             let cluster_w = BAR_THICKNESS + TICK_LENGTH + 2.0 + numeric_label_w;
             let title_w = label_column_width(title);
             let content_w = cluster_w.max(title_w);
-            let content_h = title_line_height + bar_length;
+            let content_h = title_line_height + VERTICAL_BAR_END_PADDING * 2.0 + bar_length;
             let panel_w = content_w + PANEL_PADDING * 2.0;
             let panel_h = content_h + PANEL_PADDING * 2.0;
-            let bar_offset_y = PANEL_PADDING + title_line_height;
+            let bar_offset_y = PANEL_PADDING + title_line_height + VERTICAL_BAR_END_PADDING;
             let bar_offset_x = PANEL_PADDING + (content_w - cluster_w) / 2.0;
             (
                 Size::new(panel_w, panel_h),
@@ -207,11 +211,12 @@ fn panel_for_strip(legend: &Config, title: Option<&str>, strip: Rectangle) -> Pa
             )
         }
         Orientation::Vertical => {
-            let strip_bar_budget = (strip.height - PANEL_PADDING * 2.0 - title_line_height).max(0.0);
+            let strip_bar_budget =
+                (strip.height - PANEL_PADDING * 2.0 - title_line_height - VERTICAL_BAR_END_PADDING * 2.0).max(0.0);
             let bar_length = strip_bar_budget.min(VERTICAL_BAR_LENGTH);
             let panel_w = strip.width;
-            let panel_h = title_line_height + bar_length + PANEL_PADDING * 2.0;
-            let bar_offset_y = PANEL_PADDING + title_line_height;
+            let panel_h = title_line_height + VERTICAL_BAR_END_PADDING * 2.0 + bar_length + PANEL_PADDING * 2.0;
+            let bar_offset_y = PANEL_PADDING + title_line_height + VERTICAL_BAR_END_PADDING;
             // Center the bar+labels cluster (bar + tick gap + numeric
             // label) horizontally inside the panel. The numeric label
             // column is short — formatted values like "$500K" or
@@ -551,6 +556,28 @@ mod tests {
         let (_, narrow) = reservation(&l, None).unwrap();
         let (_, wide) = reservation(&l, Some("Population density per km2")).unwrap();
         assert!(wide > narrow, "long title should widen vertical strip");
+    }
+
+    #[test]
+    fn vertical_overlay_panel_pads_bar_end_labels() {
+        let legend = Config::overlay(Anchor::BottomRight).orientation(Orientation::Vertical);
+        let panel = panel_for_overlay(&legend, Some("Revenue"), Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 600.0,
+            height: 400.0,
+        });
+        let title_line_height = FONT_SIZE + 4.0;
+
+        assert!(
+            panel.bar_offset.y >= PANEL_PADDING + title_line_height + VERTICAL_BAR_END_PADDING,
+            "vertical legend should keep the top tick label away from the title"
+        );
+        assert!(
+            panel.size.height - (panel.bar_offset.y + panel.bar_size.height)
+                >= PANEL_PADDING + VERTICAL_BAR_END_PADDING,
+            "vertical legend should keep the bottom tick label away from the panel edge"
+        );
     }
 
     #[test]
