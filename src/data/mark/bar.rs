@@ -141,6 +141,11 @@ pub struct Bars {
     /// Note: with `Layout::Stacked`, only the topmost segment of each stack
     /// is rounded so that adjacent segments meet without gaps.
     pub(crate) corner_radius: f32,
+    /// Ordering direction for grouped-series placement.
+    ///
+    /// Palette assignment, legend order, and hit-test series indexes stay
+    /// tied to `series`; only the visual slot inside each group changes.
+    pub(crate) series_order: axis::Order,
 }
 
 /// Creates a single bar series with styling options.
@@ -204,6 +209,7 @@ impl<T: IntoDatums> IntoBars for T {
             spacing: Spacing::default(),
             direction: Direction::default(),
             corner_radius: 0.0,
+            series_order: axis::Order::default(),
         }
     }
 }
@@ -218,6 +224,7 @@ impl<const N: usize> IntoBars for [Series; N] {
             spacing: Spacing::default(),
             direction: Direction::default(),
             corner_radius: 0.0,
+            series_order: axis::Order::default(),
         }
     }
 }
@@ -232,6 +239,7 @@ impl IntoBars for Vec<Series> {
             spacing: Spacing::default(),
             direction: Direction::default(),
             corner_radius: 0.0,
+            series_order: axis::Order::default(),
         }
     }
 }
@@ -247,7 +255,18 @@ impl Bars {
             spacing: Spacing::default(),
             direction: Direction::default(),
             corner_radius: 0.0,
+            series_order: axis::Order::default(),
         }
+    }
+
+    /// Set grouped-series placement order while preserving series order.
+    ///
+    /// This is the nested categorical order inside each group; palette
+    /// assignment, legend order, and hit-test series indexes stay tied
+    /// to `series`.
+    pub fn series_order(mut self, order: axis::Order) -> Self {
+        self.series_order = order;
+        self
     }
 
     /// Sets the corner radius for the bar "end" corners.
@@ -392,6 +411,10 @@ impl Bars {
     /// Returns a reference to a specific series by index.
     pub fn series(&self, index: usize) -> Option<&Series> {
         self.series.get(index)
+    }
+
+    pub(crate) fn visual_series_index(&self, index: usize) -> usize {
+        self.series_order.index(self.series.len(), index)
     }
 
     // === Axis factory methods ===

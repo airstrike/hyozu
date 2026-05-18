@@ -324,6 +324,7 @@ where
                     .iter()
                     .enumerate()
                     .map(|(series_idx, series)| {
+                        let visual_series_idx = self.data.visual_series_index(series_idx);
                         series
                             .points
                             .iter()
@@ -337,7 +338,7 @@ where
                                 let bar_center_x = plane.to_pixel(Datum::x(bin_idx as f64)).x;
                                 let total_group_width = bin_width * bar_length;
                                 let group_start = bar_center_x - total_group_width / 2.0;
-                                let x = group_start + series_idx as f32 * (bar_width + spacing_px);
+                                let x = group_start + visual_series_idx as f32 * (bar_width + spacing_px);
 
                                 Rectangle {
                                     x,
@@ -462,6 +463,7 @@ where
                     .iter()
                     .enumerate()
                     .map(|(series_idx, series)| {
+                        let visual_series_idx = self.data.visual_series_index(series_idx);
                         series
                             .points
                             .iter()
@@ -476,7 +478,7 @@ where
                                 let bar_center_y = plane.to_pixel(Datum::new(0.0, bin_idx as f64)).y;
                                 let total_group_height = bin_height * bar_length;
                                 let group_start = bar_center_y - total_group_height / 2.0;
-                                let y = group_start + series_idx as f32 * (bar_height + spacing_px);
+                                let y = group_start + visual_series_idx as f32 * (bar_height + spacing_px);
 
                                 Rectangle {
                                     x,

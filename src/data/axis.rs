@@ -17,6 +17,23 @@ pub enum Orientation {
     Right,
 }
 
+/// Ordering direction for an axis-like categorical domain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Order {
+    #[default]
+    Forward,
+    Reverse,
+}
+
+impl Order {
+    pub(crate) fn index(self, len: usize, index: usize) -> usize {
+        match self {
+            Order::Forward => index,
+            Order::Reverse => len.saturating_sub(1).saturating_sub(index),
+        }
+    }
+}
+
 /// The semantic kind of an axis - determines bounds computation and formatting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Kind {
