@@ -6,7 +6,8 @@
 //! sequential bar coloring). It carries an optional explicit
 //! `domain` (else inferred from data), an optional [`Palette`] (else the
 //! mark's default), a [`Transform`] (default [`Transform::Linear`]), and
-//! an optional `format` closure for legend ticks.
+//! an optional `format` closure for legend ticks. `reverse` flips the
+//! color range without rewriting the numeric domain.
 //!
 //! ## Resolution
 //!
@@ -46,6 +47,11 @@ pub struct ColorScale<I> {
     /// ticks. `None` means "fall back to the chart's default formatter
     /// for `I`."
     pub format: Option<Format<I>>,
+    /// Reverse the palette sampling direction after resolving the
+    /// palette. Useful when a single-hue palette is authored with its
+    /// most prominent stop first but a continuous scale should map low
+    /// values to light colors and high values to dark colors.
+    pub reverse: bool,
     /// Whether the resolved (data-derived) domain should round outward to
     /// nice numbers. `true` by default — matches D3's `.nice()` and
     /// Vega-Lite's `scale.nice: true`. Has no effect when an explicit
@@ -60,6 +66,7 @@ impl<I> Default for ColorScale<I> {
             palette: None,
             transform: Transform::Linear,
             format: None,
+            reverse: false,
             nice: true,
         }
     }
@@ -72,6 +79,7 @@ impl<I: Clone> Clone for ColorScale<I> {
             palette: self.palette.clone(),
             transform: self.transform,
             format: self.format.clone(),
+            reverse: self.reverse,
             nice: self.nice,
         }
     }
@@ -84,6 +92,7 @@ impl<I: std::fmt::Debug> std::fmt::Debug for ColorScale<I> {
             .field("palette", &self.palette)
             .field("transform", &self.transform)
             .field("format", &self.format.as_ref().map(|_| "<function>"))
+            .field("reverse", &self.reverse)
             .field("nice", &self.nice)
             .finish()
     }
@@ -127,6 +136,19 @@ impl<I: Clone> ColorScale<I> {
     /// [`Arc`] so subsequent clones share the same allocation.
     pub fn format(mut self, f: impl Fn(&I) -> String + Send + Sync + 'static) -> Self {
         self.format = Some(Arc::new(f));
+        self
+    }
+
+    /// Sets whether palette sampling should run in reverse while
+    /// leaving the numeric domain untouched.
+    pub fn reverse(mut self, reverse: bool) -> Self {
+        self.reverse = reverse;
+        self
+    }
+
+    /// Convenience builder for `.reverse(true)`.
+    pub fn reversed(mut self) -> Self {
+        self.reverse = true;
         self
     }
 
@@ -205,6 +227,7 @@ mod tests {
         assert!(s.domain.is_none());
         assert!(s.palette.is_none());
         assert_eq!(s.transform, Transform::Linear);
+        assert!(!s.reverse);
     }
 
     #[test]
@@ -215,6 +238,18 @@ mod tests {
         assert_eq!(s.transform, Transform::Log);
         let s: ColorScale<f64> = ColorScale::default().linear();
         assert_eq!(s.transform, Transform::Linear);
+    }
+
+    #[test]
+    fn builders_set_reverse_direction() {
+        let s: ColorScale<f64> = ColorScale::default().reverse(true);
+        assert!(s.reverse);
+
+        let s = s.reverse(false);
+        assert!(!s.reverse);
+
+        let s = s.reversed();
+        assert!(s.reverse);
     }
 
     #[test]

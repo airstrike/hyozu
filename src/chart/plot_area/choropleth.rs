@@ -239,17 +239,24 @@ pub(super) fn palette_to_continuous_stops(
     }
 }
 
-/// Default palette for a Choropleth when the user hasn't set one. A
-/// three-stop semantic gradient that flows through the active theme's
-/// success / warning / danger slots — this matches the historical
-/// behavior of the explicit `vec![seed.success, seed.warning, seed.danger]`
-/// fallback the renderer previously baked inline.
+/// Default palette for a Choropleth when the user hasn't set one.
+/// Continuous choropleths default to a single-hue sequential scale from
+/// the active theme's primary color; semantic green/yellow/red gradients
+/// are too opinionated for unknown measures.
 fn default_choropleth_palette() -> crate::palette::Palette {
-    crate::palette::Palette::Gradient(vec![
-        crate::color::Color::Success,
-        crate::color::Color::Warning,
-        crate::color::Color::Danger,
-    ])
+    crate::palette::Palette::SEQUENTIAL
+}
+
+fn color_stops_for_scale(
+    scale: &crate::scale::ColorScale<f64>,
+    seed: &crate::palette::Seed,
+) -> Vec<crate::core::Color> {
+    let palette = scale.resolved_palette(default_choropleth_palette);
+    let mut stops = palette_to_continuous_stops(&palette, seed);
+    if scale.reverse {
+        stops.reverse();
+    }
+    stops
 }
 
 /// Linear-RGB blend of `a` toward `b` by `t` in `[0.0, 1.0]`. `t = 0`
@@ -450,12 +457,11 @@ where
         let layout_bounds = layout.bounds();
 
         // ── Resolve color scale ───────────────────────────────────
-        // Theme-dependent (uses the palette seed when no explicit palette
-        // is set), so it stays in draw. The user's explicit palette wins;
-        // otherwise the closure produces the mark's semantic
-        // success → warning → danger gradient.
-        let palette = self.data.color.resolved_palette(default_choropleth_palette);
-        let color_stops: Vec<crate::core::Color> = palette_to_continuous_stops(&palette, &seed);
+        // Theme-dependent (uses the palette seed when no explicit
+        // palette is set), so it stays in draw. The user's explicit
+        // palette and direction win; otherwise the mark defaults to the
+        // theme's primary sequential scale.
+        let color_stops = color_stops_for_scale(&self.data.color, &seed);
 
         // ── Derived colors ───────────────────────────────────────
         let default_land_fill = crate::core::Color {
@@ -620,8 +626,7 @@ where
         let text_pair = theme.text_pair();
         let seed = theme.seed();
 
-        let palette = self.data.color.resolved_palette(default_choropleth_palette);
-        let color_stops: Vec<crate::core::Color> = palette_to_continuous_stops(&palette, &seed);
+        let color_stops = color_stops_for_scale(&self.data.color, &seed);
         let border_color = theme.divider_color().resolve(background, text_pair, &seed, None);
         let label_color = {
             let resolved = text_pair.resolve(background, None);
@@ -813,6 +818,32 @@ mod tests {
                 lightnesses
             );
         }
+    }
+
+    #[test]
+    fn reverse_scale_flips_continuous_stops() {
+        let blue = color!(0x3366cc);
+        let seed = Seed {
+            primary: blue,
+            secondary: blue,
+            success: blue,
+            warning: blue,
+            danger: blue,
+            background: Color::WHITE,
+        };
+        let forward = crate::scale::ColorScale::default().palette(sequential(blue));
+        let reversed = forward.clone().reverse(true);
+
+        let forward_stops = color_stops_for_scale(&forward, &seed);
+        let reversed_stops = color_stops_for_scale(&reversed, &seed);
+
+        assert_eq!(forward_stops.first(), reversed_stops.last());
+        assert_eq!(forward_stops.last(), reversed_stops.first());
+    }
+
+    #[test]
+    fn default_choropleth_palette_is_single_hue_primary() {
+        assert_eq!(default_choropleth_palette(), crate::palette::Palette::SEQUENTIAL);
     }
 
     #[test]

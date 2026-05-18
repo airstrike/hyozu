@@ -369,14 +369,21 @@ impl Choropleth {
         self
     }
 
-    /// Configures the color-scale legend.
+    /// Configures the continuous color-scale guide.
     ///
     /// Pass a [`legend::Config`] to customize anchor / placement / orientation /
     /// text, or `None` to suppress the legend entirely. The default is an
     /// overlaid horizontal bar pinned to the bottom-right.
-    pub fn legend(mut self, legend: impl Into<Option<legend::Config>>) -> Self {
+    pub fn scale_legend(mut self, legend: impl Into<Option<legend::Config>>) -> Self {
         self.legend = legend.into();
         self
+    }
+
+    /// Alias for [`Self::scale_legend`]. Kept because many charting
+    /// APIs call every guide a legend, while continuous color encodings
+    /// read more clearly as a scale guide in authored code.
+    pub fn legend(self, legend: impl Into<Option<legend::Config>>) -> Self {
+        self.scale_legend(legend)
     }
 
     /// Returns the current color-scale legend configuration.

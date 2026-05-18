@@ -397,7 +397,7 @@ pub fn draw<Theme, Renderer>(
             let tick_x_left = bar_origin.x + bar_size.width;
             let tick_x_right = tick_x_left + TICK_LENGTH;
             let labels_x = tick_x_right + 2.0;
-            for (i, tick) in plan.ticks.iter().enumerate() {
+            for tick in &plan.ticks {
                 // Vertical legends paint `t = 1.0` (high end) at the
                 // top and `t = 0.0` at the bottom — invert here so the
                 // y position grows downward as the value drops.
@@ -407,17 +407,11 @@ pub fn draw<Theme, Renderer>(
                     builder.line_to(Point::new(tick_x_right, y));
                 });
                 frame.stroke(&line, Stroke::default().with_color(border_color).with_width(0.5));
-                // Top endpoint anchors its baseline at the tick (Top
-                // align); bottom endpoint hangs from the tick (Bottom
-                // align); interior ticks center their label vertically
-                // on the tick line.
-                let align_y = if i == plan.ticks.len() - 1 {
-                    alignment::Vertical::Top
-                } else if i == 0 {
-                    alignment::Vertical::Bottom
-                } else {
-                    alignment::Vertical::Center
-                };
+                // Center every label on its tick. Endpoint-specific
+                // top/bottom anchoring makes vertical legends look
+                // uneven because glyph ascenders and descenders change
+                // the perceived spacing between adjacent values.
+                let align_y = alignment::Vertical::Center;
                 frame.fill_text(CanvasText {
                     content: tick.label.clone(),
                     position: Point::new(labels_x, y),
