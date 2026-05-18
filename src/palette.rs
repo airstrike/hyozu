@@ -11,9 +11,9 @@ pub enum Palette {
     /// Distinct hues for categorical data (pie, multi-series).
     Categorical,
     /// Brand-tonal slots from a single hue. Slot 0 is the hue exactly;
-    /// later slots vary lightness/chroma without rotating hue. This is
-    /// the right default for branded dashboards where "more colors"
-    /// should not mean "more unrelated hues."
+    /// later slots fade toward a low-chroma neutral fill without
+    /// rotating hue. This is the right default for branded dashboards
+    /// where "more colors" should not mean "more unrelated hues."
     Tonal(Color),
     /// Shades of a single hue. The inner [`Color`] picks which hue:
     /// pass [`Color::Primary`] (the historical default) for shades of
@@ -47,7 +47,7 @@ impl Palette {
 
 /// Convenience constructor for [`Palette::Tonal`]. Accepts any value
 /// that can be converted into a [`Color`]. Slot 0 resolves to this hue
-/// exactly; additional slots are same-hue tonal variants.
+/// exactly; additional slots fade toward low-chroma neutral variants.
 ///
 /// # Examples
 ///
@@ -417,7 +417,8 @@ fn generate_categorical(seed: &Seed, n: usize) -> Vec<Color> {
     colors
 }
 
-/// Generate brand-tonal colors: same hue, slot 0 exactly the source.
+/// Generate brand-tonal colors: slot 0 exactly the source, then a
+/// same-hue fade toward a neutral fill.
 fn generate_tonal(primary: crate::core::Color, background: crate::core::Color, n: usize) -> Vec<Color> {
     if n == 1 {
         return vec![Color::Fixed(primary)];
@@ -425,42 +426,21 @@ fn generate_tonal(primary: crate::core::Color, background: crate::core::Color, n
 
     let base = to_oklch(primary);
     let dark_bg = is_dark_background(background);
-    let offsets: &[(f32, f32)] = if dark_bg {
-        &[
-            (0.0, 1.0),
-            (0.18, 0.82),
-            (-0.10, 0.92),
-            (0.32, 0.52),
-            (-0.20, 0.72),
-            (0.42, 0.34),
-        ]
-    } else {
-        &[
-            (0.0, 1.0),
-            (0.18, 0.82),
-            (-0.12, 0.92),
-            (0.32, 0.52),
-            (-0.24, 0.72),
-            (0.42, 0.34),
-        ]
-    };
+    let target_l = if dark_bg { 0.34 } else { 0.93 };
+    let target_c = base.c * 0.12;
 
     (0..n)
         .map(|i| {
             if i == 0 {
                 return Color::Fixed(primary);
             }
-            let (dl, chroma_mult) = offsets[i % offsets.len()];
-            let pass = i / offsets.len();
-            let pass_shift = if dark_bg {
-                pass as f32 * 0.08
-            } else {
-                -(pass as f32 * 0.08)
-            };
-            let l = (base.l + dl + pass_shift).clamp(0.24, 0.94);
+            let t = i as f32 / (n - 1).max(1) as f32;
+            let eased = 1.0 - (1.0 - t) * (1.0 - t);
+            let l = base.l + (target_l - base.l) * eased;
+            let c = base.c + (target_c - base.c) * eased;
             Color::Fixed(from_oklch(Oklch {
-                l,
-                c: base.c * chroma_mult,
+                l: l.clamp(0.18, 0.96),
+                c: c.max(0.0),
                 h: base.h,
                 a: base.a,
             }))
