@@ -36,6 +36,24 @@ fn mark_value_format(mark: &Mark) -> Option<crate::scale::Format<f64>> {
     }
 }
 
+fn legend_entries_for(
+    data: &crate::Data,
+) -> (
+    Vec<crate::data::mark::LegendEntry>,
+    Vec<Option<crate::scale::Format<f64>>>,
+) {
+    let mut entries = Vec::new();
+    let mut entry_value_format = Vec::new();
+    for mark in data.primary.marks().iter().chain(data.secondary.marks()) {
+        let mark_format = mark_value_format(mark).or_else(|| data.value_scale().format.clone());
+        for entry in mark.legend_entries() {
+            entries.push(entry);
+            entry_value_format.push(mark_format.clone());
+        }
+    }
+    (entries, entry_value_format)
+}
+
 /// Scene organizes the 7 pieces of a chart.
 /// Borrows everything from Data for lifetime 'a.
 /// Follows the pane_grid::Content pattern from iced.
@@ -241,19 +259,12 @@ where
 
     /// Create a new scene from Data, borrowing everything for lifetime 'a.
     pub fn new(data: &'a crate::Data) -> Self {
-        // Extract legend entries from primary-area marks, paired with each
-        // entry's resolved value-format closure (mark override falls
-        // through to the chart-level data scale). The legend layout walks
-        // the legend-config override on top of these per-entry slots.
-        let mut entries: Vec<crate::data::mark::LegendEntry> = Vec::new();
-        let mut entry_value_format: Vec<Option<crate::scale::Format<f64>>> = Vec::new();
-        for mark in data.primary.marks() {
-            let mark_format = mark_value_format(mark).or_else(|| data.value_scale().format.clone());
-            for entry in mark.legend_entries() {
-                entries.push(entry);
-                entry_value_format.push(mark_format.clone());
-            }
-        }
+        // Extract legend entries from primary and secondary-area marks,
+        // paired with each entry's resolved value-format closure (mark
+        // override falls through to the chart-level data scale). The
+        // legend layout walks the legend-config override on top of
+        // these per-entry slots.
+        let (entries, entry_value_format) = legend_entries_for(data);
 
         let legend = match data.legend.as_ref() {
             Some(config) if !entries.is_empty() => Some(Legend::new(
@@ -1124,5 +1135,26 @@ where
             self.top_axis.as_ref().map(|g| g.axis()),
             self.right_axis.as_ref().map(|g| g.axis()),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn legend_entries_include_secondary_marks() {
+        let bars = crate::bars([
+            crate::bar([100.0, 120.0]).with_name("Prior year"),
+            crate::bar([110.0, 130.0]).with_name("Current year"),
+        ]);
+        let line = crate::line([0.2, 0.25]).with_name("Operating Profit Margin %");
+        let data = crate::data(bars)
+            .secondary(vec![crate::Mark::Line(line)])
+            .legend(crate::legend::Config::above());
+
+        let (entries, formats) = super::legend_entries_for(&data);
+        let names: Vec<_> = entries.iter().map(|entry| entry.name.as_str()).collect();
+
+        assert_eq!(names, vec!["Prior year", "Current year", "Operating Profit Margin %"],);
+        assert_eq!(formats.len(), entries.len());
     }
 }
