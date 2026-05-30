@@ -2616,6 +2616,7 @@ fn draw_pie_tooltip_overlay<Message>(
                         .with_width(1.0),
                 );
                 renderer.with_translation(crate::core::Vector::new(plot_bounds.x, plot_bounds.y), |renderer| {
+                    #[allow(clippy::unit_arg)]
                     geometry::Renderer::draw_geometry(renderer, frame.into_geometry());
                 });
             }
