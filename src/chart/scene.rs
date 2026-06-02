@@ -944,6 +944,7 @@ where
         cursor: crate::core::mouse::Cursor,
         viewport: &crate::core::Rectangle,
         hidden_series: &std::collections::HashSet<String>,
+        corners: crate::core::border::Radius,
     ) where
         D: design::Design + ?Sized,
     {
@@ -1064,6 +1065,7 @@ where
             self.user_palette.as_ref(),
             self.selection,
             hidden_series,
+            corners,
         );
 
         // Scale legends. Overlaid panels float inside the plot area;

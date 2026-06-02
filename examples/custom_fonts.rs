@@ -40,7 +40,6 @@ impl App {
     fn new() -> (Self, Task<Message>) {
         let sales = data(
             bars([bar([1200, 1900, 1500, 2200, 1800, 2400]).with_name("Revenue")])
-                .corner_radius(6.0)
                 .data_labels(Above + font("JetBrains Mono") + Bold + Italic),
         )
         .palette(Palette::Categorical)
@@ -97,7 +96,13 @@ impl App {
         .spacing(2);
 
         let status = text(&self.status).size(11).color([0.5, 0.5, 0.5]);
-        let chart = chart(&self.sales).design(&Theme::TokyoNightLight).padding(20);
+        let chart = chart(&self.sales)
+            .design(&Theme::TokyoNightLight)
+            .padding(20)
+            .style(|d| hyozu::chart::Style {
+                corners: 6.0.into(),
+                ..hyozu::chart::default(d)
+            });
 
         center(column![header, chart, key, status].spacing(16))
             .padding(20)

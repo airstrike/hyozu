@@ -21,10 +21,9 @@ pub type Message = ();
 impl App {
     fn new() -> Self {
         Self {
-            sales: data(
-                bars([bar([1200, 1900, 1500, 2200, 1800, 2400]).color_by(encoding::key(|i, _| MONTHS[i]))])
-                    .corner_radius(6.0),
-            )
+            sales: data(bars([
+                bar([1200, 1900, 1500, 2200, 1800, 2400]).color_by(encoding::key(|i, _| MONTHS[i]))
+            ]))
             .palette(Palette::Categorical)
             .x_axis_labels(MONTHS)
             .y_axis(|a| a.show_grid(true).show_minor_grid(true)),
@@ -32,9 +31,17 @@ impl App {
     }
 
     fn view(&self) -> iced::Element<'_, Message> {
-        center(hyozu::chart(&self.sales).design(&Theme::TokyoNightLight).padding(20))
-            .padding(20)
-            .into()
+        center(
+            hyozu::chart(&self.sales)
+                .design(&Theme::TokyoNightLight)
+                .padding(20)
+                .style(|d| hyozu::chart::Style {
+                    corners: 6.0.into(),
+                    ..hyozu::chart::default(d)
+                }),
+        )
+        .padding(20)
+        .into()
     }
 
     fn update(&mut self, _: Message) -> Task<Message> {

@@ -167,6 +167,22 @@ pub trait Design {
         crate::text::Style::new().font(self.font()).size(self.font_size())
     }
 
+    /// Returns the default corner rounding applied to roundable marks:
+    /// bar/column value-ends, pie & donut slices, and the gauge value arc.
+    ///
+    /// Pixel radii — interpreted per-corner for rectangular bars (so a
+    /// `[tl, tr, br, bl]` radius rounds individual corners, matching
+    /// Recharts' `radius` prop) and as a uniform cap radius for polar
+    /// marks (matching Recharts' `cornerRadius`).
+    ///
+    /// Defaults to square (`0.0`) so rounding is strictly opt-in and no
+    /// existing chart changes appearance. A theme overrides this for a
+    /// house style; a per-chart [`crate::chart::Style::corners`] override
+    /// (set inside [`crate::chart::Chart::style`]) layers on top.
+    fn corners(&self) -> crate::core::border::Radius {
+        0.0.into()
+    }
+
     /// Returns an owned [`Cow`] of this design.
     fn to_cow(&self) -> Cow<'static, Self>
     where
@@ -264,6 +280,10 @@ impl<T: Design> Design for &T {
     fn data_label_text(&self) -> crate::text::Style {
         (*self).data_label_text()
     }
+
+    fn corners(&self) -> crate::core::border::Radius {
+        (*self).corners()
+    }
 }
 
 /// Default implementation of Design for iced::Theme.
@@ -336,5 +356,9 @@ impl Design for theme::Theme {
 
     fn font_size(&self) -> f32 {
         12.0
+    }
+
+    fn corners(&self) -> crate::core::border::Radius {
+        8.0.into()
     }
 }

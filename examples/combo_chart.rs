@@ -105,8 +105,7 @@ impl App {
             bar(revenue_current).with_name("Revenue (FY25)"),
             bar(revenue_prior).with_name("Revenue (FY24)"),
         ])
-        .with_layout(BarLayout::Grouped)
-        .corner_radius(3.0);
+        .with_layout(BarLayout::Grouped);
 
         // Secondary side — line series. Inboard wraps this as a
         // `Mark::Line(...)` and passes a `vec![Mark::Line(...)]`
@@ -128,9 +127,17 @@ impl App {
     }
 
     fn view(&self) -> iced::Element<'_, Message> {
-        center(hyozu::chart(&self.chart).design(&Theme::Light).padding(20))
-            .padding(20)
-            .into()
+        center(
+            hyozu::chart(&self.chart)
+                .design(&Theme::Light)
+                .padding(20)
+                .style(|d| hyozu::chart::Style {
+                    corners: 3.0.into(),
+                    ..hyozu::chart::default(d)
+                }),
+        )
+        .padding(20)
+        .into()
     }
 
     fn update(&mut self, _: Message) -> Task<Message> {

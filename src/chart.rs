@@ -1854,6 +1854,7 @@ where
             cursor,
             viewport,
             &state.hidden_series,
+            style.corners,
         );
 
         // Draw the donut center overlay above the scene so the badge
@@ -1905,6 +1906,7 @@ where
                     viewport,
                     cursor,
                     self.hover_fn.is_none(),
+                    style.corners,
                 );
             }
         }
@@ -2119,6 +2121,7 @@ fn draw_tooltip_overlay<Message>(
     viewport: &Rectangle,
     cursor: mouse::Cursor,
     draw_box: bool,
+    corners: crate::core::border::Radius,
 ) {
     if !hover_mark_indices_are_current(hover, scene.plot_area().series.len()) {
         return;
@@ -2155,6 +2158,7 @@ fn draw_tooltip_overlay<Message>(
             viewport,
             cursor,
             draw_box,
+            corners,
         ),
         hover::Geometry::Geographic { mark_idx, point_idx } => draw_geo_tooltip_overlay(
             renderer,
@@ -2517,6 +2521,7 @@ fn draw_pie_tooltip_overlay<Message>(
     viewport: &Rectangle,
     cursor: mouse::Cursor,
     draw_box: bool,
+    corners: crate::core::border::Radius,
 ) {
     use crate::core::renderer::Renderer as _;
     use crate::widget::canvas::{Frame, Stroke};
@@ -2599,27 +2604,37 @@ fn draw_pie_tooltip_overlay<Message>(
     };
     let effective_tooltip = effective_tooltip.clone().swatch(false);
 
-    if tooltip_config.markers {
+    if tooltip_config.markers
+        && let Some(&(start, end)) = pie_state.slice_angles.get(slice_idx)
+        && (end - start).abs() > f32::EPSILON
+    {
+        // Build the hover outline from the same `slice_path` (explode +
+        // rounding) the fill uses, so the highlight always traces the
+        // exact petal shape.
+        let corner = corners.top_left.max(0.0);
+        let gap_offset = plot_area::pie::effective_gap(pie.data.gap, corner, pie.data.slices.len()) / 2.0;
+        let path = plot_area::pie::slice_path(
+            Point::new(pie_state.center.0, pie_state.center.1),
+            pie_state.inner_radius,
+            pie_state.outer_radius,
+            start,
+            end,
+            gap_offset,
+            corner,
+        );
         renderer.with_layer(*viewport, |renderer| {
-            if let Some(path) = pie_hover_outline_path(
-                pie_state,
-                slice_idx,
-                pie.data.gap > 0.0 && pie.data.slices.len() > 1,
-                pie.data.gap / 2.0,
-            ) {
-                let frame_size = crate::core::Size::new(plane.bounds.width, plane.bounds.height);
-                let mut frame = Frame::new(renderer, frame_size);
-                frame.stroke(
-                    &path,
-                    Stroke::default()
-                        .with_color(pie_hover_stroke(background))
-                        .with_width(1.0),
-                );
-                renderer.with_translation(crate::core::Vector::new(plot_bounds.x, plot_bounds.y), |renderer| {
-                    #[allow(clippy::unit_arg)]
-                    geometry::Renderer::draw_geometry(renderer, frame.into_geometry());
-                });
-            }
+            let frame_size = crate::core::Size::new(plane.bounds.width, plane.bounds.height);
+            let mut frame = Frame::new(renderer, frame_size);
+            frame.stroke(
+                &path,
+                Stroke::default()
+                    .with_color(pie_hover_stroke(background))
+                    .with_width(1.0),
+            );
+            renderer.with_translation(crate::core::Vector::new(plot_bounds.x, plot_bounds.y), |renderer| {
+                #[allow(clippy::unit_arg)]
+                geometry::Renderer::draw_geometry(renderer, frame.into_geometry());
+            });
         });
     }
 
@@ -2640,75 +2655,11 @@ fn draw_pie_tooltip_overlay<Message>(
     }
 }
 
-const PIE_HOVER_ARC_SEGMENTS_PER_TAU: usize = 64;
-
 fn pie_hover_stroke(background: crate::core::Color) -> crate::core::Color {
     if crate::palette::is_dark_background(background) {
         crate::core::Color::from_rgba(1.0, 1.0, 1.0, 0.5)
     } else {
         crate::core::Color::from_rgba(0.0, 0.0, 0.0, 0.5)
-    }
-}
-
-fn pie_hover_outline_path(
-    state: &plot_area::pie::State,
-    slice_idx: usize,
-    has_gap: bool,
-    gap_offset: f32,
-) -> Option<crate::widget::canvas::Path> {
-    let (start, end) = *state.slice_angles.get(slice_idx)?;
-    if (end - start).abs() <= f32::EPSILON {
-        return None;
-    }
-
-    let (mut cx, mut cy) = state.center;
-    if has_gap {
-        let mid = (start + end) / 2.0;
-        cx += gap_offset * mid.cos();
-        cy += gap_offset * mid.sin();
-    }
-    let inner_radius = state.inner_radius;
-    let outer_radius = state.outer_radius;
-
-    Some(crate::widget::canvas::Path::new(|builder| {
-        if inner_radius > 0.0 {
-            let inner_start = Point::new(cx + inner_radius * start.cos(), cy + inner_radius * start.sin());
-            let outer_start = Point::new(cx + outer_radius * start.cos(), cy + outer_radius * start.sin());
-
-            builder.move_to(inner_start);
-            builder.line_to(outer_start);
-            trace_hover_arc(builder, cx, cy, outer_radius, start, end);
-
-            let inner_end = Point::new(cx + inner_radius * end.cos(), cy + inner_radius * end.sin());
-            builder.line_to(inner_end);
-            trace_hover_arc(builder, cx, cy, inner_radius, end, start);
-            builder.close();
-        } else {
-            builder.move_to(Point::new(cx, cy));
-            let outer_start = Point::new(cx + outer_radius * start.cos(), cy + outer_radius * start.sin());
-            builder.line_to(outer_start);
-            trace_hover_arc(builder, cx, cy, outer_radius, start, end);
-            builder.close();
-        }
-    }))
-}
-
-fn trace_hover_arc(
-    builder: &mut crate::widget::canvas::path::Builder,
-    cx: f32,
-    cy: f32,
-    radius: f32,
-    start_angle: f32,
-    end_angle: f32,
-) {
-    let sweep = end_angle - start_angle;
-    let segments = ((sweep.abs() / std::f32::consts::TAU) * PIE_HOVER_ARC_SEGMENTS_PER_TAU as f32).ceil() as usize;
-    let segments = segments.max(1);
-
-    for i in 1..=segments {
-        let t = i as f32 / segments as f32;
-        let angle = start_angle + sweep * t;
-        builder.line_to(Point::new(cx + radius * angle.cos(), cy + radius * angle.sin()));
     }
 }
 
@@ -3254,12 +3205,25 @@ fn draw_tooltip_box(
 }
 
 /// The appearance of a chart.
+///
+/// Construct via the built-in fns ([`default`], [`filled`], …) and extend
+/// with struct-update syntax — `Style { corners: 6.0.into(), ..default(d) }`
+/// — matching the iced ecosystem convention for style structs.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Style {
     /// The background color of the chart.
     pub background: Option<crate::core::Color>,
     /// The border of the chart.
     pub border: crate::core::Border,
+    /// Corner rounding for roundable marks: bar/column value-ends, pie &
+    /// donut slices, and the gauge value arc.
+    ///
+    /// Per-corner pixel radii for rectangular bars (Recharts `radius`);
+    /// the uniform value is taken as the cap radius for polar marks
+    /// (Recharts `cornerRadius`). The built-in style fns seed this from
+    /// [`design::Design::corners`], so a theme default flows through;
+    /// override it inside [`Chart::style`] to round per chart.
+    pub corners: crate::core::border::Radius,
 }
 
 /// A styling function for a [`Chart`].
@@ -3276,12 +3240,17 @@ pub fn default(design: &dyn design::Design) -> Style {
                 .divider_color()
                 .resolve(design.background_color(), design.text_pair(), &design.seed(), None),
         },
+        corners: design.corners(),
     }
 }
 
-/// A transparent [`Chart`] with no background or border.
-pub fn transparent(_design: &dyn design::Design) -> Style {
-    Style::default()
+/// A transparent [`Chart`] with no background or border. Mark corner
+/// rounding still follows the design — the frame is bare, not the marks.
+pub fn transparent(design: &dyn design::Design) -> Style {
+    Style {
+        corners: design.corners(),
+        ..Style::default()
+    }
 }
 
 /// A [`Chart`] with thin square border and no background.
@@ -3295,6 +3264,7 @@ pub fn bordered(design: &dyn design::Design) -> Style {
                 .divider_color()
                 .resolve(design.background_color(), design.text_pair(), &design.seed(), None),
         },
+        corners: design.corners(),
     }
 }
 
@@ -3309,6 +3279,7 @@ pub fn filled(design: &dyn design::Design) -> Style {
                 .divider_color()
                 .resolve(design.background_color(), design.text_pair(), &design.seed(), None),
         },
+        corners: design.corners(),
     }
 }
 

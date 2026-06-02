@@ -9,9 +9,6 @@ use crate::widget::canvas::{Frame, Path, Stroke, Text as CanvasText};
 use crate::core::text;
 use crate::widget::renderer::geometry;
 
-/// Number of line segments per full circle for arc approximation.
-const ARC_SEGMENTS_PER_TAU: usize = 64;
-
 /// Treats non-finite slice values (NaN, ±∞) as the gap convention:
 /// the slice contributes nothing to the total and renders a zero-sweep
 /// arc, so a stray `+∞` doesn't propagate into `proportion = ∞/∞ = NaN`
@@ -28,6 +25,49 @@ const OUTSIDE_LABEL_OFFSET: f32 = 14.0;
 
 /// Distance from outer arc to leader-line knee for outside labels.
 const OUTSIDE_LEADER_KNEE: f32 = 10.0;
+
+/// Resolves the effective inter-slice gap in pixels. An explicit `gap`
+/// always wins; otherwise rounded slices derive a gap from the corner
+/// radius so they read as separated petals (a single slice never gaps).
+///
+/// Shared by the slice fill and the hover/selection overlays so the
+/// separation can't drift between layers.
+pub(crate) fn effective_gap(gap: f32, corner: f32, slice_count: usize) -> f32 {
+    if slice_count <= 1 {
+        0.0
+    } else if gap > 0.0 {
+        gap
+    } else {
+        corner
+    }
+}
+
+/// Builds the path for one pie/donut slice: the gap-explode offset (each
+/// slice nudged out along its bisector by `gap_offset`) plus corner
+/// rounding via [`super::sector::push_sector_path`].
+///
+/// This is the single place a slice outline is constructed — the fill, the
+/// selection highlight, and the hover overlay all call it, so their shapes
+/// can never diverge again.
+pub(crate) fn slice_path(
+    center: crate::core::Point,
+    inner_radius: f32,
+    outer_radius: f32,
+    start: f32,
+    end: f32,
+    gap_offset: f32,
+    corner: f32,
+) -> Path {
+    let (scx, scy) = if gap_offset > 0.0 {
+        let mid = (start + end) * 0.5;
+        (center.x + gap_offset * mid.cos(), center.y + gap_offset * mid.sin())
+    } else {
+        (center.x, center.y)
+    };
+    Path::new(move |builder| {
+        super::sector::push_sector_path(builder, scx, scy, inner_radius, outer_radius, start, end, corner);
+    })
+}
 
 /// State for Pie — stores pre-calculated slice angles and geometry for hit-testing
 pub struct State {
@@ -250,6 +290,7 @@ where
         palette: &crate::palette::Resolved,
         mark_index: usize,
         selection: &Option<crate::target::Target>,
+        corners: crate::core::border::Radius,
     ) where
         Theme: crate::design::Design + ?Sized,
     {
@@ -258,6 +299,10 @@ where
         if state.slice_angles.is_empty() {
             return;
         }
+
+        // Polar marks take a uniform cap radius (Recharts `cornerRadius`);
+        // the per-corner `Radius` collapses to its `top_left` value.
+        let corner = corners.top_left.max(0.0);
 
         let background = theme.background_color();
         let text_pair = theme.text_pair();
@@ -283,8 +328,10 @@ where
         let radius = ((layout_bounds.width.min(layout_bounds.height) / 2.0 - pad).max(0.0)) * 0.95;
         let inner_radius = radius * self.hole;
 
-        let has_gap = self.data.gap > 0.0 && self.data.slices.len() > 1;
-        let gap_offset = self.data.gap / 2.0;
+        // Half the effective inter-slice gap — the distance each slice is
+        // nudged outward along its bisector. Rounded slices auto-derive a
+        // gap so they separate into petals; see [`effective_gap`].
+        let gap_offset = effective_gap(self.data.gap, corner, self.data.slices.len()) / 2.0;
 
         // Sweep: each slice's angular delta interpolates from its
         // previous-layout delta to its current delta, and the next
@@ -317,36 +364,15 @@ where
             let end = anim_cursor + delta;
             anim_cursor = end;
 
-            let (scx, scy) = if has_gap {
-                let mid = (start + end) / 2.0;
-                (cx + gap_offset * mid.cos(), cy + gap_offset * mid.sin())
-            } else {
-                (cx, cy)
-            };
-
-            let path = Path::new(|builder| {
-                if inner_radius > 0.0 {
-                    let inner_start =
-                        crate::core::Point::new(scx + inner_radius * start.cos(), scy + inner_radius * start.sin());
-                    let outer_start = crate::core::Point::new(scx + radius * start.cos(), scy + radius * start.sin());
-
-                    builder.move_to(inner_start);
-                    builder.line_to(outer_start);
-                    trace_arc(builder, scx, scy, radius, start, end);
-
-                    let inner_end =
-                        crate::core::Point::new(scx + inner_radius * end.cos(), scy + inner_radius * end.sin());
-                    builder.line_to(inner_end);
-                    trace_arc(builder, scx, scy, inner_radius, end, start);
-                    builder.close();
-                } else {
-                    builder.move_to(crate::core::Point::new(scx, scy));
-                    let outer_start = crate::core::Point::new(scx + radius * start.cos(), scy + radius * start.sin());
-                    builder.line_to(outer_start);
-                    trace_arc(builder, scx, scy, radius, start, end);
-                    builder.close();
-                }
-            });
+            let path = slice_path(
+                crate::core::Point::new(cx, cy),
+                inner_radius,
+                radius,
+                start,
+                end,
+                gap_offset,
+                corner,
+            );
 
             frame.fill(&path, color);
         }
@@ -518,38 +544,15 @@ where
                 let start = *start_angle;
                 let end = *end_angle;
 
-                let (scx, scy) = if has_gap {
-                    let mid = (start + end) / 2.0;
-                    (cx + gap_offset * mid.cos(), cy + gap_offset * mid.sin())
-                } else {
-                    (cx, cy)
-                };
-
-                let highlight_path = Path::new(|builder| {
-                    if inner_radius > 0.0 {
-                        let inner_start =
-                            crate::core::Point::new(scx + inner_radius * start.cos(), scy + inner_radius * start.sin());
-                        let outer_start =
-                            crate::core::Point::new(scx + radius * start.cos(), scy + radius * start.sin());
-
-                        builder.move_to(inner_start);
-                        builder.line_to(outer_start);
-                        trace_arc(builder, scx, scy, radius, start, end);
-
-                        let inner_end =
-                            crate::core::Point::new(scx + inner_radius * end.cos(), scy + inner_radius * end.sin());
-                        builder.line_to(inner_end);
-                        trace_arc(builder, scx, scy, inner_radius, end, start);
-                        builder.close();
-                    } else {
-                        builder.move_to(crate::core::Point::new(scx, scy));
-                        let outer_start =
-                            crate::core::Point::new(scx + radius * start.cos(), scy + radius * start.sin());
-                        builder.line_to(outer_start);
-                        trace_arc(builder, scx, scy, radius, start, end);
-                        builder.close();
-                    }
-                });
+                let highlight_path = slice_path(
+                    crate::core::Point::new(cx, cy),
+                    inner_radius,
+                    radius,
+                    start,
+                    end,
+                    gap_offset,
+                    corner,
+                );
 
                 selection_frame.stroke(
                     &highlight_path,
@@ -685,31 +688,5 @@ fn label_rect(g: LabelGeometry, text_width: f32, text_height: f32) -> crate::cor
         y,
         width: text_width,
         height: text_height,
-    }
-}
-
-/// Trace an arc using line segments (avoids iced's `arc()` which uses `move_to` internally).
-///
-/// Draws from `start_angle` to `end_angle` around `(cx, cy)` at the given `radius`.
-/// The direction depends on the sign of `end_angle - start_angle`.
-fn trace_arc(
-    builder: &mut crate::widget::canvas::path::Builder,
-    cx: f32,
-    cy: f32,
-    radius: f32,
-    start_angle: f32,
-    end_angle: f32,
-) {
-    let sweep = end_angle - start_angle;
-    let segments = ((sweep.abs() / std::f32::consts::TAU) * ARC_SEGMENTS_PER_TAU as f32).ceil() as usize;
-    let segments = segments.max(1);
-
-    for i in 1..=segments {
-        let t = i as f32 / segments as f32;
-        let angle = start_angle + sweep * t;
-        builder.line_to(crate::core::Point::new(
-            cx + radius * angle.cos(),
-            cy + radius * angle.sin(),
-        ));
     }
 }

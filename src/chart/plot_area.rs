@@ -16,6 +16,7 @@ pub mod heatmap;
 pub mod line;
 pub mod pie;
 pub mod rule;
+pub mod sector;
 pub mod text;
 pub mod tick;
 pub mod treemap;
@@ -1300,6 +1301,7 @@ where
         chart_user_palette: Option<&crate::palette::Palette>,
         selection: &Option<crate::target::Target>,
         hidden_series: &std::collections::HashSet<String>,
+        corners: crate::core::border::Radius,
     ) where
         D: crate::design::Design + ?Sized,
     {
@@ -1361,6 +1363,7 @@ where
                         chart_user_palette,
                         i,
                         selection,
+                        corners,
                     );
                     color_offset += bars.data.series.len();
                 }
@@ -1405,6 +1408,7 @@ where
                         palette,
                         i,
                         selection,
+                        corners,
                     );
                     color_offset += pie.data.slices.len();
                 }
@@ -1419,6 +1423,7 @@ where
                         viewport,
                         color_offset,
                         palette,
+                        corners,
                     );
                     color_offset += 1;
                 }

@@ -9,9 +9,6 @@ use crate::widget::canvas::{Frame, Path, Text};
 use crate::core::text;
 use crate::widget::renderer::geometry;
 
-/// Number of line segments per full circle for arc approximation.
-const ARC_SEGMENTS_PER_TAU: usize = 64;
-
 /// State for Gauge — stores computed arc parameters
 pub struct State {
     /// Value angle in radians (relative to arc start)
@@ -115,6 +112,7 @@ where
         _viewport: &crate::core::Rectangle,
         color_offset: usize,
         palette: &crate::palette::Resolved,
+        corners: crate::core::border::Radius,
     ) where
         Theme: crate::design::Design + ?Sized,
     {
@@ -144,6 +142,13 @@ where
         let radius = (half - tick_margin).max(half * 0.5);
         let thickness = radius * self.data.thickness;
         let inner_radius = radius - thickness;
+
+        // Gauge rounding is binary: any positive corner becomes a perfect
+        // semicircular cap (radius = half the ring thickness), so the tip
+        // reads the same at every gauge size. `0` stays square. All arc
+        // layers (track, value, zones, gradient, dimming) use this one
+        // value, so their caps align instead of leaving slivers.
+        let corner = if corners.top_left > 0.0 { thickness * 0.5 } else { 0.0 };
 
         // Arc starts at bottom-left and sweeps clockwise
         // For a 270° gauge, gap is at the bottom
@@ -182,6 +187,8 @@ where
             start_angle,
             start_angle + state.sweep_rad,
             track_color,
+            corner,
+            corner,
         );
 
         // Arc rendering
@@ -198,6 +205,7 @@ where
                 state.sweep_rad,
                 &stops,
                 self.data.color_stops,
+                corner,
             );
             // Dimming overlay on unfilled portion
             draw_dimming_overlay(
@@ -211,10 +219,14 @@ where
                 state.sweep_rad,
                 background,
                 self.data.dim_opacity,
+                corner,
             );
         } else if has_zones {
-            // Zone mode: draw all zones at full opacity, then dim unfilled portion
-            for zone in &self.data.zones {
+            // Zone mode: draw all zones at full opacity, then dim unfilled
+            // portion. Only the outermost ends round (first zone's leading
+            // cap, last zone's trailing cap) so adjacent zones stay flush.
+            let last_zone = self.data.zones.len().saturating_sub(1);
+            for (zi, zone) in self.data.zones.iter().enumerate() {
                 let zone_start_prop = ((zone.from - self.data.min) / range).clamp(0.0, 1.0) as f32;
                 let zone_end_prop = ((zone.to - self.data.min) / range).clamp(0.0, 1.0) as f32;
 
@@ -231,6 +243,8 @@ where
                     zone_start,
                     zone_end,
                     zone_color,
+                    if zi == 0 { corner } else { 0.0 },
+                    if zi == last_zone { corner } else { 0.0 },
                 );
             }
             // Dimming overlay on unfilled portion
@@ -245,6 +259,7 @@ where
                 state.sweep_rad,
                 background,
                 self.data.dim_opacity,
+                corner,
             );
         } else if self.data.gradient {
             // Gradient mode without zones: interpolate from palette color to desaturated
@@ -266,6 +281,7 @@ where
                 state.sweep_rad,
                 &stops,
                 self.data.color_stops,
+                corner,
             );
             draw_dimming_overlay(
                 &mut frame,
@@ -278,6 +294,7 @@ where
                 state.sweep_rad,
                 background,
                 self.data.dim_opacity,
+                corner,
             );
         } else {
             // Simple value arc (original behavior)
@@ -292,6 +309,8 @@ where
                     start_angle,
                     start_angle + animated_value_angle,
                     value_color,
+                    corner,
+                    corner,
                 );
             }
         }
@@ -502,6 +521,7 @@ fn draw_dimming_overlay<R: geometry::Renderer>(
     sweep_rad: f32,
     background: crate::core::Color,
     dim_opacity: f32,
+    corner: f32,
 ) {
     let unfilled = sweep_rad - value_angle;
     if unfilled < 0.001 {
@@ -511,6 +531,8 @@ fn draw_dimming_overlay<R: geometry::Renderer>(
         a: dim_opacity,
         ..background
     };
+    // Round only the arc terminal (`a1`) to match the track/zone end; the
+    // value boundary stays flat.
     draw_arc_segment(
         frame,
         cx,
@@ -520,6 +542,8 @@ fn draw_dimming_overlay<R: geometry::Renderer>(
         start_angle + value_angle,
         start_angle + sweep_rad,
         dim_color,
+        0.0,
+        corner,
     );
 }
 
@@ -616,18 +640,61 @@ fn draw_gradient_arc<R: geometry::Renderer>(
     sweep_rad: f32,
     stops: &Stops,
     segments: usize,
+    corner: f32,
 ) {
-    for i in 0..segments {
-        let t0 = i as f32 / segments as f32;
-        let t1 = (i + 1) as f32 / segments as f32;
-        let mid_t = (t0 + t1) / 2.0;
-        let color = interpolate_color(stops, mid_t);
-
-        let a0 = start_angle + t0 * sweep_rad;
-        let a1 = start_angle + t1 * sweep_rad;
-
-        draw_arc_segment(frame, cx, cy, inner_radius, outer_radius, a0, a1, color);
+    if segments == 0 {
+        return;
     }
+    let sd = sweep_rad.signum();
+    let abs_sweep = sweep_rad.abs();
+
+    // Reserve a cap-sized wedge at each end: a single 1/segments mini-slice
+    // is too narrow to host a half-thickness fillet, so the cap is split
+    // off as its own segment whose angular width is exactly the fillet
+    // inset. That makes the rounded tip align with the track and dimming
+    // overlay (which round to the same radius) instead of poking through.
+    let cap = corner.max(0.0).min((outer_radius - inner_radius) * 0.5);
+    let cap_angle = if cap > 0.0 && outer_radius > cap {
+        (cap / (outer_radius - cap)).asin().min(abs_sweep * 0.5)
+    } else {
+        0.0
+    };
+
+    // Draws one mini-segment, sampling the gradient color at its midpoint.
+    let seg = |frame: &mut Frame<R>, a0: f32, a1: f32, c0: f32, c1: f32| {
+        let mid_prop = (((a0 + a1) * 0.5 - start_angle) / sweep_rad).clamp(0.0, 1.0);
+        let color = interpolate_color(stops, mid_prop);
+        draw_arc_segment(frame, cx, cy, inner_radius, outer_radius, a0, a1, color, c0, c1);
+    };
+
+    if cap_angle <= 0.0 || abs_sweep <= 2.0 * cap_angle {
+        // No rounding, or no room to split caps off: round only the first
+        // segment's start and the last segment's end, rest square.
+        for i in 0..segments {
+            let a0 = start_angle + (i as f32 / segments as f32) * sweep_rad;
+            let a1 = start_angle + ((i + 1) as f32 / segments as f32) * sweep_rad;
+            seg(
+                frame,
+                a0,
+                a1,
+                if i == 0 { corner } else { 0.0 },
+                if i + 1 == segments { corner } else { 0.0 },
+            );
+        }
+        return;
+    }
+
+    // Rounded start cap, interpolated middle, rounded end cap.
+    let mid_start = start_angle + sd * cap_angle;
+    let mid_end = start_angle + sweep_rad - sd * cap_angle;
+    let mid_sweep = mid_end - mid_start;
+    seg(frame, start_angle, mid_start, corner, 0.0);
+    for i in 0..segments {
+        let a0 = mid_start + (i as f32 / segments as f32) * mid_sweep;
+        let a1 = mid_start + ((i + 1) as f32 / segments as f32) * mid_sweep;
+        seg(frame, a0, a1, 0.0, 0.0);
+    }
+    seg(frame, mid_end, start_angle + sweep_rad, 0.0, corner);
 }
 
 /// Compute tick positions as data values.
@@ -774,6 +841,8 @@ fn draw_arc_segment<R: geometry::Renderer>(
     start_angle: f32,
     end_angle: f32,
     color: crate::core::Color,
+    corner_start: f32,
+    corner_end: f32,
 ) {
     // Non-finite inputs (NaN value, NaN zone bound, ±∞ sweep) propagate
     // through cos/sin and panic the tessellator. Bail at the rendering
@@ -788,55 +857,18 @@ fn draw_arc_segment<R: geometry::Renderer>(
         return;
     }
     let path = Path::new(|builder| {
-        // Start at inner radius
-        let inner_start = crate::core::Point::new(
-            cx + inner_radius * start_angle.cos(),
-            cy + inner_radius * start_angle.sin(),
+        super::sector::push_sector_path_ends(
+            builder,
+            cx,
+            cy,
+            inner_radius,
+            outer_radius,
+            start_angle,
+            end_angle,
+            corner_start,
+            corner_end,
         );
-        let outer_start = crate::core::Point::new(
-            cx + outer_radius * start_angle.cos(),
-            cy + outer_radius * start_angle.sin(),
-        );
-
-        builder.move_to(inner_start);
-        builder.line_to(outer_start);
-
-        // Trace outer arc forward
-        trace_arc(builder, cx, cy, outer_radius, start_angle, end_angle);
-
-        // Line from outer end to inner end
-        let inner_end =
-            crate::core::Point::new(cx + inner_radius * end_angle.cos(), cy + inner_radius * end_angle.sin());
-        builder.line_to(inner_end);
-
-        // Trace inner arc backward
-        trace_arc(builder, cx, cy, inner_radius, end_angle, start_angle);
-
-        builder.close();
     });
 
     frame.fill(&path, color);
-}
-
-/// Trace an arc using line segments.
-fn trace_arc(
-    builder: &mut crate::widget::canvas::path::Builder,
-    cx: f32,
-    cy: f32,
-    radius: f32,
-    start_angle: f32,
-    end_angle: f32,
-) {
-    let sweep = end_angle - start_angle;
-    let segments = ((sweep.abs() / std::f32::consts::TAU) * ARC_SEGMENTS_PER_TAU as f32).ceil() as usize;
-    let segments = segments.max(1);
-
-    for i in 1..=segments {
-        let t = i as f32 / segments as f32;
-        let angle = start_angle + sweep * t;
-        builder.line_to(crate::core::Point::new(
-            cx + radius * angle.cos(),
-            cy + radius * angle.sin(),
-        ));
-    }
 }

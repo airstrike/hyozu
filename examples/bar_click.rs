@@ -50,7 +50,6 @@ impl App {
                     bar([1200, 1900, 1500, 2200, 1800, 2400]).with_name("Revenue"),
                     bar([800, 1100, 950, 1400, 1050, 1500]).with_name("Expenses"),
                 ])
-                .corner_radius(4.0)
                 .data_labels(label::Position::Above),
             )
             .palette(Palette::Categorical)
@@ -93,7 +92,13 @@ impl App {
             Some(other) => format!("Other: {other:?}"),
         };
 
-        let chart = chart(&self.sales).on_action(Message::ChartAction).padding(20);
+        let chart = chart(&self.sales)
+            .on_action(Message::ChartAction)
+            .padding(20)
+            .style(|d| hyozu::chart::Style {
+                corners: 4.0.into(),
+                ..hyozu::chart::default(d)
+            });
 
         container(
             column![chart, text(status).size(13)]

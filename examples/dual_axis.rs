@@ -21,9 +21,7 @@ pub type Message = ();
 
 impl App {
     fn new() -> Self {
-        let revenue = bars([1200, 1900, 1500, 2200, 1800, 2400])
-            .corner_radius(4.0)
-            .data_labels(BarLabelPos::Above + currency);
+        let revenue = bars([1200, 1900, 1500, 2200, 1800, 2400]).data_labels(BarLabelPos::Above + currency);
         let conversion_rate = line([0.12, 0.18, 0.15, 0.22, 0.19, 0.25])
             .style(LineStyle::Dashed)
             .data_labels(LineLabelPos::Auto + percent);
@@ -39,9 +37,17 @@ impl App {
     }
 
     fn view(&self) -> iced::Element<'_, Message> {
-        center(hyozu::chart(&self.chart).design(&Theme::SolarizedLight).padding(20))
-            .padding(20)
-            .into()
+        center(
+            hyozu::chart(&self.chart)
+                .design(&Theme::SolarizedLight)
+                .padding(20)
+                .style(|d| hyozu::chart::Style {
+                    corners: 4.0.into(),
+                    ..hyozu::chart::default(d)
+                }),
+        )
+        .padding(20)
+        .into()
     }
 
     fn update(&mut self, _: Message) -> Task<Message> {
