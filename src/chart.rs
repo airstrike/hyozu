@@ -345,40 +345,63 @@ fn find_nearest_cartesian_hover<Message>(
         )
     };
 
-    let mut best_dist = f32::INFINITY;
-    let mut best_pixel_x = 0.0f32;
+    // Horizontal bar charts invert the axes: categories run along Y and bars
+    // extend along X. Hover then snaps along Y (the category axis) instead of
+    // X, and only bars participate — continuous marks (line/area/xy) are
+    // inherently X-major and don't appear in a horizontal-bar chart.
+    let horizontal = plot_area.series.iter().any(
+        |s| matches!(s, plot_area::Series::Bars(b) if b.data.direction == crate::mark::bar::Direction::Horizontal),
+    );
+    let cursor_primary = if horizontal { local.y } else { local.x };
 
-    // Pass 1: find globally nearest pixel_x. Treat non-finite pixel points
-    // as gaps (NaN-as-gap policy) so a `(finite_x, NaN_y)` datum can't
-    // become a hover target and feed a NaN center into the tessellator.
+    // A bar's coordinate along the category (primary) axis: center-x for
+    // vertical columns, center-y for horizontal bars.
+    let bar_primary = |rect: &Rectangle| {
+        if horizontal {
+            rect.y + rect.height / 2.0
+        } else {
+            rect.x + rect.width / 2.0
+        }
+    };
+    let rect_finite = |rect: &Rectangle| {
+        rect.x.is_finite() && rect.y.is_finite() && rect.width.is_finite() && rect.height.is_finite()
+    };
+
+    let mut best_dist = f32::INFINITY;
+    let mut best_primary = 0.0f32;
+
+    // Pass 1: find the globally nearest primary-axis coordinate. Treat
+    // non-finite pixel points as gaps (NaN-as-gap policy) so a
+    // `(finite_x, NaN_y)` datum can't become a hover target and feed a NaN
+    // center into the tessellator.
     for (mark_idx, child) in plot_area_tree.children.iter().enumerate() {
-        if child.tag == line_tag {
+        if !horizontal && child.tag == line_tag {
             let s = child.state.downcast_ref::<plot_area::line::State>();
             for pt in &s.pixel_points {
                 if !pt.x.is_finite() || !pt.y.is_finite() {
                     continue;
                 }
-                let d = (pt.x - local.x).abs();
+                let d = (pt.x - cursor_primary).abs();
                 if d < best_dist {
                     best_dist = d;
-                    best_pixel_x = pt.x;
+                    best_primary = pt.x;
                 }
             }
-        } else if child.tag == area_tag {
+        } else if !horizontal && child.tag == area_tag {
             let s = child.state.downcast_ref::<plot_area::area::State>();
             for sub in &s.series_points {
                 for pt in sub {
                     if !pt.x.is_finite() || !pt.y.is_finite() {
                         continue;
                     }
-                    let d = (pt.x - local.x).abs();
+                    let d = (pt.x - cursor_primary).abs();
                     if d < best_dist {
                         best_dist = d;
-                        best_pixel_x = pt.x;
+                        best_primary = pt.x;
                     }
                 }
             }
-        } else if child.tag == xy_tag {
+        } else if !horizontal && child.tag == xy_tag {
             if is_geo_xy(mark_idx) {
                 continue;
             }
@@ -387,25 +410,24 @@ fn find_nearest_cartesian_hover<Message>(
                 if !pt.x.is_finite() || !pt.y.is_finite() {
                     continue;
                 }
-                let d = (pt.x - local.x).abs();
+                let d = (pt.x - cursor_primary).abs();
                 if d < best_dist {
                     best_dist = d;
-                    best_pixel_x = pt.x;
+                    best_primary = pt.x;
                 }
             }
         } else if child.tag == bars_tag {
             let s = child.state.downcast_ref::<plot_area::bars::State>();
             for rects in &s.series_rects {
                 for rect in rects {
-                    if !rect.x.is_finite() || !rect.y.is_finite() || !rect.width.is_finite() || !rect.height.is_finite()
-                    {
+                    if !rect_finite(rect) {
                         continue;
                     }
-                    let center_x = rect.x + rect.width / 2.0;
-                    let d = (center_x - local.x).abs();
+                    let primary = bar_primary(rect);
+                    let d = (primary - cursor_primary).abs();
                     if d < best_dist {
                         best_dist = d;
-                        best_pixel_x = center_x;
+                        best_primary = primary;
                     }
                 }
             }
@@ -421,40 +443,44 @@ fn find_nearest_cartesian_hover<Message>(
         return None;
     }
 
-    let data_x = plane.to_data_x(best_pixel_x);
+    // `data_x` drives the tracking line (continuous marks only) and hover-
+    // change detection. For horizontal bars the snap is along Y, so there is
+    // no meaningful data-x; entries discriminate the hovered row.
+    let data_x = if horizontal { 0.0 } else { plane.to_data_x(best_primary) };
 
-    // Pass 2: collect all entries at that pixel_x (within tolerance)
+    // Pass 2: collect all entries at that primary coordinate (within tolerance).
     let tolerance = 0.5f32;
-    // Bars need a wider tolerance because bar center x can differ from line pixel x
+    // Bars need a wider tolerance because a bar's center can differ from a
+    // line's pixel coordinate.
     let bar_tolerance = 4.0f32;
     let mut entries = Vec::new();
 
     for (mark_idx, child) in plot_area_tree.children.iter().enumerate() {
-        if child.tag == line_tag {
+        if !horizontal && child.tag == line_tag {
             let s = child.state.downcast_ref::<plot_area::line::State>();
             for (pt_idx, pt) in s.pixel_points.iter().enumerate() {
                 if !pt.x.is_finite() || !pt.y.is_finite() {
                     continue;
                 }
-                if (pt.x - best_pixel_x).abs() <= tolerance {
+                if (pt.x - best_primary).abs() <= tolerance {
                     entries.push((mark_idx, 0, pt_idx));
                     break; // one entry per line series
                 }
             }
-        } else if child.tag == area_tag {
+        } else if !horizontal && child.tag == area_tag {
             let s = child.state.downcast_ref::<plot_area::area::State>();
             for (ser_idx, sub) in s.series_points.iter().enumerate() {
                 for (pt_idx, pt) in sub.iter().enumerate() {
                     if !pt.x.is_finite() || !pt.y.is_finite() {
                         continue;
                     }
-                    if (pt.x - best_pixel_x).abs() <= tolerance {
+                    if (pt.x - best_primary).abs() <= tolerance {
                         entries.push((mark_idx, ser_idx, pt_idx));
                         break;
                     }
                 }
             }
-        } else if child.tag == xy_tag {
+        } else if !horizontal && child.tag == xy_tag {
             if is_geo_xy(mark_idx) {
                 continue;
             }
@@ -463,7 +489,7 @@ fn find_nearest_cartesian_hover<Message>(
                 if !pt.x.is_finite() || !pt.y.is_finite() {
                     continue;
                 }
-                if (pt.x - best_pixel_x).abs() <= tolerance {
+                if (pt.x - best_primary).abs() <= tolerance {
                     entries.push((mark_idx, 0, pt_idx));
                     break;
                 }
@@ -472,12 +498,10 @@ fn find_nearest_cartesian_hover<Message>(
             let s = child.state.downcast_ref::<plot_area::bars::State>();
             for (ser_idx, rects) in s.series_rects.iter().enumerate() {
                 for (bar_idx, rect) in rects.iter().enumerate() {
-                    if !rect.x.is_finite() || !rect.y.is_finite() || !rect.width.is_finite() || !rect.height.is_finite()
-                    {
+                    if !rect_finite(rect) {
                         continue;
                     }
-                    let center_x = rect.x + rect.width / 2.0;
-                    if (center_x - best_pixel_x).abs() <= bar_tolerance {
+                    if (bar_primary(rect) - best_primary).abs() <= bar_tolerance {
                         entries.push((mark_idx, ser_idx, bar_idx));
                         break;
                     }
@@ -2235,6 +2259,13 @@ fn draw_cartesian_tooltip_overlay<Message>(
     let plot_area = scene.plot_area();
     let plot_area_tree = &scene_tree.children[6];
 
+    // Horizontal bars invert the axes (see `find_nearest_cartesian_hover`):
+    // the tooltip anchors at the bar's value-end / row center rather than
+    // the column top, and the box tracks the bar geometry rather than `data_x`.
+    let horizontal = plot_area.series.iter().any(
+        |s| matches!(s, plot_area::Series::Bars(b) if b.data.direction == crate::mark::bar::Direction::Horizontal),
+    );
+
     let background = design.background_color();
     let text_pair = design.text_pair();
     let seed = design.seed();
@@ -2351,7 +2382,15 @@ fn draw_cartesian_tooltip_overlay<Message>(
                     .series_rects
                     .get(series_idx)
                     .and_then(|rects| rects.get(pt_idx))
-                    .map(|rect| Point::new(rect.x + rect.width / 2.0, rect.y))
+                    .map(|rect| {
+                        if horizontal {
+                            // Value-end of the bar, vertically centered on its row.
+                            Point::new(rect.x + rect.width, rect.y + rect.height / 2.0)
+                        } else {
+                            // Top-center of the column.
+                            Point::new(rect.x + rect.width / 2.0, rect.y)
+                        }
+                    })
                     .unwrap_or_else(|| plane.to_pixel(crate::data::Datum { x: pt.x, y: pt.y }));
 
                 // Resolve the bar's displayed color via the full priority
@@ -2413,11 +2452,6 @@ fn draw_cartesian_tooltip_overlay<Message>(
         return;
     }
 
-    // Vertically center on mean y of entries, in absolute coords.
-    let mean_y: f32 = entries.iter().map(|re| re.anchor.y).sum::<f32>() / entries.len() as f32;
-    let anchor_x = plot_bounds.x + tracking_pixel_x - plane.bounds.x;
-    let anchor_y = plot_bounds.y + mean_y - plane.bounds.y;
-
     // Canvas geometry and renderer quads are bucketed separately inside
     // a layer. Keep focus chrome and the tooltip box in distinct layers
     // so the box can truly composite above tracking lines and markers.
@@ -2425,6 +2459,19 @@ fn draw_cartesian_tooltip_overlay<Message>(
         .iter()
         .any(|re| matches!(re.highlight, hover::Highlight::PointMarker { .. }));
     let has_discrete = entries.iter().any(|re| matches!(re.highlight, hover::Highlight::None));
+
+    // Center on the mean of the entry anchors. Discrete marks (bars) anchor
+    // the box on their own geometry — the value-end for horizontal bars, the
+    // column top for vertical — rather than the `data_x` tracking position,
+    // which only applies to continuous marks.
+    let mean_x: f32 = entries.iter().map(|re| re.anchor.x).sum::<f32>() / entries.len() as f32;
+    let mean_y: f32 = entries.iter().map(|re| re.anchor.y).sum::<f32>() / entries.len() as f32;
+    let anchor_x = if has_discrete && !has_continuous {
+        plot_bounds.x + mean_x - plane.bounds.x
+    } else {
+        plot_bounds.x + tracking_pixel_x - plane.bounds.x
+    };
+    let anchor_y = plot_bounds.y + mean_y - plane.bounds.y;
     let draw_tracking_line = tooltip_config.tracking_line && has_continuous && !has_discrete;
     if draw_tracking_line || tooltip_config.markers {
         renderer.with_layer(*viewport, |renderer| {
