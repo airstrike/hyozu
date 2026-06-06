@@ -642,7 +642,10 @@ where
         // --- Phase 6.5: Series-driven inset floor ---
         // Ask the plot area how much inset its series need past the data
         // mapping region (e.g., for data labels that extend past bar ends).
-        // This becomes a floor for the axis insets so ticks & bars stay aligned.
+        // Labels are shaped here, in the measurement pass, so the inset
+        // measure reads real paragraph metrics and the final `plot_area.layout`
+        // reuses the same shaped paragraphs. This inset becomes a floor for the
+        // axis insets so ticks & bars stay aligned.
         let series_insets = {
             use crate::chart::guide;
             let x_bounds = self.bottom_axis.as_ref().map(|_| {
@@ -659,8 +662,10 @@ where
             });
             let xb = x_bounds.unwrap_or((0.0, 1.0));
             let yb = y_bounds.unwrap_or((0.0, 1.0));
+            let plot_tree = &mut tree.children[6];
+            self.plot_area.shape_labels(plot_tree, renderer);
             self.plot_area
-                .compute_series_insets(crate::core::Size::new(plot_width, plot_height), xb, yb)
+                .min_insets(plot_tree, crate::core::Size::new(plot_width, plot_height), xb, yb)
         };
 
         // --- Phase 7: Final layout pass ---
@@ -721,7 +726,7 @@ where
         // Axis bounds for plot area coordinate sync
         let (axis_bounds, secondary_bounds, plot_insets) = {
             use crate::chart::guide;
-            use crate::chart::plot_area::PlotInsets;
+            use crate::chart::plot_area::Insets;
 
             let (x_bounds, h_insets) = if self.bottom_axis.is_some() {
                 let st = first_children[4]
@@ -766,7 +771,12 @@ where
                 _ => None,
             };
 
-            let insets = PlotInsets {
+            // The data-rect inset is the axis guides' final `label_insets`,
+            // which already fold the series `min_inset` floor in via the
+            // guide's own max — so ticks and the content node consume one
+            // shared per-edge value. Horizontal edges come from the bottom
+            // axis, vertical from the left.
+            let insets = Insets {
                 left: h_insets.0,
                 right: h_insets.1,
                 top: v_insets.0,
@@ -775,12 +785,13 @@ where
             (bounds, secondary_bounds, insets)
         };
 
-        let axis_layout = crate::chart::plot_area::AxisLayout {
-            left_width,
-            right_width,
-            top_height,
-            bottom_height,
-            insets: plot_insets,
+        // Sibling-axis pixel extents, used only to build label-avoidance
+        // obstacle bands inside the plot area (removed in a later phase).
+        let axis_bands = crate::chart::plot_area::Insets {
+            left: left_width,
+            right: right_width,
+            top: top_height,
+            bottom: bottom_height,
         };
 
         let plot_area_node = self.plot_area.layout(
@@ -789,7 +800,8 @@ where
             &lim(plot_width, plot_height),
             axis_bounds,
             secondary_bounds,
-            axis_layout,
+            plot_insets,
+            axis_bands,
             self.y_transform,
             self.secondary_y_transform,
             &self.geo_config,

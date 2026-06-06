@@ -117,22 +117,11 @@ pub struct Plane {
     pub obstacles: Vec<Rectangle>,
 }
 
-/// Axis layout dimensions passed from Scene to PlotArea
+/// Pixel margins reserved on each edge of the plot area to seat the
+/// data-mapping region. The same per-edge value seats the axis ticks and the
+/// content node, so marks and ticks stay aligned by construction.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct AxisLayout {
-    pub left_width: f32,
-    pub right_width: f32,
-    pub top_height: f32,
-    pub bottom_height: f32,
-    /// Insets from edge labels to keep marks aligned with tick positions.
-    /// Horizontal insets come from the bottom/top axis, vertical from left/right.
-    pub insets: PlotInsets,
-}
-
-/// Pixel insets applied to the data-mapping region within the plot area,
-/// so that marks align with inset axis tick positions.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct PlotInsets {
+pub struct Insets {
     pub left: f32,
     pub right: f32,
     pub top: f32,
@@ -771,22 +760,44 @@ where
         (x_min, x_max, y_min, y_max)
     }
 
+    /// Shapes every label-bearing series' text into its tree state ahead of
+    /// the inset measure. Shaping depends only on content + font + size — not
+    /// on the data rect — so it runs in the measurement pass; [`min_insets`]
+    /// then reads the kept paragraphs' `min_bounds()`, and the final
+    /// [`PlotArea::layout`] reuses the same shaped paragraphs (no reshape).
+    pub fn shape_labels(&self, tree: &mut Tree, renderer: &Renderer) {
+        for (i, series) in self.series.iter().enumerate() {
+            if let Series::Bars(bars) = series {
+                let series_tree = &mut tree.children[i];
+                let state = series_tree.state.downcast_mut::<bars::State<Renderer::Paragraph>>();
+                bars.shape_labels(state, renderer);
+            }
+        }
+    }
+
     /// Returns the minimum pixel inset required at each edge of the data-mapping
     /// region for this plot area's series (e.g. data labels that extend past
-    /// the end of a bar). Used by the scene as a `min_inset` floor for axis
-    /// guides so ticks, bars, and labels all align.
-    pub fn compute_series_insets(
+    /// the end of a bar), folded across series. Used by the scene as a
+    /// `min_inset` floor for axis guides so ticks, bars, and labels all align.
+    ///
+    /// Reads each bar label's already-shaped paragraph (see [`shape_labels`]),
+    /// so callers must shape before measuring.
+    pub fn min_insets(
         &self,
+        tree: &Tree,
         plot_size: crate::core::Size,
         x_bounds: (f64, f64),
         y_bounds: (f64, f64),
-    ) -> PlotInsets {
-        let mut insets = PlotInsets::default();
-        for series in &self.series {
-            let series_insets = match series {
-                Series::Bars(bars) => bars.compute_label_insets(plot_size, x_bounds, y_bounds),
-                _ => continue,
+    ) -> Insets {
+        let mut insets = Insets::default();
+        for (i, series) in self.series.iter().enumerate() {
+            let Series::Bars(bars) = series else {
+                continue;
             };
+            let state = tree.children[i]
+                .state
+                .downcast_ref::<bars::State<Renderer::Paragraph>>();
+            let series_insets = bars.min_insets(state, plot_size, x_bounds, y_bounds);
             insets.left = insets.left.max(series_insets.left);
             insets.right = insets.right.max(series_insets.right);
             insets.top = insets.top.max(series_insets.top);
@@ -810,7 +821,8 @@ where
         limits: &Limits,
         axis_bounds: Option<(f64, f64, f64, f64)>, // (x_min, x_max, y_min, y_max) from primary axes
         secondary_axis_bounds: Option<(f64, f64, f64, f64)>, // bounds from secondary axes
-        axis_layout: AxisLayout,                   // Physical dimensions of axes
+        insets: Insets,                            // Data-rect margins (shared with axis ticks)
+        axis_bands: Insets,                        // Sibling-axis pixel extents (obstacle bands)
         y_transform: crate::scale::Transform,
         secondary_y_transform: crate::scale::Transform,
         geo_config: &GeoConfig,
@@ -836,46 +848,45 @@ where
         let mut obstacles = Vec::new();
 
         // Left axis obstacle (to the left of plot area)
-        if axis_layout.left_width > 0.0 {
+        if axis_bands.left > 0.0 {
             obstacles.push(Rectangle {
-                x: -axis_layout.left_width,
+                x: -axis_bands.left,
                 y: 0.0,
-                width: axis_layout.left_width,
+                width: axis_bands.left,
                 height: size.height,
             });
         }
 
         // Right axis obstacle (to the right of plot area)
-        if axis_layout.right_width > 0.0 {
+        if axis_bands.right > 0.0 {
             obstacles.push(Rectangle {
                 x: size.width,
                 y: 0.0,
-                width: axis_layout.right_width,
+                width: axis_bands.right,
                 height: size.height,
             });
         }
 
         // Top axis obstacle (above plot area)
-        if axis_layout.top_height > 0.0 {
+        if axis_bands.top > 0.0 {
             obstacles.push(Rectangle {
                 x: 0.0,
-                y: -axis_layout.top_height,
+                y: -axis_bands.top,
                 width: size.width,
-                height: axis_layout.top_height,
+                height: axis_bands.top,
             });
         }
 
         // Bottom axis obstacle (below plot area)
-        if axis_layout.bottom_height > 0.0 {
+        if axis_bands.bottom > 0.0 {
             obstacles.push(Rectangle {
                 x: 0.0,
                 y: size.height,
                 width: size.width,
-                height: axis_layout.bottom_height,
+                height: axis_bands.bottom,
             });
         }
 
-        let insets = &axis_layout.insets;
         let plot_rect = Rectangle {
             x: insets.left,
             y: insets.top,

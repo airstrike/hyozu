@@ -1,4 +1,4 @@
-use super::{Plane, PlotInsets};
+use super::{Insets, Plane};
 use crate::animation;
 use crate::core::layout::{Limits, Node};
 use crate::core::text::{self, paragraph};
@@ -208,18 +208,25 @@ where
     /// boundary. Only labels that extend past the bar end (outside the bar)
     /// contribute; inside-placement labels return zero insets.
     ///
-    /// For each bar, solves `R >= extent - (extent - pad - label_width) / v`
+    /// For each bar, solves `R >= extent - (extent - pad - label_extent) / v`
     /// where `v ∈ [0, 1]` is the bar's normalized position along the value
     /// axis. Returns the max across all bars.
-    pub(super) fn compute_label_insets(
+    ///
+    /// `label_extent` is the value-axis size of the *already-shaped* label
+    /// paragraph (`state.labels[series][bar].min_bounds()`): width for
+    /// horizontal bars (label at the bar's right end), height for vertical
+    /// (label above the bar top). The caller shapes the labels first via
+    /// [`super::PlotArea::shape_labels`]; this never reshapes.
+    pub(super) fn min_insets(
         &self,
+        state: &State<Renderer::Paragraph>,
         plot_size: Size,
         x_bounds: (f64, f64),
         y_bounds: (f64, f64),
-    ) -> PlotInsets {
+    ) -> Insets {
         use crate::mark::bar::Direction;
 
-        let mut insets = PlotInsets::default();
+        let mut insets = Insets::default();
         let is_horizontal = self.data.direction == Direction::Horizontal;
 
         // Which axis bounds drive the bar end? For horizontal bars, the bar
@@ -237,7 +244,7 @@ where
         };
         let pad = 4.0_f32;
 
-        for series in &self.data.series {
+        for (series_idx, series) in self.data.series.iter().enumerate() {
             let Some(label_config) = &series.label else {
                 continue;
             };
@@ -245,14 +252,11 @@ where
                 continue;
             }
 
-            let label_size = label_config.text.size.map(|p| p.0).unwrap_or(12.0);
-            let char_width = label_size * 0.6;
-            // Vertical text run for line-height-ish font metrics. 1.2
-            // is the iced LineHeight::default() coefficient; +4 matches
-            // the ~2px top/bottom pad drawn around a label.
-            let label_height = label_size * 1.2 + 4.0;
+            let Some(labels) = state.labels.get(series_idx) else {
+                continue;
+            };
 
-            for point in &series.points {
+            for (bar_idx, point) in series.points.iter().enumerate() {
                 // point.y carries the bar length in both orientations
                 let value = point.y;
                 let v = ((value - min_v) / range) as f32;
@@ -263,21 +267,23 @@ where
                     continue;
                 }
 
-                let text = (label_config.format)(value);
-                if text.is_empty() {
+                let Some(bounds) = labels.get(bar_idx).map(|p| p.min_bounds()) else {
+                    continue;
+                };
+                if bounds.width <= 0.0 {
                     continue;
                 }
-                // The relevant label extent is along the value axis:
-                // text width for horizontal bars (label at the bar's
-                // right end), text height for vertical bars (label
-                // above the bar top). Using the wrong one produces
-                // grossly wrong top insets on vertical bars — the
-                // label clips against the plot area top because the
-                // reserved space is derived from a horizontal measure.
+                // The relevant label extent is along the value axis: the
+                // shaped paragraph's width for horizontal bars (label at the
+                // bar's right end), its height for vertical bars (label above
+                // the bar top). The +6/+4 pads mirror the ~3px-each-side /
+                // ~2px-top-bottom clearance drawn around a label. Using the
+                // wrong axis produces grossly wrong insets — the label clips
+                // against the plot area edge.
                 let label_extent_along_value_axis = if is_horizontal {
-                    text.len() as f32 * char_width + 6.0
+                    bounds.width + 6.0
                 } else {
-                    label_height
+                    bounds.height + 4.0
                 };
 
                 // Assumes the other-end inset on the same axis is 0 (safe
@@ -298,7 +304,7 @@ where
     }
 
     /// Layout the bars - calculates bar positions and sizes
-    pub fn layout(&self, tree: &mut Tree, renderer: &Renderer, _limits: &Limits, plane: &Plane) -> Node {
+    pub fn layout(&self, tree: &mut Tree, _renderer: &Renderer, _limits: &Limits, plane: &Plane) -> Node {
         use crate::mark::bar::Direction;
 
         let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
@@ -336,9 +342,9 @@ where
         // Compute label rects for hit-testing
         state.label_rects = self.compute_label_rects(state);
 
-        // Shape the data-label paragraphs once, here in layout, so `draw`
-        // renders them via `fill_paragraph` without re-shaping each frame.
-        self.shape_labels(state, renderer);
+        // The data-label paragraphs are shaped once in the measurement pass
+        // (`PlotArea::shape_labels`, which `min_insets` then measures); this
+        // final pass reuses them, so it must not reshape here.
 
         // Pre-plan fill encodings, one per series. The plan is theme-free
         // and stable across repaints — only re-runs when layout invalidates
@@ -713,7 +719,7 @@ where
     /// a draw-time concern). Bars with a non-finite value or empty formatted
     /// text keep a default (empty) paragraph; the draw pass skips them with the
     /// same guards, so the index stays aligned with `bar_idx`.
-    fn shape_labels(&self, state: &mut State<Renderer::Paragraph>, renderer: &Renderer) {
+    pub(super) fn shape_labels(&self, state: &mut State<Renderer::Paragraph>, renderer: &Renderer) {
         use crate::core::alignment;
 
         let default_font = renderer.default_font();
@@ -732,8 +738,10 @@ where
                 continue;
             };
 
-            let rects = state.series_rects.get(series_idx);
-            let bar_count = rects.map_or(0, |r| r.len()).min(series.points.len());
+            // One paragraph per data point. Shaping depends only on the
+            // point's value + the label font/size, not on bar geometry, so
+            // this runs in the measurement pass before the plane is known.
+            let bar_count = series.points.len();
 
             while labels.len() < bar_count {
                 labels.push(paragraph::Plain::default());
