@@ -209,6 +209,10 @@ pub struct Axis {
     // Display options
     title: Option<String>,
     show_line: bool,
+    /// Tick-mark visibility. `None` follows `show_line` (ticks belong to the
+    /// spine, so hiding the line hides them); `Some(_)` overrides for the
+    /// rare ticks-without-line or line-without-ticks cases.
+    show_ticks: Option<bool>,
     show_labels: bool,
     show_grid: bool,
     show_minor_grid: bool,
@@ -252,6 +256,7 @@ impl Axis {
             upper_bound: None,
             title: None,
             show_line: true,
+            show_ticks: None,
             show_labels: true,
             show_grid: true,
             show_minor_grid: false,
@@ -412,8 +417,22 @@ impl Axis {
     }
 
     /// Show or hide the axis line.
+    ///
+    /// Tick marks follow the line by default (see [`show_ticks`](Self::show_ticks)),
+    /// so hiding the line also hides its ticks unless they were set explicitly.
     pub fn show_line(mut self, show: bool) -> Self {
         self.show_line = show;
+        self
+    }
+
+    /// Show or hide the tick marks (the short strokes on the spine).
+    ///
+    /// By default tick marks follow the axis line — a hidden line hides its
+    /// ticks too, since an orphaned tick stub reads as a glitch. Call this to
+    /// override: `show_ticks(false)` keeps the line but drops the ticks, and
+    /// `show_ticks(true)` draws ticks even with the line hidden.
+    pub fn show_ticks(mut self, show: bool) -> Self {
+        self.show_ticks = Some(show);
         self
     }
 
@@ -489,6 +508,13 @@ impl Axis {
     /// Returns whether the axis line is shown.
     pub fn shows_line(&self) -> bool {
         self.show_line
+    }
+
+    /// Returns whether tick marks are drawn: the explicit `show_ticks`
+    /// override if set, otherwise following the line, and always gated by a
+    /// non-`None` tick style.
+    pub fn shows_ticks(&self) -> bool {
+        self.show_ticks.unwrap_or(self.show_line) && self.has_ticks()
     }
 
     /// Returns whether grid lines are shown.

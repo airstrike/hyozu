@@ -1302,6 +1302,9 @@ where
         selection: &Option<crate::target::Target>,
         hidden_series: &std::collections::HashSet<String>,
         corners: crate::core::border::Radius,
+        track: Option<crate::core::Color>,
+        bottom_axis_line: bool,
+        left_axis_line: bool,
     ) where
         D: crate::design::Design + ?Sized,
     {
@@ -1350,6 +1353,15 @@ where
                     color_offset += 1;
                 }
                 Series::Bars(bars) => {
+                    // A bar's baseline sits on the spine perpendicular to its
+                    // growth: horizontal bars on the left spine, vertical on
+                    // the bottom. The baseline end may round only when that
+                    // spine is hidden.
+                    let baseline_exposed = if bars.data.direction == crate::mark::bar::Direction::Horizontal {
+                        !left_axis_line
+                    } else {
+                        !bottom_axis_line
+                    };
                     bars.draw(
                         series_tree,
                         renderer,
@@ -1364,6 +1376,8 @@ where
                         i,
                         selection,
                         corners,
+                        track,
+                        baseline_exposed,
                     );
                     color_offset += bars.data.series.len();
                 }

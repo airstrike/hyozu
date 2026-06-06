@@ -183,6 +183,21 @@ pub trait Design {
         0.0.into()
     }
 
+    /// Returns the default fill for the "track" rail drawn behind bars: the
+    /// faint full-extent rectangle that shows the axis range a bar grows
+    /// within (Recharts `<Bar background>`; the same rail the gauge already
+    /// paints behind its value arc).
+    ///
+    /// `None` (default) means no rail, so the feature is strictly opt-in and
+    /// no existing chart changes appearance. A theme returns `Some(color)` to
+    /// give every bar chart a house-style rail; a per-chart
+    /// [`crate::chart::Style::track`] override (set inside
+    /// [`crate::chart::Chart::style`]) layers on top. The rail adopts the
+    /// design's [`corners`](Self::corners) radius.
+    fn bar_track(&self) -> Option<crate::core::Color> {
+        None
+    }
+
     /// Returns an owned [`Cow`] of this design.
     fn to_cow(&self) -> Cow<'static, Self>
     where

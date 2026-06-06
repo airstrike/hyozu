@@ -8,20 +8,24 @@ use crate::mark::bar::label::Position;
 use crate::widget::canvas::{Frame, Path, Text as CanvasText};
 use crate::widget::renderer::geometry;
 
-/// Builds a rectangle path with rounded "value-end" corners.
+/// Builds a rectangle path with selectively rounded ends.
 ///
-/// Vertical bars round the top two corners (`top_left`, `top_right`);
-/// horizontal bars round the right two corners (`top_right`,
-/// `bottom_right`). The baseline corners stay square so bars sit flush on
-/// the axis and stacked segments meet without gaps. Each rounded corner
-/// uses its own radius from `corners`, so a per-corner radius (Recharts
-/// `radius=[…]`) is honored; a uniform radius rounds both value-end
-/// corners equally. Radii are clamped so neither can exceed `min(w, h) / 2`.
+/// A bar has two ends along its growth axis: the *value end* (top for
+/// columns, right for bars) and the *baseline end* (bottom / left). The
+/// value end uses the per-corner radii from `corners` directly, honoring a
+/// Recharts-style `radius=[…]`; the baseline end mirrors those radii so a
+/// bar reads as a symmetric pill. Each end is rounded only when its flag is
+/// set: by default just the value end rounds (so flush bars sit on the axis
+/// and stacked segments meet without gaps), while a bar resting on a track
+/// rail — and the rail itself — round both. Radii are clamped so neither
+/// can exceed `min(w, h) / 2`.
 fn push_bar_path(
     builder: &mut crate::widget::canvas::path::Builder,
     rect: &Rectangle,
     corners: crate::core::border::Radius,
     is_horizontal: bool,
+    round_value_end: bool,
+    round_baseline: bool,
 ) {
     let w = rect.width;
     let h = rect.height;
@@ -36,51 +40,68 @@ fn push_bar_path(
     }
     let cap = (w.min(h)) * 0.5;
 
-    // Corners: TL, TR, BR, BL.
-    let tl = Point::new(rect.x, rect.y);
-    let tr = Point::new(rect.x + w, rect.y);
-    let br = Point::new(rect.x + w, rect.y + h);
-    let bl = Point::new(rect.x, rect.y + h);
-
+    // Resolve the four corner radii from the value-end pair, gated per end.
+    // Vertical: value end = top (TL, TR), baseline = bottom (BL, BR).
+    // Horizontal: value end = right (TR, BR), baseline = left (TL, BL).
+    let (mut r_tl, mut r_tr, mut r_br, mut r_bl) = (0.0_f32, 0.0_f32, 0.0_f32, 0.0_f32);
     if is_horizontal {
-        // Round TR and BR (right edge — the value end).
-        let r_tr = corners.top_right.clamp(0.0, cap);
-        let r_br = corners.bottom_right.clamp(0.0, cap);
-        if r_tr <= 0.0 && r_br <= 0.0 {
-            builder.rectangle(Point::new(rect.x, rect.y), Size::new(w, h));
-            return;
+        if round_value_end {
+            r_tr = corners.top_right;
+            r_br = corners.bottom_right;
         }
-        builder.move_to(tl);
-        builder.line_to(Point::new(tr.x - r_tr, tr.y));
-        if r_tr > 0.0 {
-            builder.arc_to(tr, Point::new(tr.x, tr.y + r_tr), r_tr);
+        if round_baseline {
+            r_tl = corners.top_right;
+            r_bl = corners.bottom_right;
         }
-        builder.line_to(Point::new(br.x, br.y - r_br));
-        if r_br > 0.0 {
-            builder.arc_to(br, Point::new(br.x - r_br, br.y), r_br);
-        }
-        builder.line_to(bl);
-        builder.close();
     } else {
-        // Round TL and TR (top edge — the value end).
-        let r_tl = corners.top_left.clamp(0.0, cap);
-        let r_tr = corners.top_right.clamp(0.0, cap);
-        if r_tl <= 0.0 && r_tr <= 0.0 {
-            builder.rectangle(Point::new(rect.x, rect.y), Size::new(w, h));
-            return;
+        if round_value_end {
+            r_tl = corners.top_left;
+            r_tr = corners.top_right;
         }
-        builder.move_to(Point::new(tl.x, tl.y + r_tl));
-        if r_tl > 0.0 {
-            builder.arc_to(tl, Point::new(tl.x + r_tl, tl.y), r_tl);
+        if round_baseline {
+            r_bl = corners.top_left;
+            r_br = corners.top_right;
         }
-        builder.line_to(Point::new(tr.x - r_tr, tr.y));
-        if r_tr > 0.0 {
-            builder.arc_to(tr, Point::new(tr.x, tr.y + r_tr), r_tr);
-        }
-        builder.line_to(br);
-        builder.line_to(bl);
-        builder.close();
     }
+    let r_tl = r_tl.clamp(0.0, cap);
+    let r_tr = r_tr.clamp(0.0, cap);
+    let r_br = r_br.clamp(0.0, cap);
+    let r_bl = r_bl.clamp(0.0, cap);
+
+    if r_tl <= 0.0 && r_tr <= 0.0 && r_br <= 0.0 && r_bl <= 0.0 {
+        builder.rectangle(Point::new(rect.x, rect.y), Size::new(w, h));
+        return;
+    }
+
+    // General rounded rectangle, clockwise from just past TL on the top
+    // edge. `arc_to(corner, edge_point, radius)` matches the tangent form
+    // used elsewhere; a zero-radius corner skips its arc, so the preceding
+    // `line_to` lands square on the corner.
+    let x = rect.x;
+    let y = rect.y;
+    let tl = Point::new(x, y);
+    let tr = Point::new(x + w, y);
+    let br = Point::new(x + w, y + h);
+    let bl = Point::new(x, y + h);
+
+    builder.move_to(Point::new(x + r_tl, y));
+    builder.line_to(Point::new(tr.x - r_tr, tr.y));
+    if r_tr > 0.0 {
+        builder.arc_to(tr, Point::new(tr.x, tr.y + r_tr), r_tr);
+    }
+    builder.line_to(Point::new(br.x, br.y - r_br));
+    if r_br > 0.0 {
+        builder.arc_to(br, Point::new(br.x - r_br, br.y), r_br);
+    }
+    builder.line_to(Point::new(bl.x + r_bl, bl.y));
+    if r_bl > 0.0 {
+        builder.arc_to(bl, Point::new(bl.x, bl.y - r_bl), r_bl);
+    }
+    builder.line_to(Point::new(tl.x, tl.y + r_tl));
+    if r_tl > 0.0 {
+        builder.arc_to(tl, Point::new(tl.x + r_tl, tl.y), r_tl);
+    }
+    builder.close();
 }
 /// State for Bars - stores positioned bar rectangles
 pub struct State {
@@ -102,6 +123,10 @@ pub struct State {
     /// Per-frame entrance/transition lifecycle (progress, pending-start
     /// flag, latest captured `Instant`) advanced by the chart widget.
     pub tick: animation::Tick,
+    /// The plot area's pixel rectangle (layout-relative, matching
+    /// `series_rects`) captured at layout time. The track rail spans this
+    /// extent along the value axis behind each bar.
+    pub plot_bounds: Rectangle,
 }
 
 /// A Bars series that renders vertical bar charts.
@@ -150,6 +175,12 @@ where
                 series_fill_plans: Vec::new(),
                 previous_series_rects: Vec::new(),
                 tick: animation::Tick::new(),
+                plot_bounds: Rectangle {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 0.0,
+                    height: 0.0,
+                },
             }),
             children: Vec::new(),
         }
@@ -285,6 +316,10 @@ where
                 self.layout_vertical(state, plane, num_bins, num_series, bar_length, spacing_prop);
             }
         }
+
+        // Capture the plot extent so the draw pass can span the track rail
+        // across the full value axis behind each bar.
+        state.plot_bounds = plane.bounds;
 
         // Compute label rects for hit-testing
         state.label_rects = self.compute_label_rects(state);
@@ -669,6 +704,8 @@ where
         mark_index: usize,
         selection: &Option<crate::target::Target>,
         corners: crate::core::border::Radius,
+        track: Option<crate::core::Color>,
+        baseline_exposed: bool,
     ) where
         Theme: crate::design::Design + ?Sized,
     {
@@ -764,6 +801,46 @@ where
         // invariant across series, so compute the seed once per draw.
         let seed = theme.seed();
 
+        // Track rail: a faint full-extent pill behind every bar showing the
+        // axis range the bar grows within (Recharts `<Bar background>`).
+        // Drawn first so bars paint on top, and built as one combined path
+        // filled once — a single blend keeps the translucent color from
+        // doubling up where bands overlap (stacked / overlaid share a band).
+        // Uses the laid-out `series_rects` (not the animated rects) so the
+        // rail stays put while bars grow into it.
+        if let Some(track_color) = track {
+            let plot = state.plot_bounds;
+            let track_path = Path::new(|builder| {
+                for rects in state.series_rects.iter() {
+                    for r in rects {
+                        if !(r.x.is_finite() && r.y.is_finite() && r.width.is_finite() && r.height.is_finite()) {
+                            continue;
+                        }
+                        let track_rect = if is_horizontal {
+                            Rectangle {
+                                x: plot.x,
+                                y: r.y,
+                                width: plot.width,
+                                height: r.height,
+                            }
+                        } else {
+                            Rectangle {
+                                x: r.x,
+                                y: plot.y,
+                                width: r.width,
+                                height: plot.height,
+                            }
+                        };
+                        // The far (value) end is always rounded; the baseline
+                        // end rounds only when its axis spine is hidden, so a
+                        // visible spine keeps the rail flush against it.
+                        push_bar_path(builder, &track_rect, corners, is_horizontal, true, baseline_exposed);
+                    }
+                }
+            });
+            bar_frame.fill(&track_path, track_color);
+        }
+
         // Draw each series
         for (series_idx, (series, rects)) in self.data.series.iter().zip(animated_series_rects.iter()).enumerate() {
             let round_this_series = max_end_radius > 0.0 && (!is_stacked || series_idx + 1 == total_series);
@@ -806,25 +883,25 @@ where
                 })
                 .collect();
 
-            let active_corners = if round_this_series {
-                corners
-            } else {
-                crate::core::border::Radius::default()
-            };
+            // Round the baseline end only when its axis spine is hidden — a
+            // visible spine means bars should sit flush against it, so they
+            // touch the line instead of floating as pills. In a stack only
+            // the baseline-most segment (the first) rounds its baseline end.
+            let round_baseline = max_end_radius > 0.0 && baseline_exposed && (!is_stacked || series_idx == 0);
 
             // Draw bars: per-bar fill if any per-point override OR any fill
             // encoding is present; otherwise batch into a single Path.
             if series.has_point_colors() || series.color_by.is_some() {
                 for (rect, &color) in rects.iter().zip(bar_colors.iter()) {
                     let path = Path::new(|builder| {
-                        push_bar_path(builder, rect, active_corners, is_horizontal);
+                        push_bar_path(builder, rect, corners, is_horizontal, round_this_series, round_baseline);
                     });
                     bar_frame.fill(&path, color);
                 }
             } else {
                 let path = Path::new(|builder| {
                     for rect in rects {
-                        push_bar_path(builder, rect, active_corners, is_horizontal);
+                        push_bar_path(builder, rect, corners, is_horizontal, round_this_series, round_baseline);
                     }
                 });
                 bar_frame.fill(&path, base_color);
@@ -1060,16 +1137,23 @@ fn label_position(
 ) {
     use crate::core::alignment::{Horizontal, Vertical};
 
+    // Gap between a data label and the bar edge it sits against. Labels
+    // tucked inside the bar (End/Base) get a roomier inset so the text isn't
+    // cramped against the rounded value end; labels floating just outside
+    // (Above) keep a smaller gap.
+    const INSIDE: f32 = 8.0;
+    const OUTSIDE: f32 = 4.0;
+
     if is_horizontal {
         match position {
             Position::Above => (
-                rect.x + rect.width + 4.0,
+                rect.x + rect.width + OUTSIDE,
                 rect.y + rect.height / 2.0,
                 Horizontal::Left,
                 Vertical::Center,
             ),
             Position::End => (
-                rect.x + rect.width - 4.0,
+                rect.x + rect.width - INSIDE,
                 rect.y + rect.height / 2.0,
                 Horizontal::Right,
                 Vertical::Center,
@@ -1081,7 +1165,7 @@ fn label_position(
                 Vertical::Center,
             ),
             Position::Base => (
-                rect.x + 4.0,
+                rect.x + INSIDE,
                 rect.y + rect.height / 2.0,
                 Horizontal::Left,
                 Vertical::Center,
@@ -1091,13 +1175,13 @@ fn label_position(
         match position {
             Position::Above => (
                 rect.x + rect.width / 2.0,
-                rect.y - 4.0,
+                rect.y - OUTSIDE,
                 Horizontal::Center,
                 Vertical::Bottom,
             ),
             Position::End => (
                 rect.x + rect.width / 2.0,
-                rect.y + 4.0,
+                rect.y + INSIDE,
                 Horizontal::Center,
                 Vertical::Top,
             ),
@@ -1109,7 +1193,7 @@ fn label_position(
             ),
             Position::Base => (
                 rect.x + rect.width / 2.0,
-                rect.y + rect.height - 4.0,
+                rect.y + rect.height - INSIDE,
                 Horizontal::Center,
                 Vertical::Bottom,
             ),

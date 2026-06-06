@@ -945,6 +945,7 @@ where
         viewport: &crate::core::Rectangle,
         hidden_series: &std::collections::HashSet<String>,
         corners: crate::core::border::Radius,
+        track: Option<crate::core::Color>,
     ) where
         D: design::Design + ?Sized,
     {
@@ -1053,6 +1054,16 @@ where
             );
         }
 
+        // Whether the baseline axis spines are drawn. Bars round their
+        // baseline end only when the spine they'd sit on is hidden; the plot
+        // area selects the left or bottom flag per bar direction.
+        let bottom_axis_line = self
+            .bottom_axis
+            .as_ref()
+            .map(|g| g.axis().shows_line())
+            .unwrap_or(false);
+        let left_axis_line = self.left_axis.as_ref().map(|g| g.axis().shows_line()).unwrap_or(false);
+
         self.plot_area.draw(
             &tree.children[6],
             renderer,
@@ -1066,6 +1077,9 @@ where
             self.selection,
             hidden_series,
             corners,
+            track,
+            bottom_axis_line,
+            left_axis_line,
         );
 
         // Scale legends. Overlaid panels float inside the plot area;

@@ -1879,6 +1879,7 @@ where
             viewport,
             &state.hidden_series,
             style.corners,
+            style.track,
         );
 
         // Draw the donut center overlay above the scene so the badge
@@ -2528,7 +2529,9 @@ fn draw_cartesian_tooltip_overlay<Message>(
     }
 
     if draw_box {
-        let flip_axis_x = plot_bounds.x + plane.bounds.width / 2.0;
+        // Flip the box inward only when it would run past the plot's right
+        // edge, so a bar tip with room to its right keeps the tooltip outside.
+        let right_limit_x = plot_bounds.x + plane.bounds.width;
         renderer.with_layer(*viewport, |renderer| {
             draw_tooltip_box(
                 renderer,
@@ -2536,7 +2539,7 @@ fn draw_cartesian_tooltip_overlay<Message>(
                 tooltip_config,
                 &entries,
                 Point::new(anchor_x, anchor_y),
-                flip_axis_x,
+                right_limit_x,
                 chart_bounds,
                 text_color,
                 viewport,
@@ -2611,7 +2614,7 @@ fn draw_pie_tooltip_overlay<Message>(
         return;
     };
     let plot_bounds = compute_plot_bounds(chart_bounds, padding, plot_area_offset, plane);
-    let flip_axis_x = plot_bounds.x + plot_bounds.width / 2.0;
+    let right_limit_x = plot_bounds.x + plot_bounds.width;
 
     let entry = hover::Row {
         tooltip: TooltipEntry {
@@ -2693,7 +2696,7 @@ fn draw_pie_tooltip_overlay<Message>(
                 &effective_tooltip,
                 &entries,
                 cursor_pos,
-                flip_axis_x,
+                right_limit_x,
                 chart_bounds,
                 text_color,
                 viewport,
@@ -2818,15 +2821,14 @@ fn draw_geo_tooltip_overlay<Message>(
     );
     // Place the box on the side of the bubble that points away from the
     // closest chart edge, with its near edge sitting `radius + 8px` past
-    // the bubble's outline. `draw_tooltip_box` interprets `flip_axis_x`
-    // as: anchor < flip_axis_x → box extends rightward from anchor;
-    // anchor > flip_axis_x → box extends leftward. Anchoring at the
-    // bubble's edge (rather than its center) means the box's `box_gap`
-    // shim from `draw_tooltip_box` lands fully outside the bubble,
-    // not inside its disc.
+    // the bubble's outline. `draw_tooltip_box` prefers the right and flips
+    // left when the box would pass `right_limit_x`, so passing `chart_right`
+    // forces a right box (it always fits) and `chart_left` forces a left box
+    // (it never fits). Anchoring at the bubble's edge (rather than its
+    // center) means the box's `box_gap` shim lands fully outside the disc.
     let chart_center_x = chart_bounds.x + chart_bounds.width / 2.0;
     let on_left_half = anchor_abs.x < chart_center_x;
-    let (box_anchor_x, flip_axis_x) = if on_left_half {
+    let (box_anchor_x, right_limit_x) = if on_left_half {
         (anchor_abs.x + radius, chart_bounds.x + chart_bounds.width)
     } else {
         (anchor_abs.x - radius, chart_bounds.x)
@@ -2891,7 +2893,7 @@ fn draw_geo_tooltip_overlay<Message>(
                 effective_tooltip,
                 &entries,
                 box_anchor,
-                flip_axis_x,
+                right_limit_x,
                 chart_bounds,
                 text_color,
                 viewport,
@@ -3004,7 +3006,7 @@ fn draw_choropleth_tooltip_overlay<Message>(
         return;
     };
     let plot_bounds = compute_plot_bounds(chart_bounds, padding, plot_area_offset, plane);
-    let flip_axis_x = plot_bounds.x + plot_bounds.width / 2.0;
+    let right_limit_x = plot_bounds.x + plot_bounds.width;
 
     let entry = hover::Row {
         tooltip: TooltipEntry {
@@ -3094,7 +3096,7 @@ fn draw_choropleth_tooltip_overlay<Message>(
                 effective_tooltip,
                 &entries,
                 cursor_pos,
-                flip_axis_x,
+                right_limit_x,
                 chart_bounds,
                 text_color,
                 viewport,
@@ -3105,11 +3107,15 @@ fn draw_choropleth_tooltip_overlay<Message>(
 
 /// Render the tooltip box body (background, swatches, text rows).
 ///
-/// The caller picks the visual `anchor`, the L/R `flip_axis_x` that
-/// decides whether the box sits to the left or right of the anchor,
-/// and the `clamp_bounds` rectangle that the box's vertical position
-/// is clamped within. Returns nothing — the caller is responsible for
-/// the surrounding layering wrapper.
+/// The caller picks the visual `anchor`, the `right_limit_x` past which a
+/// right-placed box is considered to overflow, and the `clamp_bounds`
+/// rectangle the box is kept inside. The box prefers sitting to the right of
+/// the anchor and flips to the left only when its right edge would exceed
+/// `right_limit_x` — so a tooltip stays outside the bar tip whenever there's
+/// room, instead of flipping at a fixed midpoint. Pass `right_limit_x =
+/// chart_right` to force right, or `chart_left` to force left (the box can
+/// never fit, so it always flips). Returns nothing — the caller is
+/// responsible for the surrounding layering wrapper.
 #[allow(clippy::too_many_arguments)]
 fn draw_tooltip_box(
     renderer: &mut Renderer,
@@ -3117,7 +3123,7 @@ fn draw_tooltip_box(
     tooltip_config: &crate::data::tooltip::Tooltip,
     entries: &[hover::Row],
     anchor: Point,
-    flip_axis_x: f32,
+    right_limit_x: f32,
     clamp_bounds: Rectangle,
     text_color: crate::core::Color,
     viewport: &Rectangle,
@@ -3126,8 +3132,11 @@ fn draw_tooltip_box(
     use crate::core::text::Renderer as _;
 
     let font = renderer.default_font();
-    let font_size: f32 = 12.0;
-    let line_height_px: f32 = 18.0;
+    // Scale the tooltip with the chart's base font so it grows with the
+    // design. The 1.5x line height reproduces the historical 18px at the
+    // default 12px size, so existing charts are unchanged.
+    let font_size: f32 = design.font_size();
+    let line_height_px: f32 = font_size * 1.5;
     let swatch_size: f32 = 8.0;
     let swatch_gap: f32 = 6.0;
     let box_padding: f32 = 8.0;
@@ -3155,12 +3164,20 @@ fn draw_tooltip_box(
     let box_width = box_padding + swatch_space + max_text_width + box_padding_right;
     let box_height = box_padding * 2.0 + entries.len() as f32 * line_height_px;
 
-    // Position tooltip box: right of anchor if to the left of flip_axis_x, else left
-    let box_x = if anchor.x < flip_axis_x {
-        anchor.x + box_gap
+    // Prefer placing the box just past the anchor (right of the bar tip /
+    // cursor); flip it to the left only when its right edge would exceed
+    // `right_limit_x` — so it stays outside whenever there's room rather than
+    // flipping at a fixed midpoint. Then clamp horizontally so it never
+    // clips, even when the flipped box would run off the left edge.
+    let right_x = anchor.x + box_gap;
+    let box_x = if right_x + box_width <= right_limit_x {
+        right_x
     } else {
         anchor.x - box_width - box_gap
     };
+    let box_x = box_x
+        .max(clamp_bounds.x + 2.0)
+        .min(clamp_bounds.x + clamp_bounds.width - box_width - 2.0);
 
     let box_y = (anchor.y - box_height / 2.0)
         .max(clamp_bounds.y + 2.0)
@@ -3271,6 +3288,16 @@ pub struct Style {
     /// [`design::Design::corners`], so a theme default flows through;
     /// override it inside [`Chart::style`] to round per chart.
     pub corners: crate::core::border::Radius,
+    /// Fill for the "track" rail behind bars: the faint full-axis-extent
+    /// rectangle a bar grows within (Recharts `<Bar background>`). `None`
+    /// disables it.
+    ///
+    /// Seeded from [`design::Design::bar_track`], so a theme default flows
+    /// through; override inside [`Chart::style`] to toggle per chart. The
+    /// rail adopts the same [`corners`](Self::corners) radius and renders as
+    /// a full pill (both ends rounded); bars then round their baseline end
+    /// too, so they read as free-floating pills resting on the rail.
+    pub track: Option<crate::core::Color>,
 }
 
 /// A styling function for a [`Chart`].
@@ -3288,6 +3315,7 @@ pub fn default(design: &dyn design::Design) -> Style {
                 .resolve(design.background_color(), design.text_pair(), &design.seed(), None),
         },
         corners: design.corners(),
+        track: design.bar_track(),
     }
 }
 
@@ -3296,6 +3324,7 @@ pub fn default(design: &dyn design::Design) -> Style {
 pub fn transparent(design: &dyn design::Design) -> Style {
     Style {
         corners: design.corners(),
+        track: design.bar_track(),
         ..Style::default()
     }
 }
@@ -3312,6 +3341,7 @@ pub fn bordered(design: &dyn design::Design) -> Style {
                 .resolve(design.background_color(), design.text_pair(), &design.seed(), None),
         },
         corners: design.corners(),
+        track: design.bar_track(),
     }
 }
 
@@ -3327,6 +3357,7 @@ pub fn filled(design: &dyn design::Design) -> Style {
                 .resolve(design.background_color(), design.text_pair(), &design.seed(), None),
         },
         corners: design.corners(),
+        track: design.bar_track(),
     }
 }
 

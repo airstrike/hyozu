@@ -1138,7 +1138,7 @@ where
         let labels = &state.label_info;
         let (min_value, max_value) = (state.bounds.min(), state.bounds.max());
 
-        if labels.is_empty() || (!self.axis.has_ticks() && !self.axis.has_labels()) {
+        if labels.is_empty() || (!self.axis.shows_ticks() && !self.axis.has_labels()) {
             // Hidden axes (e.g. a y-axis muted via `.none()` to show only
             // gridlines) still need to propagate the `min_inset` floor so
             // series-driven insets — bar data labels extending past the
@@ -1300,9 +1300,10 @@ where
             );
         }
 
+        let tick_space = if self.axis.shows_ticks() { tick_length } else { 0.0 };
         let width = if self.axis.has_labels() {
-            max_label_width + tick_length + label_offset
-        } else if self.axis.has_ticks() {
+            max_label_width + tick_space + label_offset
+        } else if self.axis.shows_ticks() {
             tick_length
         } else {
             0.0
@@ -1466,7 +1467,8 @@ where
             );
         }
 
-        let height = max_label_height + tick_length + label_offset;
+        let tick_space = if self.axis.shows_ticks() { tick_length } else { 0.0 };
+        let height = max_label_height + tick_space + label_offset;
         Node::with_children(Size::new(max_size.width, height), children)
     }
 
@@ -1516,7 +1518,7 @@ where
         // Draw all tick marks using canvas geometry (same pipeline as marks)
         let tick_length = 5.0;
         let (inset_start, inset_end) = state.label_insets;
-        if !tick_positions.is_empty() {
+        if !tick_positions.is_empty() && self.axis.shows_ticks() {
             let mut frame = Frame::new(renderer, bounds.size());
             // Pixel-snap perpendicular coordinates to a half-pixel row so a
             // 1 px stroke renders as one crisp physical pixel (instead of
