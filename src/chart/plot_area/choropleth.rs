@@ -11,7 +11,7 @@ use crate::widget::canvas::{Frame, Path, Stroke};
 use crate::core::text;
 use crate::widget::renderer::geometry;
 
-use super::{Plane, geo};
+use super::{Domain, geo};
 
 /// Per-feature display state, derived from the entries map and the
 /// feature's value (or absence thereof). Drives the 3-way color decision
@@ -362,7 +362,8 @@ where
         tree: &mut Tree,
         _renderer: &Renderer,
         _limits: &Limits,
-        _plane: &Plane,
+        _domain: &Domain,
+        _rect: crate::core::Rectangle,
         geo_plane: Option<&geo::Plane>,
     ) -> Node {
         let state = tree.state.downcast_mut::<State>();

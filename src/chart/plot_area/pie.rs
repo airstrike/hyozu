@@ -1,4 +1,4 @@
-use super::Plane;
+use super::Domain;
 use crate::animation;
 use crate::core::Size;
 use crate::core::layout::{Limits, Node};
@@ -191,7 +191,14 @@ where
     pub(super) fn diff(&self, _tree: &mut Tree) {}
 
     /// Layout the pie — compute angles from values
-    pub fn layout(&self, tree: &mut Tree, _renderer: &Renderer, limits: &Limits, _plane: &Plane) -> Node {
+    pub fn layout(
+        &self,
+        tree: &mut Tree,
+        _renderer: &Renderer,
+        limits: &Limits,
+        _domain: &Domain,
+        _rect: crate::core::Rectangle,
+    ) -> Node {
         let state = tree.state.downcast_mut::<State>();
 
         let total: f64 = self.data.slices.iter().map(|s| finite_or_zero(s.value)).sum();

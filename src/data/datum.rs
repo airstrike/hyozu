@@ -24,7 +24,7 @@ impl_numeric!(i8, i16, i32, i64, isize, u8, u16, u32, u64, usize, f32, f64);
 /// A data point with x and y coordinates.
 ///
 /// Uses f64 for precision with timestamps and large values.
-/// Convert to pixel coordinates via `Plane::to_pixel()`.
+/// Convert to pixel coordinates via `crate::chart::plot_area::to_pixel()`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Datum {
     pub x: f64,

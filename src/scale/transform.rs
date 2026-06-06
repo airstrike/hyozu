@@ -99,7 +99,7 @@ pub enum Transform {
 impl Transform {
     /// Maps `value` from the domain `[min, max]` onto the unit interval
     /// `[0.0, 1.0]`. Used by every numeric-axis mark renderer (via
-    /// [`crate::chart::plot_area::Plane::to_pixel`]) and by axis tick
+    /// [`crate::chart::plot_area::to_pixel`]) and by axis tick
     /// generation.
     ///
     /// Degenerate domains (`min == max`) return `0.5`. For [`Self::Log`],

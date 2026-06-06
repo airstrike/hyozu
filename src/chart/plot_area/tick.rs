@@ -1,4 +1,4 @@
-use super::Plane;
+use super::{Domain, to_pixel};
 use crate::core::Size;
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
@@ -57,20 +57,27 @@ where
 
     pub(super) fn diff(&self, _tree: &mut Tree) {}
 
-    pub fn layout(&self, tree: &mut Tree, _renderer: &Renderer, _limits: &Limits, plane: &Plane) -> Node {
+    pub fn layout(
+        &self,
+        tree: &mut Tree,
+        _renderer: &Renderer,
+        _limits: &Limits,
+        domain: &Domain,
+        rect: crate::core::Rectangle,
+    ) -> Node {
         let state = tree.state.downcast_mut::<State>();
         state.positions.clear();
 
         let (num_categories, band_px) = match self.data.orientation {
             Orientation::Vertical => {
                 // Horizontal bars: categories on y-axis, values on x-axis
-                let n = (plane.domain.y.max - plane.domain.y.min + 1.0).max(1.0);
-                (n, plane.bounds.height / n as f32)
+                let n = (domain.y.max - domain.y.min + 1.0).max(1.0);
+                (n, rect.height / n as f32)
             }
             Orientation::Horizontal => {
                 // Vertical bars: categories on x-axis, values on y-axis
-                let n = (plane.domain.x.max - plane.domain.x.min + 1.0).max(1.0);
-                (n, plane.bounds.width / n as f32)
+                let n = (domain.x.max - domain.x.min + 1.0).max(1.0);
+                (n, rect.width / n as f32)
             }
         };
 
@@ -82,11 +89,11 @@ where
             let pixel = match self.data.orientation {
                 Orientation::Vertical => {
                     // For horizontal bars: x-axis = value, y-axis = category
-                    plane.to_pixel(Datum::new(point.y, point.x))
+                    to_pixel(domain, rect, Datum::new(point.y, point.x))
                 }
                 Orientation::Horizontal => {
                     // For vertical bars: x-axis = category, y-axis = value
-                    plane.to_pixel(Datum::new(point.x, point.y))
+                    to_pixel(domain, rect, Datum::new(point.x, point.y))
                 }
             };
 

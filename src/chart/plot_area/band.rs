@@ -1,4 +1,4 @@
-use super::Plane;
+use super::{Domain, to_pixel};
 use crate::animation;
 use crate::core::Size;
 use crate::core::layout::{Limits, Node};
@@ -83,17 +83,24 @@ where
     pub(super) fn diff(&self, _tree: &mut Tree) {}
 
     /// Layout the band — convert data values to pixel coordinates.
-    pub fn layout(&self, tree: &mut Tree, _renderer: &Renderer, _limits: &Limits, plane: &Plane) -> Node {
+    pub fn layout(
+        &self,
+        tree: &mut Tree,
+        _renderer: &Renderer,
+        _limits: &Limits,
+        domain: &Domain,
+        rect: crate::core::Rectangle,
+    ) -> Node {
         let state = tree.state.downcast_mut::<State>();
 
         match self.data.orientation {
             BandOrientation::Horizontal => {
-                state.lower_pixel = plane.to_pixel(Datum::new(0.0, self.data.lower)).y;
-                state.upper_pixel = plane.to_pixel(Datum::new(0.0, self.data.upper)).y;
+                state.lower_pixel = to_pixel(domain, rect, Datum::new(0.0, self.data.lower)).y;
+                state.upper_pixel = to_pixel(domain, rect, Datum::new(0.0, self.data.upper)).y;
             }
             BandOrientation::Vertical => {
-                state.lower_pixel = plane.to_pixel(Datum::new(self.data.lower, 0.0)).x;
-                state.upper_pixel = plane.to_pixel(Datum::new(self.data.upper, 0.0)).x;
+                state.lower_pixel = to_pixel(domain, rect, Datum::new(self.data.lower, 0.0)).x;
+                state.upper_pixel = to_pixel(domain, rect, Datum::new(self.data.upper, 0.0)).x;
             }
         }
 
@@ -154,7 +161,7 @@ where
 
         let rect = match self.data.orientation {
             BandOrientation::Horizontal => {
-                // Y-range band spans full plot width. Plane pixel values grow
+                // Y-range band spans full plot width. Pixel values grow
                 // downward, so `upper` (data) maps to a smaller pixel y.
                 let (y0, y1) = if animated_upper <= animated_lower {
                     (animated_upper, animated_lower)

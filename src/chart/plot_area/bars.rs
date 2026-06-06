@@ -1,4 +1,4 @@
-use super::{Insets, Plane};
+use super::{Domain, Insets, to_pixel};
 use crate::animation;
 use crate::core::layout::{Limits, Node};
 use crate::core::text::{self, paragraph};
@@ -304,7 +304,14 @@ where
     }
 
     /// Layout the bars - calculates bar positions and sizes
-    pub fn layout(&self, tree: &mut Tree, _renderer: &Renderer, _limits: &Limits, plane: &Plane) -> Node {
+    pub fn layout(
+        &self,
+        tree: &mut Tree,
+        _renderer: &Renderer,
+        _limits: &Limits,
+        domain: &Domain,
+        rect: Rectangle,
+    ) -> Node {
         use crate::mark::bar::Direction;
 
         let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
@@ -328,16 +335,16 @@ where
 
         match self.data.direction {
             Direction::Horizontal => {
-                self.layout_horizontal(state, plane, num_bins, num_series, bar_length, spacing_prop);
+                self.layout_horizontal(state, domain, rect, num_bins, num_series, bar_length, spacing_prop);
             }
             Direction::Vertical => {
-                self.layout_vertical(state, plane, num_bins, num_series, bar_length, spacing_prop);
+                self.layout_vertical(state, domain, rect, num_bins, num_series, bar_length, spacing_prop);
             }
         }
 
         // Capture the plot extent so the draw pass can span the track rail
         // across the full value axis behind each bar.
-        state.plot_bounds = plane.bounds;
+        state.plot_bounds = rect;
 
         // Compute label rects for hit-testing
         state.label_rects = self.compute_label_rects(state);
@@ -362,10 +369,12 @@ where
     }
 
     /// Layout bars vertically (default) - bars grow upward from baseline.
+    #[allow(clippy::too_many_arguments)]
     fn layout_vertical(
         &self,
         state: &mut State<Renderer::Paragraph>,
-        plane: &Plane,
+        domain: &Domain,
+        rect: Rectangle,
         num_bins: usize,
         num_series: usize,
         bar_length: f32,
@@ -374,12 +383,12 @@ where
         use crate::mark::bar::Layout;
 
         // Calculate zero line position
-        let zero_y = plane.to_pixel(Datum::ORIGIN).y;
+        let zero_y = to_pixel(domain, rect, Datum::ORIGIN).y;
 
         match self.data.layout {
             Layout::Grouped => {
                 // Total width for all bins (categories)
-                let total_width = plane.bounds.width;
+                let total_width = rect.width;
                 let bin_width = total_width / num_bins as f32;
 
                 // Within each bin, calculate bar width based on:
@@ -407,12 +416,12 @@ where
                             .iter()
                             .enumerate()
                             .map(|(bin_idx, point)| {
-                                let pixel_point = plane.to_pixel(*point);
+                                let pixel_point = to_pixel(domain, rect, *point);
                                 let bar_height = (zero_y - pixel_point.y).abs();
 
                                 // Use plane to transform data coordinate to pixel
                                 // For grouped layout, position bars within the group with spacing
-                                let bar_center_x = plane.to_pixel(Datum::x(bin_idx as f64)).x;
+                                let bar_center_x = to_pixel(domain, rect, Datum::x(bin_idx as f64)).x;
                                 let total_group_width = bin_width * bar_length;
                                 let group_start = bar_center_x - total_group_width / 2.0;
                                 let x = group_start + visual_series_idx as f32 * (bar_width + spacing_px);
@@ -430,7 +439,7 @@ where
             }
             Layout::Stacked => {
                 // For stacked: full width for each bin (spacing has no effect)
-                let total_width = plane.bounds.width;
+                let total_width = rect.width;
                 let bin_width = total_width / num_bins as f32;
                 let bar_width = bin_width * bar_length;
 
@@ -443,14 +452,14 @@ where
                             .iter()
                             .enumerate()
                             .map(|(bin_idx, point)| {
-                                let pixel_point = plane.to_pixel(*point);
+                                let pixel_point = to_pixel(domain, rect, *point);
                                 let bar_height = (zero_y - pixel_point.y).abs();
 
                                 let y = cumulative_tops[bin_idx] - bar_height;
                                 cumulative_tops[bin_idx] = y;
 
                                 // Use plane to transform data coordinate to pixel
-                                let bar_center_x = plane.to_pixel(Datum::x(bin_idx as f64)).x;
+                                let bar_center_x = to_pixel(domain, rect, Datum::x(bin_idx as f64)).x;
                                 let x = bar_center_x - bar_width / 2.0;
 
                                 Rectangle {
@@ -471,7 +480,7 @@ where
             }
             Layout::Overlaid => {
                 // For overlaid: same position for all series (spacing has no effect)
-                let total_width = plane.bounds.width;
+                let total_width = rect.width;
                 let bin_width = total_width / num_bins as f32;
                 let bar_width = bin_width * bar_length;
 
@@ -485,11 +494,11 @@ where
                             .iter()
                             .enumerate()
                             .map(|(bin_idx, point)| {
-                                let pixel_point = plane.to_pixel(*point);
+                                let pixel_point = to_pixel(domain, rect, *point);
                                 let bar_height = (zero_y - pixel_point.y).abs();
 
                                 // Use plane to transform data coordinate to pixel
-                                let bar_center_x = plane.to_pixel(Datum::x(bin_idx as f64)).x;
+                                let bar_center_x = to_pixel(domain, rect, Datum::x(bin_idx as f64)).x;
                                 let x = bar_center_x - bar_width / 2.0;
 
                                 Rectangle {
@@ -507,10 +516,12 @@ where
     }
 
     /// Layout bars horizontally - bars grow rightward from baseline.
+    #[allow(clippy::too_many_arguments)]
     fn layout_horizontal(
         &self,
         state: &mut State<Renderer::Paragraph>,
-        plane: &Plane,
+        domain: &Domain,
+        rect: Rectangle,
         num_bins: usize,
         num_series: usize,
         bar_length: f32,
@@ -519,11 +530,11 @@ where
         use crate::mark::bar::Layout;
 
         // Calculate zero line position (x where value = 0)
-        let zero_x = plane.to_pixel(Datum::ORIGIN).x;
+        let zero_x = to_pixel(domain, rect, Datum::ORIGIN).x;
 
         match self.data.layout {
             Layout::Grouped => {
-                let total_height = plane.bounds.height;
+                let total_height = rect.height;
                 let bin_height = total_height / num_bins as f32;
 
                 let total_bar_units = num_series as f32 + spacing_prop * (num_series as f32 - 1.0);
@@ -547,12 +558,12 @@ where
                             .enumerate()
                             .map(|(bin_idx, point)| {
                                 // point.x = category index, point.y = value
-                                let value_x = plane.to_pixel(Datum::new(point.y, 0.0)).x;
+                                let value_x = to_pixel(domain, rect, Datum::new(point.y, 0.0)).x;
                                 let bar_width = (value_x - zero_x).abs();
                                 let x = value_x.min(zero_x);
 
                                 // Position category along y-axis
-                                let bar_center_y = plane.to_pixel(Datum::new(0.0, bin_idx as f64)).y;
+                                let bar_center_y = to_pixel(domain, rect, Datum::new(0.0, bin_idx as f64)).y;
                                 let total_group_height = bin_height * bar_length;
                                 let group_start = bar_center_y - total_group_height / 2.0;
                                 let y = group_start + visual_series_idx as f32 * (bar_height + spacing_px);
@@ -569,7 +580,7 @@ where
                     .collect();
             }
             Layout::Stacked => {
-                let total_height = plane.bounds.height;
+                let total_height = rect.height;
                 let bin_height = total_height / num_bins as f32;
                 let bar_height = bin_height * bar_length;
 
@@ -582,13 +593,13 @@ where
                             .iter()
                             .enumerate()
                             .map(|(bin_idx, point)| {
-                                let value_x = plane.to_pixel(Datum::new(point.y, 0.0)).x;
+                                let value_x = to_pixel(domain, rect, Datum::new(point.y, 0.0)).x;
                                 let bar_width = (value_x - zero_x).abs();
 
                                 let x = cumulative_rights[bin_idx];
                                 cumulative_rights[bin_idx] = x + bar_width;
 
-                                let bar_center_y = plane.to_pixel(Datum::new(0.0, bin_idx as f64)).y;
+                                let bar_center_y = to_pixel(domain, rect, Datum::new(0.0, bin_idx as f64)).y;
                                 let y = bar_center_y - bar_height / 2.0;
 
                                 Rectangle {
@@ -608,7 +619,7 @@ where
                 state.series_rects = series_rects;
             }
             Layout::Overlaid => {
-                let total_height = plane.bounds.height;
+                let total_height = rect.height;
                 let bin_height = total_height / num_bins as f32;
                 let bar_height = bin_height * bar_length;
 
@@ -622,11 +633,11 @@ where
                             .iter()
                             .enumerate()
                             .map(|(bin_idx, point)| {
-                                let value_x = plane.to_pixel(Datum::new(point.y, 0.0)).x;
+                                let value_x = to_pixel(domain, rect, Datum::new(point.y, 0.0)).x;
                                 let bar_width = (value_x - zero_x).abs();
                                 let x = value_x.min(zero_x);
 
-                                let bar_center_y = plane.to_pixel(Datum::new(0.0, bin_idx as f64)).y;
+                                let bar_center_y = to_pixel(domain, rect, Datum::new(0.0, bin_idx as f64)).y;
                                 let y = bar_center_y - bar_height / 2.0;
 
                                 Rectangle {

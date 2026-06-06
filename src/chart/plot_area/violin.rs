@@ -1,4 +1,4 @@
-use super::Plane;
+use super::{Domain, to_pixel};
 use crate::animation;
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
@@ -100,7 +100,14 @@ where
     }
 
     /// Layout the violin -- compute mirrored density shape positions
-    pub fn layout(&self, tree: &mut Tree, _renderer: &Renderer, _limits: &Limits, plane: &Plane) -> Node {
+    pub fn layout(
+        &self,
+        tree: &mut Tree,
+        _renderer: &Renderer,
+        _limits: &Limits,
+        domain: &Domain,
+        rect: crate::core::Rectangle,
+    ) -> Node {
         let state = tree.state.downcast_mut::<State>();
 
         let num_entries = self.data.entries.len();
@@ -109,14 +116,14 @@ where
             return Node::new(Size::ZERO);
         }
 
-        let total_width = plane.bounds.width;
+        let total_width = rect.width;
         let bin_width = total_width / num_entries as f32;
         let max_half_width = (bin_width * self.data.width) / 2.0;
 
         state.entries.clear();
 
         for (i, entry) in self.data.entries.iter().enumerate() {
-            let center_x = plane.to_pixel(Datum::x(i as f64)).x;
+            let center_x = to_pixel(domain, rect, Datum::x(i as f64)).x;
 
             if entry.density.is_empty() {
                 state.entries.push(EntryLayout {
@@ -146,7 +153,7 @@ where
             let mut left_points = Vec::new();
 
             for &(value, density) in &entry.density {
-                let y = plane.to_pixel(Datum::new(i as f64, value)).y;
+                let y = to_pixel(domain, rect, Datum::new(i as f64, value)).y;
                 let half_w = (density / max_density) as f32 * max_half_width;
 
                 right_points.push(Point::new(center_x + half_w, y));
@@ -156,11 +163,11 @@ where
             // Box stats layout
             let box_layout = if self.data.show_box {
                 entry.stats.as_ref().map(|stats| BoxLayout {
-                    min_y: plane.to_pixel(Datum::new(i as f64, stats.min)).y,
-                    q1_y: plane.to_pixel(Datum::new(i as f64, stats.q1)).y,
-                    median_y: plane.to_pixel(Datum::new(i as f64, stats.median)).y,
-                    q3_y: plane.to_pixel(Datum::new(i as f64, stats.q3)).y,
-                    max_y: plane.to_pixel(Datum::new(i as f64, stats.max)).y,
+                    min_y: to_pixel(domain, rect, Datum::new(i as f64, stats.min)).y,
+                    q1_y: to_pixel(domain, rect, Datum::new(i as f64, stats.q1)).y,
+                    median_y: to_pixel(domain, rect, Datum::new(i as f64, stats.median)).y,
+                    q3_y: to_pixel(domain, rect, Datum::new(i as f64, stats.q3)).y,
+                    max_y: to_pixel(domain, rect, Datum::new(i as f64, stats.max)).y,
                 })
             } else {
                 None

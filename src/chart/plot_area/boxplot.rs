@@ -1,4 +1,4 @@
-use super::Plane;
+use super::{Domain, to_pixel};
 use crate::animation;
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
@@ -98,7 +98,14 @@ where
     }
 
     /// Layout the box plot — calculate positions and sizes
-    pub fn layout(&self, tree: &mut Tree, _renderer: &Renderer, _limits: &Limits, plane: &Plane) -> Node {
+    pub fn layout(
+        &self,
+        tree: &mut Tree,
+        _renderer: &Renderer,
+        _limits: &Limits,
+        domain: &Domain,
+        rect: Rectangle,
+    ) -> Node {
         let state = tree.state.downcast_mut::<State>();
 
         if self.data.entries.is_empty() {
@@ -113,23 +120,23 @@ where
 
         match self.data.direction {
             Direction::Vertical => {
-                let total_width = plane.bounds.width;
+                let total_width = rect.width;
                 let bin_width = total_width / num_entries as f32;
                 let box_width = bin_width * self.data.width;
 
                 for (i, entry) in self.data.entries.iter().enumerate() {
-                    let center_x = plane.to_pixel(Datum::x(i as f64)).x;
+                    let center_x = to_pixel(domain, rect, Datum::x(i as f64)).x;
 
-                    let q1_y = plane.to_pixel(Datum::new(i as f64, entry.q1)).y;
-                    let q3_y = plane.to_pixel(Datum::new(i as f64, entry.q3)).y;
-                    let min_y = plane.to_pixel(Datum::new(i as f64, entry.min)).y;
-                    let max_y = plane.to_pixel(Datum::new(i as f64, entry.max)).y;
-                    let median_y = plane.to_pixel(Datum::new(i as f64, entry.median)).y;
+                    let q1_y = to_pixel(domain, rect, Datum::new(i as f64, entry.q1)).y;
+                    let q3_y = to_pixel(domain, rect, Datum::new(i as f64, entry.q3)).y;
+                    let min_y = to_pixel(domain, rect, Datum::new(i as f64, entry.min)).y;
+                    let max_y = to_pixel(domain, rect, Datum::new(i as f64, entry.max)).y;
+                    let median_y = to_pixel(domain, rect, Datum::new(i as f64, entry.median)).y;
 
                     let outlier_ys: Vec<f32> = entry
                         .outliers
                         .iter()
-                        .map(|&o| plane.to_pixel(Datum::new(i as f64, o)).y)
+                        .map(|&o| to_pixel(domain, rect, Datum::new(i as f64, o)).y)
                         .collect();
 
                     // q3 is higher value -> lower y pixel
@@ -156,23 +163,23 @@ where
                 }
             }
             Direction::Horizontal => {
-                let total_height = plane.bounds.height;
+                let total_height = rect.height;
                 let bin_height = total_height / num_entries as f32;
                 let box_height = bin_height * self.data.width;
 
                 for (i, entry) in self.data.entries.iter().enumerate() {
-                    let center_y = plane.to_pixel(Datum::y(i as f64)).y;
+                    let center_y = to_pixel(domain, rect, Datum::y(i as f64)).y;
 
-                    let q1_x = plane.to_pixel(Datum::new(entry.q1, i as f64)).x;
-                    let q3_x = plane.to_pixel(Datum::new(entry.q3, i as f64)).x;
-                    let min_x = plane.to_pixel(Datum::new(entry.min, i as f64)).x;
-                    let max_x = plane.to_pixel(Datum::new(entry.max, i as f64)).x;
-                    let median_x = plane.to_pixel(Datum::new(entry.median, i as f64)).x;
+                    let q1_x = to_pixel(domain, rect, Datum::new(entry.q1, i as f64)).x;
+                    let q3_x = to_pixel(domain, rect, Datum::new(entry.q3, i as f64)).x;
+                    let min_x = to_pixel(domain, rect, Datum::new(entry.min, i as f64)).x;
+                    let max_x = to_pixel(domain, rect, Datum::new(entry.max, i as f64)).x;
+                    let median_x = to_pixel(domain, rect, Datum::new(entry.median, i as f64)).x;
 
                     let outlier_xs: Vec<f32> = entry
                         .outliers
                         .iter()
-                        .map(|&o| plane.to_pixel(Datum::new(o, i as f64)).x)
+                        .map(|&o| to_pixel(domain, rect, Datum::new(o, i as f64)).x)
                         .collect();
 
                     let rect_x = q1_x.min(q3_x);

@@ -1,4 +1,4 @@
-use super::Plane;
+use super::Domain;
 use crate::animation;
 use crate::core::Size;
 use crate::core::layout::{Limits, Node};
@@ -80,7 +80,14 @@ where
     }
 
     /// Layout the gauge — compute angles
-    pub fn layout(&self, tree: &mut Tree, _renderer: &Renderer, _limits: &Limits, _plane: &Plane) -> Node {
+    pub fn layout(
+        &self,
+        tree: &mut Tree,
+        _renderer: &Renderer,
+        _limits: &Limits,
+        _domain: &Domain,
+        _rect: crate::core::Rectangle,
+    ) -> Node {
         let state = tree.state.downcast_mut::<State>();
 
         let range = self.data.max - self.data.min;

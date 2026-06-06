@@ -1,4 +1,4 @@
-use super::Plane;
+use super::{Domain, to_pixel};
 use crate::core::Size;
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
@@ -53,16 +53,23 @@ where
     }
 
     /// Layout the rule — convert value to pixel position
-    pub fn layout(&self, tree: &mut Tree, _renderer: &Renderer, _limits: &Limits, plane: &Plane) -> Node {
+    pub fn layout(
+        &self,
+        tree: &mut Tree,
+        _renderer: &Renderer,
+        _limits: &Limits,
+        domain: &Domain,
+        rect: crate::core::Rectangle,
+    ) -> Node {
         let state = tree.state.downcast_mut::<State>();
 
         match self.data.orientation {
             RuleOrientation::Horizontal => {
-                let pixel = plane.to_pixel(Datum::new(0.0, self.data.value));
+                let pixel = to_pixel(domain, rect, Datum::new(0.0, self.data.value));
                 state.position = pixel.y;
             }
             RuleOrientation::Vertical => {
-                let pixel = plane.to_pixel(Datum::new(self.data.value, 0.0));
+                let pixel = to_pixel(domain, rect, Datum::new(self.data.value, 0.0));
                 state.position = pixel.x;
             }
         }
@@ -86,7 +93,7 @@ where
     {
         let state = tree.state.downcast_ref::<State>();
 
-        // Non-finite `data.value` propagates through `plane.to_pixel` to a
+        // Non-finite `data.value` propagates through `to_pixel` to a
         // NaN position; the line path and label both crash the tessellator.
         // Treat as a gap.
         if !state.position.is_finite() {

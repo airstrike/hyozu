@@ -106,14 +106,6 @@ fn content_node(content_rect: Rectangle) -> Node {
         .move_to(crate::core::Point::new(content_rect.x, content_rect.y))
 }
 
-/// The coordinate plane for transforming data coords to pixels.
-#[derive(Debug, Clone)]
-pub struct Plane {
-    /// Data domain mapped onto [`Plane::bounds`].
-    pub domain: Domain,
-    pub bounds: Rectangle,
-}
-
 /// Pixel margins reserved on each edge of the plot area to seat the
 /// data-mapping region. The same per-edge value seats the axis ticks and the
 /// content node, so marks and ticks stay aligned by construction.
@@ -146,19 +138,6 @@ impl Default for GeoConfig {
             projection: crate::geo::ProjectionKind::default(),
             basemap: true,
         }
-    }
-}
-
-impl Plane {
-    /// Transform a data point (f64) to pixel coordinates (f32) within the plane bounds.
-    pub fn to_pixel(&self, datum: Datum) -> crate::core::Point {
-        to_pixel(&self.domain, self.bounds, datum)
-    }
-
-    /// Inverse of the x part of `to_pixel`: map a pixel x-coordinate back to
-    /// a data-space x value.
-    pub fn to_data_x(&self, pixel_x: f32) -> f64 {
-        to_data_x(&self.domain, self.bounds, pixel_x)
     }
 }
 
@@ -195,16 +174,21 @@ pub enum AxisSide {
     Secondary,
 }
 
-/// State for a PlotArea - stores the coordinate planes for rendering
+/// State for a PlotArea - stores the data domains and the cached content
+/// rect that together map data coordinates to pixels.
 pub struct State {
-    /// The coordinate plane for the primary (bottom/left) axes.
-    pub plane: Option<Plane>,
-    /// The coordinate plane for the secondary (top/right) axes, if any.
-    pub secondary_plane: Option<Plane>,
+    /// The data domain for the primary (bottom/left) axes. Mapped onto
+    /// [`State::content_rect`] via the free [`to_pixel`] / [`to_data_x`]
+    /// transforms.
+    pub domain: Option<Domain>,
+    /// The data domain for the secondary (top/right) axes, if any. Shares
+    /// [`State::content_rect`] with the primary domain.
+    pub secondary_domain: Option<Domain>,
     /// The inset data-mapping rectangle in plot-local coordinates (origin
     /// at `insets.{left, top}`), mirroring the `content` child node. The
     /// update/hover path has no child [`crate::core::Layout`] to descend,
-    /// so it reads this cache instead of the live node tree.
+    /// so it reads this cache instead of the live node tree. Both the
+    /// primary and secondary domains map their data into this rectangle.
     pub content_rect: Rectangle,
     /// Chart-level geo projection cache, populated whenever a
     /// geo-aware mark (Choropleth, geo-Xy) is present. `None` for
@@ -392,8 +376,8 @@ where
         Tree {
             tag: tree::Tag::of::<State>(),
             state: tree::State::new(State {
-                plane: None,
-                secondary_plane: None,
+                domain: None,
+                secondary_domain: None,
                 content_rect: Rectangle {
                     x: 0.0,
                     y: 0.0,
@@ -803,7 +787,7 @@ where
         insets
     }
 
-    /// Layout the plot area - creates plane and delegates to each series.
+    /// Layout the plot area - builds the data domains and delegates to each series.
     ///
     /// `y_transform` and `secondary_y_transform` carry the y-domain
     /// transform (Linear / Log) for the primary and secondary planes
@@ -847,37 +831,32 @@ where
             height: (size.height - insets.top - insets.bottom).max(0.0),
         };
 
-        let plane = Plane {
-            domain: Domain {
-                x: Range { min: x_min, max: x_max },
-                y: Range { min: y_min, max: y_max },
-                y_transform,
-            },
-            bounds: plot_rect,
+        let domain = Domain {
+            x: Range { min: x_min, max: x_max },
+            y: Range { min: y_min, max: y_max },
+            y_transform,
         };
 
-        // Build a secondary plane when the scene provides secondary axis
+        // Build a secondary domain when the scene provides secondary axis
         // bounds. If not provided but secondary marks exist, fall back to
-        // primary bounds so marks still render.
+        // primary bounds so marks still render. Both domains map into the
+        // shared `plot_rect`.
         let has_secondary_marks = self.axis_side.contains(&AxisSide::Secondary);
-        let secondary_plane = if has_secondary_marks {
+        let secondary_domain = if has_secondary_marks {
             let (sx_min, sx_max, mut sy_min, sy_max) = secondary_axis_bounds.unwrap_or((x_min, x_max, y_min, y_max));
             if matches!(secondary_y_transform, crate::scale::Transform::Log) && sy_min <= 0.0 && sy_max > 0.0 {
                 sy_min = sy_max / 1e4;
             }
-            Some(Plane {
-                domain: Domain {
-                    x: Range {
-                        min: sx_min,
-                        max: sx_max,
-                    },
-                    y: Range {
-                        min: sy_min,
-                        max: sy_max,
-                    },
-                    y_transform: secondary_y_transform,
+            Some(Domain {
+                x: Range {
+                    min: sx_min,
+                    max: sx_max,
                 },
-                bounds: plot_rect,
+                y: Range {
+                    min: sy_min,
+                    max: sy_max,
+                },
+                y_transform: secondary_y_transform,
             })
         } else {
             None
@@ -909,85 +888,86 @@ where
             state.geo_plane = None;
         }
 
-        // Layout each series with its assigned plane. Reborrow the
-        // shared geo plane before the dispatch loop so geo-aware marks
-        // can read it without holding a mutable borrow on `state` —
-        // the post-loop writes to `state.plane` and
-        // `state.secondary_plane` reacquire the mutable borrow once
-        // this scope ends.
+        // Layout each series against its assigned domain, mapped into the
+        // shared `plot_rect`. Reborrow the shared geo plane before the
+        // dispatch loop so geo-aware marks can read it without holding a
+        // mutable borrow on `state` — the post-loop writes to
+        // `state.domain` and `state.secondary_domain` reacquire the mutable
+        // borrow once this scope ends.
         let geo_plane_ref: Option<&geo::Plane> = state.geo_plane.as_ref();
         for (i, series) in self.series.iter().enumerate() {
             let series_tree = &mut tree.children[i];
-            let use_plane: &Plane = match self.axis_side[i] {
-                AxisSide::Primary => &plane,
-                AxisSide::Secondary => secondary_plane.as_ref().unwrap_or(&plane),
+            let use_domain: &Domain = match self.axis_side[i] {
+                AxisSide::Primary => &domain,
+                AxisSide::Secondary => secondary_domain.as_ref().unwrap_or(&domain),
             };
             match series {
                 Series::Area(a) => {
-                    a.layout(series_tree, renderer, limits, use_plane, axis_obstacles);
+                    a.layout(series_tree, renderer, limits, use_domain, plot_rect, axis_obstacles);
                 }
                 Series::Line(line) => {
-                    line.layout(series_tree, renderer, limits, use_plane, axis_obstacles);
+                    line.layout(series_tree, renderer, limits, use_domain, plot_rect, axis_obstacles);
                 }
                 Series::Bars(bars) => {
-                    bars.layout(series_tree, renderer, limits, use_plane);
+                    bars.layout(series_tree, renderer, limits, use_domain, plot_rect);
                 }
                 Series::BoxPlot(bp) => {
-                    bp.layout(series_tree, renderer, limits, use_plane);
+                    bp.layout(series_tree, renderer, limits, use_domain, plot_rect);
                 }
                 Series::Choropleth(c) => {
-                    c.layout(series_tree, renderer, limits, use_plane, geo_plane_ref);
+                    c.layout(series_tree, renderer, limits, use_domain, plot_rect, geo_plane_ref);
                 }
                 Series::Pie(pie) => {
-                    pie.layout(series_tree, renderer, limits, use_plane);
+                    pie.layout(series_tree, renderer, limits, use_domain, plot_rect);
                 }
                 Series::Gauge(gauge) => {
-                    gauge.layout(series_tree, renderer, limits, use_plane);
+                    gauge.layout(series_tree, renderer, limits, use_domain, plot_rect);
                 }
                 Series::Waterfall(wf) => {
-                    wf.layout(series_tree, renderer, limits, use_plane);
+                    wf.layout(series_tree, renderer, limits, use_domain, plot_rect);
                 }
                 Series::Xy(xy) => {
-                    xy.layout(series_tree, renderer, limits, use_plane, geo_plane_ref);
+                    xy.layout(series_tree, renderer, limits, use_domain, plot_rect, geo_plane_ref);
                 }
                 Series::Rule(rule) => {
-                    rule.layout(series_tree, renderer, limits, use_plane);
+                    rule.layout(series_tree, renderer, limits, use_domain, plot_rect);
                 }
                 Series::Band(band) => {
-                    band.layout(series_tree, renderer, limits, use_plane);
+                    band.layout(series_tree, renderer, limits, use_domain, plot_rect);
                 }
                 Series::Tick(tick) => {
-                    tick.layout(series_tree, renderer, limits, use_plane);
+                    tick.layout(series_tree, renderer, limits, use_domain, plot_rect);
                 }
                 Series::Heatmap(hm) => {
-                    hm.layout(series_tree, renderer, limits, use_plane);
+                    hm.layout(series_tree, renderer, limits, use_domain, plot_rect);
                 }
                 Series::Treemap(tm) => {
-                    tm.layout(series_tree, renderer, limits, use_plane);
+                    tm.layout(series_tree, renderer, limits, use_domain, plot_rect);
                 }
                 Series::Violin(v) => {
-                    v.layout(series_tree, renderer, limits, use_plane);
+                    v.layout(series_tree, renderer, limits, use_domain, plot_rect);
                 }
                 Series::Text(t) => {
-                    t.layout(series_tree, renderer, limits, use_plane, geo_plane_ref);
+                    t.layout(series_tree, renderer, limits, use_domain, plot_rect, geo_plane_ref);
                 }
             }
         }
 
-        // Store the planes for draw()
-        state.plane = Some(plane);
-        state.secondary_plane = secondary_plane;
-        // Cache the inset data-mapping rect for the no-Layout hover path.
+        // Store the domains for draw(); cache the shared inset data-mapping
+        // rect for the no-Layout hover path.
+        state.domain = Some(domain);
+        state.secondary_domain = secondary_domain;
         state.content_rect = plot_rect;
 
         Node::with_children(size, vec![content_node(plot_rect)])
     }
 
-    /// Draws major and minor gridlines into the plot area using the stored plane.
+    /// Draws major and minor gridlines into the plot area.
     ///
     /// Called before `draw()` so marks render on top of gridlines. The tick
     /// positions (in data coordinates) come from the axis guides; they are
-    /// converted to pixel positions via the plane.
+    /// converted to pixel positions via the stored [`Domain`] and the cached
+    /// content rect.
     #[allow(clippy::too_many_arguments)]
     pub fn draw_gridlines<D>(
         &self,
@@ -1005,9 +985,14 @@ where
         use crate::widget::canvas::{Frame, Path, Stroke};
 
         let state = tree.state.downcast_ref::<State>();
-        let Some(plane) = state.plane.as_ref() else {
+        let Some(domain) = state.domain.as_ref() else {
             return;
         };
+        // The cached `content_rect` mirrors the content node and equals the
+        // data-mapping region these tick conversions target; reading it here
+        // (rather than descending `layout.children()`) keeps gridlines on the
+        // same rect the marks baked their pixels into.
+        let rect = state.content_rect;
 
         let layout_bounds = layout.bounds();
         let size = layout_bounds.size();
@@ -1030,12 +1015,12 @@ where
 
         let mut frame = Frame::new(renderer, size);
 
-        // Plane bounds are the data-mapping region inside the plot area,
+        // The content rect is the data-mapping region inside the plot area,
         // expressed in plot-area-local pixel coordinates.
-        let top = plane.bounds.y;
-        let bottom = plane.bounds.y + plane.bounds.height;
-        let left = plane.bounds.x;
-        let right = plane.bounds.x + plane.bounds.width;
+        let top = rect.y;
+        let bottom = rect.y + rect.height;
+        let left = rect.x;
+        let right = rect.x + rect.width;
 
         // Pixel-snap a coordinate to the nearest half-pixel row so a 1 px
         // stroke covers exactly one physical pixel (crisp line) and lands
@@ -1068,7 +1053,7 @@ where
                     let step = (t1 - t0) / minor_subdivs as f64;
                     for k in 1..minor_subdivs {
                         let t = t0 + step * k as f64;
-                        let px = plane.to_pixel(crate::data::Datum::new(t, 0.0)).x;
+                        let px = to_pixel(domain, rect, crate::data::Datum::new(t, 0.0)).x;
                         if px >= left && px <= right {
                             let px = snap_h(px);
                             b.move_to(crate::core::Point::new(px, y0));
@@ -1093,7 +1078,7 @@ where
                     let step = (t1 - t0) / minor_subdivs as f64;
                     for k in 1..minor_subdivs {
                         let t = t0 + step * k as f64;
-                        let py = plane.to_pixel(crate::data::Datum::new(0.0, t)).y;
+                        let py = to_pixel(domain, rect, crate::data::Datum::new(0.0, t)).y;
                         if py >= top && py <= bottom {
                             let py = snap_v(py);
                             b.move_to(crate::core::Point::new(x0, py));
@@ -1115,7 +1100,7 @@ where
             let y1 = snap_v(bottom);
             let path = Path::new(|b| {
                 for &t in x_ticks {
-                    let px = plane.to_pixel(crate::data::Datum::new(t, 0.0)).x;
+                    let px = to_pixel(domain, rect, crate::data::Datum::new(t, 0.0)).x;
                     if px >= left && px <= right {
                         let px = snap_h(px);
                         b.move_to(crate::core::Point::new(px, y0));
@@ -1135,7 +1120,7 @@ where
             let x1 = snap_h(right);
             let path = Path::new(|b| {
                 for &t in y_ticks {
-                    let py = plane.to_pixel(crate::data::Datum::new(0.0, t)).y;
+                    let py = to_pixel(domain, rect, crate::data::Datum::new(0.0, t)).y;
                     if py >= top && py <= bottom {
                         let py = snap_v(py);
                         b.move_to(crate::core::Point::new(x0, py));
@@ -1183,9 +1168,14 @@ where
         use crate::widget::canvas::{Frame, Path, Stroke};
 
         let state = tree.state.downcast_ref::<State>();
-        let Some(plane) = state.plane.as_ref() else {
+        let Some(_domain) = state.domain.as_ref() else {
             return;
         };
+        // The cached `content_rect` mirrors the content node and equals the
+        // data extent the border lines bracket; reading it here keeps the
+        // borders coincident with the extreme gridlines (which read the
+        // same rect in `draw_gridlines`).
+        let rect = state.content_rect;
 
         let layout_bounds = layout.bounds();
         let size = layout_bounds.size();
@@ -1217,10 +1207,10 @@ where
             (y.round() + 0.5).clamp(0.5, hi)
         };
 
-        let top = plane.bounds.y;
-        let bottom = plane.bounds.y + plane.bounds.height;
-        let left = plane.bounds.x;
-        let right = plane.bounds.x + plane.bounds.width;
+        let top = rect.y;
+        let bottom = rect.y + rect.height;
+        let left = rect.x;
+        let right = rect.x + rect.width;
 
         // Resolve each border's color lazily so we only pay for it when
         // the side is actually drawn. Colors come from the per-axis

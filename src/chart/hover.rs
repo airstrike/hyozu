@@ -74,8 +74,8 @@ pub(crate) enum Geometry {
     ChoroplethArea {
         /// Index of the `Mark::Choropleth` in the marks list.
         mark_idx: usize,
-        /// Index of the feature within `Plane::projected_polygons` /
-        /// `Plane::filtered_ids`.
+        /// Index of the feature within `geo::Plane::projected_polygons` /
+        /// `geo::Plane::filtered_ids`.
         feature_idx: usize,
     },
 }

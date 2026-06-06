@@ -1,7 +1,7 @@
-use super::Plane;
 use super::line::{
     alignment_for_position, clamp_to_bounds, compute_label_rect, dash_segments, draw_markers, place_label,
 };
+use super::{Domain, to_pixel};
 use crate::animation;
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
@@ -100,13 +100,14 @@ where
         tree: &mut Tree,
         _renderer: &Renderer,
         _limits: &Limits,
-        plane: &Plane,
+        domain: &Domain,
+        rect: Rectangle,
         obstacles: &[Rectangle],
     ) -> Node {
         let state = tree.state.downcast_mut::<State>();
 
-        let zero_y = plane.to_pixel(Datum::ORIGIN).y;
-        state.axis_floor_y = plane.bounds.y + plane.bounds.height;
+        let zero_y = to_pixel(domain, rect, Datum::ORIGIN).y;
+        state.axis_floor_y = rect.y + rect.height;
 
         match self.data.layout {
             crate::mark::area::Layout::Overlaid => {
@@ -114,7 +115,7 @@ where
                     .data
                     .series
                     .iter()
-                    .map(|s| s.points.iter().map(|p| plane.to_pixel(*p)).collect())
+                    .map(|s| s.points.iter().map(|p| to_pixel(domain, rect, *p)).collect())
                     .collect();
 
                 state.series_baselines = self
@@ -125,7 +126,7 @@ where
                         s.points
                             .iter()
                             .map(|p| {
-                                let px = plane.to_pixel(*p);
+                                let px = to_pixel(domain, rect, *p);
                                 Point::new(px.x, zero_y)
                             })
                             .collect()
@@ -154,9 +155,9 @@ where
                             let inc = if point.y.is_finite() { point.y } else { 0.0 };
                             let new_y = base_y + inc;
 
-                            let base_pixel = plane.to_pixel(Datum::new(point.x, base_y));
+                            let base_pixel = to_pixel(domain, rect, Datum::new(point.x, base_y));
                             let upper_pixel = if point.y.is_finite() {
-                                plane.to_pixel(Datum::new(point.x, new_y))
+                                to_pixel(domain, rect, Datum::new(point.x, new_y))
                             } else {
                                 Point::new(base_pixel.x, f32::NAN)
                             };
@@ -276,7 +277,7 @@ where
                     &all_segments,
                     &placed_rects,
                     obstacles,
-                    Some(plane.bounds),
+                    Some(rect),
                 );
 
                 // If the user requested a fixed position, prefer it but still
@@ -302,7 +303,7 @@ where
                 // Guarantee the label stays inside the plot area even at the
                 // first/last data point, where the centered ideal rect would
                 // otherwise bleed past the edge and get clipped.
-                let label_rect = clamp_to_bounds(label_rect, plane.bounds);
+                let label_rect = clamp_to_bounds(label_rect, rect);
 
                 placed_rects.push(label_rect);
                 state.series_label_texts[series_idx].push(label_text);

@@ -1,4 +1,4 @@
-use super::Plane;
+use super::{Domain, to_pixel};
 use crate::animation;
 use crate::core::Size;
 use crate::core::layout::{Limits, Node};
@@ -98,13 +98,14 @@ where
         tree: &mut Tree,
         _renderer: &Renderer,
         _limits: &Limits,
-        plane: &Plane,
+        domain: &Domain,
+        rect: Rectangle,
         obstacles: &[Rectangle],
     ) -> Node {
         let state = tree.state.downcast_mut::<State>();
 
         // Transform all data points to pixel coordinates
-        state.pixel_points = self.data.points.iter().map(|p| plane.to_pixel(*p)).collect();
+        state.pixel_points = self.data.points.iter().map(|p| to_pixel(domain, rect, *p)).collect();
 
         // Build label info if configured
         state.label_texts.clear();
@@ -190,23 +191,17 @@ where
                         &segments,
                         &state.label_rects,
                         obstacles,
-                        Some(plane.bounds),
+                        Some(rect),
                     ),
                     other => {
                         // For fixed positions, use pathfinding too to avoid obstacles
                         let start_rect = compute_label_rect(*pixel_point, label_width, label_height, other);
-                        let rect = search_from_position(
-                            start_rect,
-                            &segments,
-                            &state.label_rects,
-                            obstacles,
-                            Some(plane.bounds),
-                            10,
-                        )
-                        .map(|(rect, _)| rect)
-                        .unwrap_or(start_rect);
+                        let slot_rect =
+                            search_from_position(start_rect, &segments, &state.label_rects, obstacles, Some(rect), 10)
+                                .map(|(slot, _)| slot)
+                                .unwrap_or(start_rect);
                         // Guarantee visibility at edges even if no valid slot exists.
-                        (other, clamp_to_bounds(rect, plane.bounds))
+                        (other, clamp_to_bounds(slot_rect, rect))
                     }
                 };
 

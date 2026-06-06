@@ -678,7 +678,7 @@ where
         let bottom_overflow = (left_width, right_width);
 
         // Min-inset floors from series (data labels).
-        // Vertical axis: (top, bottom) of Plane. Horizontal axis: (left, right).
+        // Vertical axis: (top, bottom) of the content rect. Horizontal axis: (left, right).
         let left_min_inset = (series_insets.top, series_insets.bottom);
         let bottom_min_inset = (series_insets.left, series_insets.right);
 

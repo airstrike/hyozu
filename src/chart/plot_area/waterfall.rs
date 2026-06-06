@@ -1,4 +1,4 @@
-use super::Plane;
+use super::{Domain, to_pixel};
 use crate::animation;
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
@@ -100,7 +100,14 @@ where
     }
 
     /// Layout the waterfall — compute bar positions from running totals
-    pub fn layout(&self, tree: &mut Tree, _renderer: &Renderer, _limits: &Limits, plane: &Plane) -> Node {
+    pub fn layout(
+        &self,
+        tree: &mut Tree,
+        _renderer: &Renderer,
+        _limits: &Limits,
+        domain: &Domain,
+        rect: Rectangle,
+    ) -> Node {
         let state = tree.state.downcast_mut::<State>();
 
         if self.data.entries.is_empty() {
@@ -112,10 +119,10 @@ where
         }
 
         let num_entries = self.data.entries.len();
-        let total_width = plane.bounds.width;
+        let total_width = rect.width;
         let bin_width = total_width / num_entries as f32;
         let bar_width = bin_width * 0.75;
-        let zero_y = plane.to_pixel(Datum::ORIGIN).y;
+        let zero_y = to_pixel(domain, rect, Datum::ORIGIN).y;
 
         let mut running_total: f64 = 0.0;
         state.rects.clear();
@@ -123,7 +130,7 @@ where
         state.tops.clear();
 
         for (i, entry) in self.data.entries.iter().enumerate() {
-            let bar_center_x = plane.to_pixel(Datum::x(i as f64)).x;
+            let bar_center_x = to_pixel(domain, rect, Datum::x(i as f64)).x;
             let x = bar_center_x - bar_width / 2.0;
 
             // Non-finite entry value = gap: don't poison the running total
@@ -144,7 +151,7 @@ where
             match entry.kind {
                 EntryKind::Total => {
                     running_total = entry.value;
-                    let top_y = plane.to_pixel(Datum::new(0.0, entry.value)).y;
+                    let top_y = to_pixel(domain, rect, Datum::new(0.0, entry.value)).y;
                     let height = (zero_y - top_y).abs();
                     let y = top_y.min(zero_y);
 
@@ -159,8 +166,8 @@ where
                 EntryKind::Increase => {
                     let prev_total = running_total;
                     running_total += entry.value;
-                    let bottom_y = plane.to_pixel(Datum::new(0.0, prev_total)).y;
-                    let top_y = plane.to_pixel(Datum::new(0.0, running_total)).y;
+                    let bottom_y = to_pixel(domain, rect, Datum::new(0.0, prev_total)).y;
+                    let top_y = to_pixel(domain, rect, Datum::new(0.0, running_total)).y;
                     let height = (bottom_y - top_y).abs();
                     let y = top_y.min(bottom_y);
 
@@ -175,8 +182,8 @@ where
                 EntryKind::Decrease => {
                     let prev_total = running_total;
                     running_total += entry.value;
-                    let top_y = plane.to_pixel(Datum::new(0.0, prev_total)).y;
-                    let bottom_y = plane.to_pixel(Datum::new(0.0, running_total)).y;
+                    let top_y = to_pixel(domain, rect, Datum::new(0.0, prev_total)).y;
+                    let bottom_y = to_pixel(domain, rect, Datum::new(0.0, running_total)).y;
                     let height = (bottom_y - top_y).abs();
                     let y = top_y.min(bottom_y);
 

@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 
-use super::Plane;
 use super::choropleth::palette_to_continuous_stops;
+use super::{Domain, to_pixel};
 use crate::animation;
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
@@ -152,7 +152,14 @@ where
     /// data-derived value range. Per-cell fill colors are theme-dependent
     /// and resolve in [`Self::draw`] so a seed-based palette renders with
     /// the active theme's hues.
-    pub fn layout(&self, tree: &mut Tree, _renderer: &Renderer, _limits: &Limits, plane: &Plane) -> Node {
+    pub fn layout(
+        &self,
+        tree: &mut Tree,
+        _renderer: &Renderer,
+        _limits: &Limits,
+        domain: &Domain,
+        rect: Rectangle,
+    ) -> Node {
         let state = tree.state.downcast_mut::<State>();
         state.cell_rects.clear();
 
@@ -168,12 +175,12 @@ where
             return Node::new(Size::ZERO);
         }
 
-        let cell_width = plane.bounds.width / cols as f32;
-        let cell_height = plane.bounds.height / rows as f32;
+        let cell_width = rect.width / cols as f32;
+        let cell_height = rect.height / rows as f32;
 
         for row in 0..rows {
             for col in 0..cols {
-                let center = plane.to_pixel(Datum::new(col as f64, row as f64));
+                let center = to_pixel(domain, rect, Datum::new(col as f64, row as f64));
 
                 state.cell_rects.push(Rectangle {
                     x: center.x - cell_width / 2.0,

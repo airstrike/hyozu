@@ -276,7 +276,7 @@ where
     }
 }
 
-/// Compute the absolute plot bounds from chart bounds, padding, and plane.
+/// Compute the absolute plot bounds from chart bounds, padding, and the content rect.
 fn compute_plot_bounds(
     chart_bounds: Rectangle,
     padding: Padding,
@@ -302,7 +302,8 @@ fn find_nearest_hover<Message>(
     local: Point,
     plot_area_tree: &Tree,
     plot_area: &plot_area::PlotArea<'_, Message, Renderer>,
-    plane: &plot_area::Plane,
+    domain: &plot_area::Domain,
+    content_rect: Rectangle,
     geo_plane: Option<&plot_area::geo::Plane>,
 ) -> Option<hover::Geometry> {
     if let Some(pie_hover) = find_pie_hover(local, plot_area_tree) {
@@ -316,7 +317,7 @@ fn find_nearest_hover<Message>(
     {
         return Some(choropleth_hover);
     }
-    find_nearest_cartesian_hover(local, plot_area_tree, plot_area, plane)
+    find_nearest_cartesian_hover(local, plot_area_tree, plot_area, domain, content_rect)
 }
 
 /// Scan Cartesian (line/area/xy/bars) marks for the nearest pixel x,
@@ -331,7 +332,8 @@ fn find_nearest_cartesian_hover<Message>(
     local: Point,
     plot_area_tree: &Tree,
     plot_area: &plot_area::PlotArea<'_, Message, Renderer>,
-    plane: &plot_area::Plane,
+    domain: &plot_area::Domain,
+    content_rect: Rectangle,
 ) -> Option<hover::Geometry> {
     let line_tag = tree::Tag::of::<plot_area::line::State>();
     let area_tag = tree::Tag::of::<plot_area::area::State>();
@@ -448,7 +450,11 @@ fn find_nearest_cartesian_hover<Message>(
     // `data_x` drives the tracking line (continuous marks only) and hover-
     // change detection. For horizontal bars the snap is along Y, so there is
     // no meaningful data-x; entries discriminate the hovered row.
-    let data_x = if horizontal { 0.0 } else { plane.to_data_x(best_primary) };
+    let data_x = if horizontal {
+        0.0
+    } else {
+        plot_area::to_data_x(domain, content_rect, best_primary)
+    };
 
     // Pass 2: collect all entries at that primary coordinate (within tolerance).
     let tolerance = 0.5f32;
@@ -948,7 +954,7 @@ where
 ///
 /// Walks every `Series::Choropleth` and runs
 /// [`plot_area::geo::hit_test`] against the chart-level
-/// [`plot_area::Plane`] (which holds the projected rings + bboxes
+/// [`plot_area::geo::Plane`] (which holds the projected rings + bboxes
 /// shared across geo-aware marks). Returns `None` when the cursor is
 /// over no polygon — the caller falls through to the cartesian snap.
 ///
@@ -1412,9 +1418,9 @@ fn layout_donut_center<Message, Theme>(
 ) -> layout::Node {
     let plot_area_tree = &scene_tree.children[6];
     let plot_area_state = plot_area_tree.state.downcast_ref::<plot_area::State>();
-    let Some(_plane) = &plot_area_state.plane else {
+    if plot_area_state.domain.is_none() {
         return layout::Node::new(Size::ZERO);
-    };
+    }
     let content_rect = plot_area_state.content_rect;
 
     let pie_tag = tree::Tag::of::<plot_area::pie::State>();
@@ -1655,15 +1661,11 @@ where
         let plot_area_offset = self.scene.plot_area_offset();
         let scene_tree = &tree.children[0];
         let plot_area_state = scene_tree.children[6].state.downcast_ref::<plot_area::State>();
-        let Some(plane) = &plot_area_state.plane else {
+        let Some(domain) = &plot_area_state.domain else {
             return;
         };
-        let plot_bounds = compute_plot_bounds(
-            chart_bounds,
-            self.padding,
-            plot_area_offset,
-            plot_area_state.content_rect,
-        );
+        let content_rect = plot_area_state.content_rect;
+        let plot_bounds = compute_plot_bounds(chart_bounds, self.padding, plot_area_offset, content_rect);
 
         match event {
             // === HOVER HANDLING ===
@@ -1674,7 +1676,8 @@ where
                         Point::new(local.x, local.y),
                         plot_area_tree,
                         self.scene.plot_area(),
-                        plane,
+                        domain,
+                        content_rect,
                         plot_area_state.geo_plane.as_ref(),
                     );
 
@@ -1936,14 +1939,15 @@ where
         {
             let scene_tree = &tree.children[0];
             let plot_area_state = scene_tree.children[6].state.downcast_ref::<plot_area::State>();
-            if let Some(plane) = &plot_area_state.plane {
+            if let Some(domain) = &plot_area_state.domain {
                 draw_tooltip_overlay(
                     renderer,
                     design,
                     layout.bounds(),
                     self.padding,
                     self.scene.plot_area_offset(),
-                    plane,
+                    domain,
+                    plot_area_state.content_rect,
                     hover,
                     tooltip_config,
                     &self.scene,
@@ -1976,7 +1980,7 @@ where
             let plot_area_offset = self.scene.plot_area_offset();
             let scene_tree = &tree.children[0];
             let plot_area_state = scene_tree.children[6].state.downcast_ref::<plot_area::State>();
-            if plot_area_state.plane.is_some() {
+            if plot_area_state.domain.is_some() {
                 let plot_bounds = compute_plot_bounds(
                     chart_bounds,
                     self.padding,
@@ -2163,7 +2167,8 @@ fn draw_tooltip_overlay<Message>(
     chart_bounds: Rectangle,
     padding: Padding,
     plot_area_offset: Point,
-    plane: &plot_area::Plane,
+    domain: &plot_area::Domain,
+    content_rect: Rectangle,
     hover: &hover::Geometry,
     tooltip_config: &crate::data::tooltip::Tooltip,
     scene: &scene::Scene<'_, Message, Renderer>,
@@ -2184,7 +2189,8 @@ fn draw_tooltip_overlay<Message>(
             chart_bounds,
             padding,
             plot_area_offset,
-            plane,
+            domain,
+            content_rect,
             *data_x,
             entries,
             tooltip_config,
@@ -2199,7 +2205,8 @@ fn draw_tooltip_overlay<Message>(
             chart_bounds,
             padding,
             plot_area_offset,
-            plane,
+            domain,
+            content_rect,
             *mark_idx,
             *slice_idx,
             tooltip_config,
@@ -2216,7 +2223,8 @@ fn draw_tooltip_overlay<Message>(
             chart_bounds,
             padding,
             plot_area_offset,
-            plane,
+            domain,
+            content_rect,
             *mark_idx,
             *point_idx,
             tooltip_config,
@@ -2231,7 +2239,8 @@ fn draw_tooltip_overlay<Message>(
             chart_bounds,
             padding,
             plot_area_offset,
-            plane,
+            domain,
+            content_rect,
             *mark_idx,
             *feature_idx,
             tooltip_config,
@@ -2268,7 +2277,8 @@ fn draw_cartesian_tooltip_overlay<Message>(
     chart_bounds: Rectangle,
     padding: Padding,
     plot_area_offset: Point,
-    plane: &plot_area::Plane,
+    domain: &plot_area::Domain,
+    content_rect: Rectangle,
     data_x: f64,
     cartesian_entries: &[(usize, usize, usize)],
     tooltip_config: &crate::data::tooltip::Tooltip,
@@ -2281,7 +2291,7 @@ fn draw_cartesian_tooltip_overlay<Message>(
     use crate::widget::canvas::{Frame, Path, Stroke};
     use crate::widget::renderer::geometry;
 
-    let plot_bounds = compute_plot_bounds(chart_bounds, padding, plot_area_offset, plane.bounds);
+    let plot_bounds = compute_plot_bounds(chart_bounds, padding, plot_area_offset, content_rect);
     let plot_area = scene.plot_area();
     let plot_area_tree = &scene_tree.children[6];
 
@@ -2300,12 +2310,12 @@ fn draw_cartesian_tooltip_overlay<Message>(
 
     // Compute the tracking pixel x from data_x
     let tracking_pixel_x = {
-        let t = if plane.domain.x.max > plane.domain.x.min {
-            ((data_x - plane.domain.x.min) / (plane.domain.x.max - plane.domain.x.min)) as f32
+        let t = if domain.x.max > domain.x.min {
+            ((data_x - domain.x.min) / (domain.x.max - domain.x.min)) as f32
         } else {
             0.5
         };
-        plane.bounds.x + t * plane.bounds.width
+        content_rect.x + t * content_rect.width
     };
 
     // Build tooltip entries and collect pixel positions
@@ -2419,7 +2429,9 @@ fn draw_cartesian_tooltip_overlay<Message>(
                             Point::new(rect.x + rect.width / 2.0, rect.y)
                         }
                     })
-                    .unwrap_or_else(|| plane.to_pixel(crate::data::Datum { x: pt.x, y: pt.y }));
+                    .unwrap_or_else(|| {
+                        plot_area::to_pixel(domain, content_rect, crate::data::Datum { x: pt.x, y: pt.y })
+                    });
 
                 // Resolve the bar's displayed color via the full priority
                 // chain (point_colors > color_by > series.color > palette)
@@ -2495,23 +2507,23 @@ fn draw_cartesian_tooltip_overlay<Message>(
     let mean_x: f32 = entries.iter().map(|re| re.anchor.x).sum::<f32>() / entries.len() as f32;
     let mean_y: f32 = entries.iter().map(|re| re.anchor.y).sum::<f32>() / entries.len() as f32;
     let anchor_x = if has_discrete && !has_continuous {
-        plot_bounds.x + mean_x - plane.bounds.x
+        plot_bounds.x + mean_x - content_rect.x
     } else {
-        plot_bounds.x + tracking_pixel_x - plane.bounds.x
+        plot_bounds.x + tracking_pixel_x - content_rect.x
     };
-    let anchor_y = plot_bounds.y + mean_y - plane.bounds.y;
+    let anchor_y = plot_bounds.y + mean_y - content_rect.y;
     let draw_tracking_line = tooltip_config.tracking_line && has_continuous && !has_discrete;
     if draw_tracking_line || tooltip_config.markers {
         renderer.with_layer(*viewport, |renderer| {
             // --- Draw tracking line and markers via canvas Frame ---
-            let frame_size = crate::core::Size::new(plane.bounds.width, plane.bounds.height);
+            let frame_size = crate::core::Size::new(content_rect.width, content_rect.height);
             let mut frame = Frame::new(renderer, frame_size);
 
             // Tracking line — only for continuous marks (line/area/xy), not discrete (bars)
             if draw_tracking_line {
-                let line_x = tracking_pixel_x - plane.bounds.x;
+                let line_x = tracking_pixel_x - content_rect.x;
                 let tracking_color = crate::core::Color { a: 0.18, ..text_color };
-                let path = Path::line(Point::new(line_x, 0.0), Point::new(line_x, plane.bounds.height));
+                let path = Path::line(Point::new(line_x, 0.0), Point::new(line_x, content_rect.height));
                 let dash_pattern: [f32; 2] = [4.0, 3.0];
                 let stroke = Stroke {
                     line_dash: crate::widget::canvas::LineDash {
@@ -2530,8 +2542,8 @@ fn draw_cartesian_tooltip_overlay<Message>(
                 for re in &entries {
                     match &re.highlight {
                         hover::Highlight::PointMarker { pixel, radius } => {
-                            let cx = pixel.x - plane.bounds.x;
-                            let cy = pixel.y - plane.bounds.y;
+                            let cx = pixel.x - content_rect.x;
+                            let cy = pixel.y - content_rect.y;
 
                             let circle = Path::circle(Point::new(cx, cy), *radius);
                             frame.fill(&circle, re.color);
@@ -2558,7 +2570,7 @@ fn draw_cartesian_tooltip_overlay<Message>(
     if draw_box {
         // Flip the box inward only when it would run past the plot's right
         // edge, so a bar tip with room to its right keeps the tooltip outside.
-        let right_limit_x = plot_bounds.x + plane.bounds.width;
+        let right_limit_x = plot_bounds.x + content_rect.width;
         renderer.with_layer(*viewport, |renderer| {
             draw_tooltip_box(
                 renderer,
@@ -2589,7 +2601,8 @@ fn draw_pie_tooltip_overlay<Message>(
     chart_bounds: Rectangle,
     padding: Padding,
     plot_area_offset: Point,
-    plane: &plot_area::Plane,
+    _domain: &plot_area::Domain,
+    content_rect: Rectangle,
     mark_idx: usize,
     slice_idx: usize,
     tooltip_config: &crate::data::tooltip::Tooltip,
@@ -2640,7 +2653,7 @@ fn draw_pie_tooltip_overlay<Message>(
     let Some(cursor_pos) = cursor.position() else {
         return;
     };
-    let plot_bounds = compute_plot_bounds(chart_bounds, padding, plot_area_offset, plane.bounds);
+    let plot_bounds = compute_plot_bounds(chart_bounds, padding, plot_area_offset, content_rect);
     let right_limit_x = plot_bounds.x + plot_bounds.width;
 
     let entry = hover::Row {
@@ -2700,7 +2713,7 @@ fn draw_pie_tooltip_overlay<Message>(
             corner,
         );
         renderer.with_layer(*viewport, |renderer| {
-            let frame_size = crate::core::Size::new(plane.bounds.width, plane.bounds.height);
+            let frame_size = crate::core::Size::new(content_rect.width, content_rect.height);
             let mut frame = Frame::new(renderer, frame_size);
             frame.stroke(
                 &path,
@@ -2754,7 +2767,8 @@ fn draw_geo_tooltip_overlay<Message>(
     chart_bounds: Rectangle,
     padding: Padding,
     plot_area_offset: Point,
-    plane: &plot_area::Plane,
+    _domain: &plot_area::Domain,
+    content_rect: Rectangle,
     mark_idx: usize,
     point_idx: usize,
     tooltip_config: &crate::data::tooltip::Tooltip,
@@ -2841,10 +2855,10 @@ fn draw_geo_tooltip_overlay<Message>(
         tooltip_config
     };
 
-    let plot_bounds = compute_plot_bounds(chart_bounds, padding, plot_area_offset, plane.bounds);
+    let plot_bounds = compute_plot_bounds(chart_bounds, padding, plot_area_offset, content_rect);
     let anchor_abs = Point::new(
-        plot_bounds.x + pixel.x - plane.bounds.x,
-        plot_bounds.y + pixel.y - plane.bounds.y,
+        plot_bounds.x + pixel.x - content_rect.x,
+        plot_bounds.y + pixel.y - content_rect.y,
     );
     // Place the box on the side of the bubble that points away from the
     // closest chart edge, with its near edge sitting `radius + 8px` past
@@ -2885,7 +2899,7 @@ fn draw_geo_tooltip_overlay<Message>(
         renderer.with_layer(*viewport, |renderer| {
             // Ring around the hovered bubble. Drawn on a frame translated
             // to the plot bounds so coordinates match the cartesian path.
-            let frame_size = crate::core::Size::new(plane.bounds.width, plane.bounds.height);
+            let frame_size = crate::core::Size::new(content_rect.width, content_rect.height);
             let mut frame = Frame::new(renderer, frame_size);
             for re in &entries {
                 match &re.highlight {
@@ -2895,8 +2909,8 @@ fn draw_geo_tooltip_overlay<Message>(
                         color,
                         width,
                     } => {
-                        let cx = pixel.x - plane.bounds.x;
-                        let cy = pixel.y - plane.bounds.y;
+                        let cx = pixel.x - content_rect.x;
+                        let cy = pixel.y - content_rect.y;
                         let path = Path::circle(Point::new(cx, cy), *radius);
                         frame.stroke(&path, Stroke::default().with_width(*width).with_color(*color));
                     }
@@ -2943,7 +2957,8 @@ fn draw_choropleth_tooltip_overlay<Message>(
     chart_bounds: Rectangle,
     padding: Padding,
     plot_area_offset: Point,
-    plane: &plot_area::Plane,
+    _domain: &plot_area::Domain,
+    content_rect: Rectangle,
     mark_idx: usize,
     feature_idx: usize,
     tooltip_config: &crate::data::tooltip::Tooltip,
@@ -3032,7 +3047,7 @@ fn draw_choropleth_tooltip_overlay<Message>(
     let Some(cursor_pos) = cursor.position() else {
         return;
     };
-    let plot_bounds = compute_plot_bounds(chart_bounds, padding, plot_area_offset, plane.bounds);
+    let plot_bounds = compute_plot_bounds(chart_bounds, padding, plot_area_offset, content_rect);
     let right_limit_x = plot_bounds.x + plot_bounds.width;
 
     let entry = hover::Row {
@@ -3089,7 +3104,7 @@ fn draw_choropleth_tooltip_overlay<Message>(
 
     if tooltip_config.markers {
         renderer.with_layer(*viewport, |renderer| {
-            let frame_size = crate::core::Size::new(plane.bounds.width, plane.bounds.height);
+            let frame_size = crate::core::Size::new(content_rect.width, content_rect.height);
             let mut frame = Frame::new(renderer, frame_size);
             for re in &entries {
                 if let hover::Highlight::Stroke { rings, color, width } = &re.highlight {
@@ -3099,9 +3114,9 @@ fn draw_choropleth_tooltip_overlay<Message>(
                         }
                         let path = Path::new(|builder| {
                             let (x0, y0) = ring[0];
-                            builder.move_to(Point::new(x0 - plane.bounds.x, y0 - plane.bounds.y));
+                            builder.move_to(Point::new(x0 - content_rect.x, y0 - content_rect.y));
                             for &(x, y) in &ring[1..] {
-                                builder.line_to(Point::new(x - plane.bounds.x, y - plane.bounds.y));
+                                builder.line_to(Point::new(x - content_rect.x, y - content_rect.y));
                             }
                             builder.close();
                         });

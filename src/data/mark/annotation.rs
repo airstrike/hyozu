@@ -78,7 +78,7 @@
 //! # Interaction with other marks
 //!
 //! Annotations render **above** all other marks (bars, lines, areas) but below
-//! tooltips. They participate in the chart's `Plane` coordinate system and
+//! tooltips. They participate in the chart's data-to-pixel coordinate mapping and
 //! respect axis bounds — annotations outside the visible range are clipped.
 //!
 //! Annotations do not contribute to axis bounds calculation. If an annotation's

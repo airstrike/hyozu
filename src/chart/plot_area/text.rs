@@ -8,7 +8,7 @@
 //! still reads correctly because labels sit at their final positions
 //! while the bubbles sweep underneath.
 
-use super::{Plane, geo};
+use super::{Domain, geo, to_pixel};
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
 use crate::core::{Point, Size};
@@ -75,7 +75,8 @@ where
         tree: &mut Tree,
         _renderer: &Renderer,
         _limits: &Limits,
-        plane: &Plane,
+        domain: &Domain,
+        rect: crate::core::Rectangle,
         geo_plane: Option<&geo::Plane>,
     ) -> Node {
         let state = tree.state.downcast_mut::<State>();
@@ -92,7 +93,7 @@ where
                 .items
                 .iter()
                 .map(|item| {
-                    let p = plane.to_pixel(item.datum);
+                    let p = to_pixel(domain, rect, item.datum);
                     let (dx, dy) = offset_for(item);
                     Point::new(p.x + dx, p.y + dy)
                 })

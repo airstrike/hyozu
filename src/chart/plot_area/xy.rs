@@ -1,4 +1,4 @@
-use super::{Plane, geo};
+use super::{Domain, geo, to_pixel};
 use crate::animation;
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
@@ -102,13 +102,14 @@ where
         tree: &mut Tree,
         _renderer: &Renderer,
         _limits: &Limits,
-        plane: &Plane,
+        domain: &Domain,
+        rect: crate::core::Rectangle,
         geo_plane: Option<&geo::Plane>,
     ) -> Node {
         let state = tree.state.downcast_mut::<State>();
 
         state.pixel_points = match self.data.coord_kind {
-            CoordKind::Cartesian => self.data.points.iter().map(|p| plane.to_pixel(*p)).collect(),
+            CoordKind::Cartesian => self.data.points.iter().map(|p| to_pixel(domain, rect, *p)).collect(),
             CoordKind::Geo => match geo_plane {
                 Some(plane) => self
                     .data
