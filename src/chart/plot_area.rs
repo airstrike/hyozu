@@ -180,7 +180,7 @@ impl Plane {
 pub enum Series<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: crate::core::text::Renderer + geometry::Renderer,
+    Renderer: crate::core::text::Renderer<Font = crate::core::Font> + geometry::Renderer,
 {
     Area(area::Area<'a, Message, Renderer>),
     Line(Line<'a, Message, Renderer>),
@@ -238,7 +238,7 @@ pub struct State {
 pub struct PlotArea<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: crate::core::text::Renderer + geometry::Renderer,
+    Renderer: crate::core::text::Renderer<Font = crate::core::Font> + geometry::Renderer,
 {
     pub(crate) series: Vec<Series<'a, Message, Renderer>>,
     /// Which axis pair each series in `series` is plotted against.
@@ -248,7 +248,7 @@ where
 impl<'a, Message, Renderer> PlotArea<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: crate::core::text::Renderer + geometry::Renderer,
+    Renderer: crate::core::text::Renderer<Font = crate::core::Font> + geometry::Renderer,
 {
     /// Create a new PlotArea from mark data (primary axis).
     pub fn new(marks: &'a [crate::Mark]) -> Self {
@@ -432,7 +432,7 @@ where
                 let expected_tag = match series {
                     Series::Area(_) => tree::Tag::of::<area::State>(),
                     Series::Line(_) => tree::Tag::of::<line::State>(),
-                    Series::Bars(_) => tree::Tag::of::<bars::State>(),
+                    Series::Bars(_) => tree::Tag::of::<bars::State<Renderer::Paragraph>>(),
                     Series::BoxPlot(_) => tree::Tag::of::<boxplot::State>(),
                     Series::Choropleth(_) => tree::Tag::of::<choropleth::State>(),
                     Series::Pie(_) => tree::Tag::of::<pie::State>(),

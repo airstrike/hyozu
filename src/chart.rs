@@ -336,7 +336,7 @@ fn find_nearest_cartesian_hover<Message>(
     let line_tag = tree::Tag::of::<plot_area::line::State>();
     let area_tag = tree::Tag::of::<plot_area::area::State>();
     let xy_tag = tree::Tag::of::<plot_area::xy::State>();
-    let bars_tag = tree::Tag::of::<plot_area::bars::State>();
+    let bars_tag = tree::Tag::of::<plot_area::bars::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
 
     let is_geo_xy = |mark_idx: usize| {
         matches!(
@@ -417,7 +417,9 @@ fn find_nearest_cartesian_hover<Message>(
                 }
             }
         } else if child.tag == bars_tag {
-            let s = child.state.downcast_ref::<plot_area::bars::State>();
+            let s = child
+                .state
+                .downcast_ref::<plot_area::bars::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
             for rects in &s.series_rects {
                 for rect in rects {
                     if !rect_finite(rect) {
@@ -495,7 +497,9 @@ fn find_nearest_cartesian_hover<Message>(
                 }
             }
         } else if child.tag == bars_tag {
-            let s = child.state.downcast_ref::<plot_area::bars::State>();
+            let s = child
+                .state
+                .downcast_ref::<plot_area::bars::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
             for (ser_idx, rects) in s.series_rects.iter().enumerate() {
                 for (bar_idx, rect) in rects.iter().enumerate() {
                     if !rect_finite(rect) {
@@ -989,8 +993,13 @@ fn animation_tick_mut(tree: &mut Tree) -> Option<&mut animation::Tick> {
     if tag == tree::Tag::of::<plot_area::pie::State>() {
         return Some(&mut tree.state.downcast_mut::<plot_area::pie::State>().tick);
     }
-    if tag == tree::Tag::of::<plot_area::bars::State>() {
-        return Some(&mut tree.state.downcast_mut::<plot_area::bars::State>().tick);
+    if tag == tree::Tag::of::<plot_area::bars::State<<Renderer as crate::core::text::Renderer>::Paragraph>>() {
+        return Some(
+            &mut tree
+                .state
+                .downcast_mut::<plot_area::bars::State<<Renderer as crate::core::text::Renderer>::Paragraph>>()
+                .tick,
+        );
     }
     if tag == tree::Tag::of::<plot_area::waterfall::State>() {
         return Some(&mut tree.state.downcast_mut::<plot_area::waterfall::State>().tick);
@@ -1048,8 +1057,12 @@ fn replant_pie(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
 /// redraw to interpolate from there. The caller is responsible for
 /// confirming both nodes carry a `bars::State`.
 fn replant_bars(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
-    let old_state = old_mark.state.downcast_ref::<plot_area::bars::State>();
-    let new_state = new_mark.state.downcast_mut::<plot_area::bars::State>();
+    let old_state = old_mark
+        .state
+        .downcast_ref::<plot_area::bars::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
+    let new_state = new_mark
+        .state
+        .downcast_mut::<plot_area::bars::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
     if animate {
         new_state.previous_series_rects = old_state.series_rects.clone();
         new_state.tick.pending_start = true;
@@ -1241,7 +1254,7 @@ fn replant_violin(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
 /// either tree lacks a plot area.
 fn replant_mark_animations(old_children: &[Tree], new_children: &mut [Tree], animate: bool) {
     let pie_tag = tree::Tag::of::<plot_area::pie::State>();
-    let bars_tag = tree::Tag::of::<plot_area::bars::State>();
+    let bars_tag = tree::Tag::of::<plot_area::bars::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
     let waterfall_tag = tree::Tag::of::<plot_area::waterfall::State>();
     let line_tag = tree::Tag::of::<plot_area::line::State>();
     let area_tag = tree::Tag::of::<plot_area::area::State>();
@@ -1716,7 +1729,8 @@ where
 
                     // Hit-test against bar/pie elements in the tree
                     let plot_area_tree = &scene_tree.children[6];
-                    let bars_tag = tree::Tag::of::<plot_area::bars::State>();
+                    let bars_tag =
+                        tree::Tag::of::<plot_area::bars::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
                     let pie_tag = tree::Tag::of::<plot_area::pie::State>();
                     let treemap_tag = tree::Tag::of::<plot_area::treemap::State>();
                     let choropleth_tag = tree::Tag::of::<plot_area::choropleth::State>();
@@ -1724,7 +1738,7 @@ where
                     // First pass: hit-test labels (labels win when overlapping shapes)
                     for (mark_idx, mark_tree) in plot_area_tree.children.iter().enumerate() {
                         if mark_tree.tag == bars_tag {
-                            let bars_state = mark_tree.state.downcast_ref::<plot_area::bars::State>();
+                            let bars_state = mark_tree.state.downcast_ref::<plot_area::bars::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
 
                             for (series_idx, label_rects) in bars_state.label_rects.iter().enumerate() {
                                 for (label_idx, maybe_rect) in label_rects.iter().enumerate() {
@@ -1766,7 +1780,7 @@ where
                     // Second pass: hit-test shapes
                     for (mark_idx, mark_tree) in plot_area_tree.children.iter().enumerate() {
                         if mark_tree.tag == bars_tag {
-                            let bars_state = mark_tree.state.downcast_ref::<plot_area::bars::State>();
+                            let bars_state = mark_tree.state.downcast_ref::<plot_area::bars::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
 
                             for (series_idx, rects) in bars_state.series_rects.iter().enumerate() {
                                 for (bar_idx, rect) in rects.iter().enumerate() {
@@ -2298,7 +2312,7 @@ fn draw_cartesian_tooltip_overlay<Message>(
     let line_tag = tree::Tag::of::<plot_area::line::State>();
     let area_tag = tree::Tag::of::<plot_area::area::State>();
     let xy_tag = tree::Tag::of::<plot_area::xy::State>();
-    let bars_tag = tree::Tag::of::<plot_area::bars::State>();
+    let bars_tag = tree::Tag::of::<plot_area::bars::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
 
     let mut entries: Vec<hover::Row> = Vec::new();
 
@@ -2389,7 +2403,9 @@ fn draw_cartesian_tooltip_overlay<Message>(
                 let Some(pt) = bar_series.points.get(pt_idx) else {
                     continue;
                 };
-                let bars_state = child.state.downcast_ref::<plot_area::bars::State>();
+                let bars_state = child
+                    .state
+                    .downcast_ref::<plot_area::bars::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
                 let anchor = bars_state
                     .series_rects
                     .get(series_idx)
