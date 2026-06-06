@@ -549,6 +549,7 @@ where
                     &lim(available.width, remaining_h),
                     (0.0, 0.0),
                     (0.0, 0.0),
+                    design,
                 );
                 node.size().height
             } else {
@@ -563,6 +564,7 @@ where
                     &lim(available.width, vertical),
                     (0.0, 0.0),
                     (0.0, 0.0),
+                    design,
                 );
                 node.size().width
             } else {
@@ -589,6 +591,7 @@ where
                     &lim(available.width, remaining_h),
                     (0.0, 0.0),
                     (0.0, 0.0),
+                    design,
                 );
                 node.size().height
             } else {
@@ -603,6 +606,7 @@ where
                     &lim(available.width, vertical),
                     (0.0, 0.0),
                     (0.0, 0.0),
+                    design,
                 );
                 node.size().width
             } else {
@@ -690,6 +694,7 @@ where
                 &lim(available.width, plot_height),
                 left_overflow,
                 left_min_inset,
+                design,
             )
         });
 
@@ -700,6 +705,7 @@ where
                 &lim(plot_width, remaining_height),
                 bottom_overflow,
                 bottom_min_inset,
+                design,
             )
         });
 
@@ -711,6 +717,7 @@ where
                 &lim(plot_width, remaining_height),
                 bottom_overflow,
                 bottom_min_inset,
+                design,
             )
         });
 
@@ -721,6 +728,7 @@ where
                 &lim(available.width, plot_height),
                 left_overflow,
                 left_min_inset,
+                design,
             )
         });
 

@@ -1118,6 +1118,7 @@ where
         limits: &Limits,
         overflow: (f32, f32),
         min_inset: (f32, f32),
+        design: Option<&dyn crate::design::Design>,
     ) -> Node {
         // Compute bounds first, then generate ticks within those bounds.
         // The target tick count scales with the axis's pixel extent along
@@ -1164,6 +1165,7 @@ where
                 max_value,
                 overflow,
                 min_inset,
+                design,
             ),
             Orientation::Bottom | Orientation::Top => self.layout_horizontal(
                 state,
@@ -1175,6 +1177,7 @@ where
                 max_value,
                 overflow,
                 min_inset,
+                design,
             ),
         }
     }
@@ -1192,6 +1195,7 @@ where
         max_value: f64,
         overflow: (f32, f32),
         min_inset: (f32, f32),
+        design: Option<&dyn crate::design::Design>,
     ) -> Node {
         // Use cached label info from state
         let label_data = &state.label_info;
@@ -1207,9 +1211,13 @@ where
         let mut max_label_width = 0.0f32;
 
         // First pass: measure all labels
+        let base_font = design
+            .map(|d| d.axis_text().resolved_font(renderer.default_font()))
+            .unwrap_or_else(|| renderer.default_font());
+        let base_size = design.and_then(|d| d.axis_text().size).map(|p| p.0).unwrap_or(12.0);
         let axis_text = self.axis.labels.text.or(self.axis.text());
-        let label_font = axis_text.resolved_font(renderer.default_font());
-        let label_size_px: crate::core::Pixels = axis_text.resolved_size(12.0).into();
+        let label_font = axis_text.resolved_font(base_font);
+        let label_size_px: crate::core::Pixels = axis_text.resolved_size(base_size).into();
         for (i, (_pos, label)) in label_data.iter().enumerate() {
             let paragraph = &mut state.labels[i];
 
@@ -1325,6 +1333,7 @@ where
         max_value: f64,
         overflow: (f32, f32),
         min_inset: (f32, f32),
+        design: Option<&dyn crate::design::Design>,
     ) -> Node {
         // Use cached label info from state
         let label_data = &state.label_info;
@@ -1381,9 +1390,13 @@ where
         // shrinks to intrinsic (the bound is an upper limit). If intrinsic >
         // column_width, the paragraph either wraps or ellipsizes at
         // column_width.
+        let base_font = design
+            .map(|d| d.axis_text().resolved_font(renderer.default_font()))
+            .unwrap_or_else(|| renderer.default_font());
+        let base_size = design.and_then(|d| d.axis_text().size).map(|p| p.0).unwrap_or(12.0);
         let axis_text = self.axis.labels.text.or(self.axis.text());
-        let label_font = axis_text.resolved_font(renderer.default_font());
-        let label_size_px: crate::core::Pixels = axis_text.resolved_size(12.0).into();
+        let label_font = axis_text.resolved_font(base_font);
+        let label_size_px: crate::core::Pixels = axis_text.resolved_size(base_size).into();
         for (i, (_pos, label)) in label_data.iter().enumerate() {
             let paragraph = &mut state.labels[i];
 
