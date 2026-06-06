@@ -281,13 +281,13 @@ fn compute_plot_bounds(
     chart_bounds: Rectangle,
     padding: Padding,
     plot_area_offset: Point,
-    plane: &plot_area::Plane,
+    content_rect: Rectangle,
 ) -> Rectangle {
     Rectangle {
-        x: chart_bounds.x + padding.left + plot_area_offset.x + plane.bounds.x,
-        y: chart_bounds.y + padding.top + plot_area_offset.y + plane.bounds.y,
-        width: plane.bounds.width,
-        height: plane.bounds.height,
+        x: chart_bounds.x + padding.left + plot_area_offset.x + content_rect.x,
+        y: chart_bounds.y + padding.top + plot_area_offset.y + content_rect.y,
+        width: content_rect.width,
+        height: content_rect.height,
     }
 }
 
@@ -1399,9 +1399,10 @@ fn layout_donut_center<Message, Theme>(
 ) -> layout::Node {
     let plot_area_tree = &scene_tree.children[6];
     let plot_area_state = plot_area_tree.state.downcast_ref::<plot_area::State>();
-    let Some(plane) = &plot_area_state.plane else {
+    let Some(_plane) = &plot_area_state.plane else {
         return layout::Node::new(Size::ZERO);
     };
+    let content_rect = plot_area_state.content_rect;
 
     let pie_tag = tree::Tag::of::<plot_area::pie::State>();
     let Some(pie_tree) = plot_area_tree.children.iter().find(|t| t.tag == pie_tag) else {
@@ -1414,12 +1415,12 @@ fn layout_donut_center<Message, Theme>(
     // `compute_plot_bounds`'s offset chain so the overlay aligns with
     // the same rectangle hover/click hit-tests against.
     let plane_origin = Point::new(
-        padding.left + plot_area_offset.x + plane.bounds.x,
-        padding.top + plot_area_offset.y + plane.bounds.y,
+        padding.left + plot_area_offset.x + content_rect.x,
+        padding.top + plot_area_offset.y + content_rect.y,
     );
 
     let (origin, area_size) = match placement {
-        donut::Placement::Stack => (plane_origin, Size::new(plane.bounds.width, plane.bounds.height)),
+        donut::Placement::Stack => (plane_origin, Size::new(content_rect.width, content_rect.height)),
         donut::Placement::Inset => {
             // Largest axis-aligned square inscribed in a circle of radius
             // `inner_radius`: side = r * sqrt(2).
@@ -1644,7 +1645,12 @@ where
         let Some(plane) = &plot_area_state.plane else {
             return;
         };
-        let plot_bounds = compute_plot_bounds(chart_bounds, self.padding, plot_area_offset, plane);
+        let plot_bounds = compute_plot_bounds(
+            chart_bounds,
+            self.padding,
+            plot_area_offset,
+            plot_area_state.content_rect,
+        );
 
         match event {
             // === HOVER HANDLING ===
@@ -1956,8 +1962,13 @@ where
             let plot_area_offset = self.scene.plot_area_offset();
             let scene_tree = &tree.children[0];
             let plot_area_state = scene_tree.children[6].state.downcast_ref::<plot_area::State>();
-            if let Some(plane) = &plot_area_state.plane {
-                let plot_bounds = compute_plot_bounds(chart_bounds, self.padding, plot_area_offset, plane);
+            if plot_area_state.plane.is_some() {
+                let plot_bounds = compute_plot_bounds(
+                    chart_bounds,
+                    self.padding,
+                    plot_area_offset,
+                    plot_area_state.content_rect,
+                );
                 if cursor.is_over(plot_bounds) {
                     return mouse::Interaction::Crosshair;
                 }
@@ -2256,7 +2267,7 @@ fn draw_cartesian_tooltip_overlay<Message>(
     use crate::widget::canvas::{Frame, Path, Stroke};
     use crate::widget::renderer::geometry;
 
-    let plot_bounds = compute_plot_bounds(chart_bounds, padding, plot_area_offset, plane);
+    let plot_bounds = compute_plot_bounds(chart_bounds, padding, plot_area_offset, plane.bounds);
     let plot_area = scene.plot_area();
     let plot_area_tree = &scene_tree.children[6];
 
@@ -2613,7 +2624,7 @@ fn draw_pie_tooltip_overlay<Message>(
     let Some(cursor_pos) = cursor.position() else {
         return;
     };
-    let plot_bounds = compute_plot_bounds(chart_bounds, padding, plot_area_offset, plane);
+    let plot_bounds = compute_plot_bounds(chart_bounds, padding, plot_area_offset, plane.bounds);
     let right_limit_x = plot_bounds.x + plot_bounds.width;
 
     let entry = hover::Row {
@@ -2814,7 +2825,7 @@ fn draw_geo_tooltip_overlay<Message>(
         tooltip_config
     };
 
-    let plot_bounds = compute_plot_bounds(chart_bounds, padding, plot_area_offset, plane);
+    let plot_bounds = compute_plot_bounds(chart_bounds, padding, plot_area_offset, plane.bounds);
     let anchor_abs = Point::new(
         plot_bounds.x + pixel.x - plane.bounds.x,
         plot_bounds.y + pixel.y - plane.bounds.y,
@@ -3005,7 +3016,7 @@ fn draw_choropleth_tooltip_overlay<Message>(
     let Some(cursor_pos) = cursor.position() else {
         return;
     };
-    let plot_bounds = compute_plot_bounds(chart_bounds, padding, plot_area_offset, plane);
+    let plot_bounds = compute_plot_bounds(chart_bounds, padding, plot_area_offset, plane.bounds);
     let right_limit_x = plot_bounds.x + plot_bounds.width;
 
     let entry = hover::Row {

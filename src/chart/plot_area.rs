@@ -94,6 +94,18 @@ pub fn to_data_x(domain: &Domain, rect: Rectangle, pixel_x: f32) -> f64 {
     }
 }
 
+/// Build the `content` child node from the inset data-mapping rect.
+///
+/// The node is the shared data-mapping region — the plot rect inset by
+/// the per-edge margins. Its bounds are plot-local (origin at
+/// `content_rect.{x, y}` = `insets.{left, top}`). Primary and secondary
+/// planes map data into this same rectangle. The node is structural:
+/// marks still translate by the plot node at draw, never this child.
+fn content_node(content_rect: Rectangle) -> Node {
+    Node::new(crate::core::Size::new(content_rect.width, content_rect.height))
+        .move_to(crate::core::Point::new(content_rect.x, content_rect.y))
+}
+
 /// The coordinate plane for transforming data coords to pixels.
 #[derive(Debug, Clone)]
 pub struct Plane {
@@ -203,6 +215,11 @@ pub struct State {
     pub plane: Option<Plane>,
     /// The coordinate plane for the secondary (top/right) axes, if any.
     pub secondary_plane: Option<Plane>,
+    /// The inset data-mapping rectangle in plot-local coordinates (origin
+    /// at `insets.{left, top}`), mirroring the `content` child node. The
+    /// update/hover path has no child [`crate::core::Layout`] to descend,
+    /// so it reads this cache instead of the live node tree.
+    pub content_rect: Rectangle,
     /// Chart-level geo projection cache, populated whenever a
     /// geo-aware mark (Choropleth, geo-Xy) is present. `None` for
     /// purely cartesian charts. Survives [`crate::chart::Chart`]'s
@@ -391,6 +408,12 @@ where
             state: tree::State::new(State {
                 plane: None,
                 secondary_plane: None,
+                content_rect: Rectangle {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 0.0,
+                    height: 0.0,
+                },
                 geo_plane: None,
             }),
             children,
@@ -992,8 +1015,10 @@ where
         // Store the planes for draw()
         state.plane = Some(plane);
         state.secondary_plane = secondary_plane;
+        // Cache the inset data-mapping rect for the no-Layout hover path.
+        state.content_rect = plot_rect;
 
-        Node::new(size)
+        Node::with_children(size, vec![content_node(plot_rect)])
     }
 
     /// Draws major and minor gridlines into the plot area using the stored plane.
@@ -1557,5 +1582,50 @@ where
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::Size;
+
+    /// The inset data-mapping rect in plot-local coordinates, as built in
+    /// [`PlotArea::layout`]. Mirrors the `plot_rect` formula so the test
+    /// asserts the content node against the value layout actually uses.
+    fn plot_rect(size: Size, left: f32, right: f32, top: f32, bottom: f32) -> Rectangle {
+        Rectangle {
+            x: left,
+            y: top,
+            width: (size.width - left - right).max(0.0),
+            height: (size.height - top - bottom).max(0.0),
+        }
+    }
+
+    #[test]
+    fn content_node_bounds_equal_inset_rect() {
+        let size = Size::new(800.0, 600.0);
+        let rect = plot_rect(size, 48.0, 12.0, 8.0, 40.0);
+
+        let bounds = content_node(rect).bounds();
+
+        // Plot-local origin sits at the inset corner, not the plot origin.
+        assert_eq!(bounds.x, rect.x);
+        assert_eq!(bounds.y, rect.y);
+        assert_eq!(bounds.width, rect.width);
+        assert_eq!(bounds.height, rect.height);
+    }
+
+    #[test]
+    fn content_node_clamps_oversized_insets() {
+        let size = Size::new(100.0, 100.0);
+        // Insets exceeding the plot collapse the rect to zero, never negative.
+        let rect = plot_rect(size, 80.0, 80.0, 70.0, 70.0);
+        assert_eq!(rect.width, 0.0);
+        assert_eq!(rect.height, 0.0);
+
+        let bounds = content_node(rect).bounds();
+        assert_eq!(bounds.width, 0.0);
+        assert_eq!(bounds.height, 0.0);
     }
 }
