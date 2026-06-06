@@ -40,22 +40,69 @@ pub use violin::Violin;
 pub use waterfall::Waterfall;
 pub use xy::Xy;
 
+/// An inclusive interval of data values along a single axis.
+#[derive(Debug, Clone, Copy)]
+pub struct Range {
+    /// Lower bound of the interval.
+    pub min: f64,
+    /// Upper bound of the interval.
+    pub max: f64,
+}
+
+/// The data domain that the plot area maps to pixels: an x and y [`Range`]
+/// plus the transform applied to the y axis. Carries no pixel geometry — the
+/// destination rectangle is supplied per call to [`to_pixel`] / [`to_data_x`].
+#[derive(Debug, Clone, Copy)]
+pub struct Domain {
+    /// Data range along the x axis.
+    pub x: Range,
+    /// Data range along the y axis.
+    pub y: Range,
+    /// Transform applied to the y domain when mapping to pixels.
+    /// Honored by numeric-axis marks via [`to_pixel`]; categorical or
+    /// geographic marks (Pie, Treemap, Choropleth) bypass the domain
+    /// entirely and aren't affected.
+    pub y_transform: crate::scale::Transform,
+}
+
+/// Transform a data point (f64) to pixel coordinates (f32) within `rect`.
+pub fn to_pixel(domain: &Domain, rect: Rectangle, datum: Datum) -> crate::core::Point {
+    let x = if domain.x.max > domain.x.min {
+        rect.x + (((datum.x - domain.x.min) / (domain.x.max - domain.x.min)) as f32) * rect.width
+    } else {
+        rect.x + rect.width / 2.0
+    };
+
+    let y = if domain.y.max > domain.y.min {
+        let unit = domain.y_transform.map_to_unit(datum.y, domain.y.min, domain.y.max) as f32;
+        rect.y + rect.height - unit * rect.height
+    } else {
+        rect.y + rect.height / 2.0
+    };
+
+    crate::core::Point::new(x, y)
+}
+
+/// Inverse of the x part of [`to_pixel`]: map a pixel x-coordinate back to a
+/// data-space x value within `rect`.
+pub fn to_data_x(domain: &Domain, rect: Rectangle, pixel_x: f32) -> f64 {
+    if rect.width == 0.0 {
+        domain.x.min
+    } else {
+        let t = (pixel_x - rect.x) / rect.width;
+        domain.x.min + (t as f64) * (domain.x.max - domain.x.min)
+    }
+}
+
 /// The coordinate plane for transforming data coords to pixels.
 #[derive(Debug, Clone)]
 pub struct Plane {
-    pub x_min: f64,
-    pub x_max: f64,
-    pub y_min: f64,
-    pub y_max: f64,
+    /// Data domain mapped onto [`Plane::bounds`].
+    pub domain: Domain,
     pub bounds: Rectangle,
     /// Obstacle rectangles that labels must avoid (axes, etc.)
     /// Coordinates are relative to plot area origin.
     pub obstacles: Vec<Rectangle>,
-    /// Transform applied to the y domain when mapping to pixels.
-    /// Honored by numeric-axis marks via [`Plane::to_pixel`]; categorical
-    /// or geographic marks (Pie, Treemap, Choropleth) bypass the plane
-    /// entirely and aren't affected.
-    pub y_transform: crate::scale::Transform,
 }
 
 /// Axis layout dimensions passed from Scene to PlotArea
@@ -107,31 +154,13 @@ impl Default for GeoConfig {
 impl Plane {
     /// Transform a data point (f64) to pixel coordinates (f32) within the plane bounds.
     pub fn to_pixel(&self, datum: Datum) -> crate::core::Point {
-        let x = if self.x_max > self.x_min {
-            self.bounds.x + (((datum.x - self.x_min) / (self.x_max - self.x_min)) as f32) * self.bounds.width
-        } else {
-            self.bounds.x + self.bounds.width / 2.0
-        };
-
-        let y = if self.y_max > self.y_min {
-            let unit = self.y_transform.map_to_unit(datum.y, self.y_min, self.y_max) as f32;
-            self.bounds.y + self.bounds.height - unit * self.bounds.height
-        } else {
-            self.bounds.y + self.bounds.height / 2.0
-        };
-
-        crate::core::Point::new(x, y)
+        to_pixel(&self.domain, self.bounds, datum)
     }
 
     /// Inverse of the x part of `to_pixel`: map a pixel x-coordinate back to
     /// a data-space x value.
     pub fn to_data_x(&self, pixel_x: f32) -> f64 {
-        if self.bounds.width == 0.0 {
-            self.x_min
-        } else {
-            let t = (pixel_x - self.bounds.x) / self.bounds.width;
-            self.x_min + (t as f64) * (self.x_max - self.x_min)
-        }
+        to_data_x(&self.domain, self.bounds, pixel_x)
     }
 }
 
@@ -832,13 +861,13 @@ where
         };
 
         let plane = Plane {
-            x_min,
-            x_max,
-            y_min,
-            y_max,
+            domain: Domain {
+                x: Range { min: x_min, max: x_max },
+                y: Range { min: y_min, max: y_max },
+                y_transform,
+            },
             bounds: plot_rect,
             obstacles: obstacles.clone(),
-            y_transform,
         };
 
         // Build a secondary plane when the scene provides secondary axis
@@ -851,13 +880,19 @@ where
                 sy_min = sy_max / 1e4;
             }
             Some(Plane {
-                x_min: sx_min,
-                x_max: sx_max,
-                y_min: sy_min,
-                y_max: sy_max,
+                domain: Domain {
+                    x: Range {
+                        min: sx_min,
+                        max: sx_max,
+                    },
+                    y: Range {
+                        min: sy_min,
+                        max: sy_max,
+                    },
+                    y_transform: secondary_y_transform,
+                },
                 bounds: plot_rect,
                 obstacles,
-                y_transform: secondary_y_transform,
             })
         } else {
             None

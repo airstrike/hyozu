@@ -64,12 +64,12 @@ where
         let (num_categories, band_px) = match self.data.orientation {
             Orientation::Vertical => {
                 // Horizontal bars: categories on y-axis, values on x-axis
-                let n = (plane.y_max - plane.y_min + 1.0).max(1.0);
+                let n = (plane.domain.y.max - plane.domain.y.min + 1.0).max(1.0);
                 (n, plane.bounds.height / n as f32)
             }
             Orientation::Horizontal => {
                 // Vertical bars: categories on x-axis, values on y-axis
-                let n = (plane.x_max - plane.x_min + 1.0).max(1.0);
+                let n = (plane.domain.x.max - plane.domain.x.min + 1.0).max(1.0);
                 (n, plane.bounds.width / n as f32)
             }
         };

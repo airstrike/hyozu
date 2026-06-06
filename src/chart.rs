@@ -2275,8 +2275,8 @@ fn draw_cartesian_tooltip_overlay<Message>(
 
     // Compute the tracking pixel x from data_x
     let tracking_pixel_x = {
-        let t = if plane.x_max > plane.x_min {
-            ((data_x - plane.x_min) / (plane.x_max - plane.x_min)) as f32
+        let t = if plane.domain.x.max > plane.domain.x.min {
+            ((data_x - plane.domain.x.min) / (plane.domain.x.max - plane.domain.x.min)) as f32
         } else {
             0.5
         };
