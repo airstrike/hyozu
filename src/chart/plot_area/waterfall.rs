@@ -212,7 +212,7 @@ where
             state.kinds.push(entry.kind);
         }
 
-        state.label_rects = self.compute_label_rects(state);
+        state.label_rects = self.compute_label_rects(state, design);
         self.shape_labels(state, renderer, design);
 
         Node::new(Size::ZERO)
@@ -283,10 +283,17 @@ where
         }
     }
 
-    fn compute_label_rects<P: text::Paragraph>(&self, state: &State<P>) -> Vec<Option<Rectangle>> {
+    fn compute_label_rects<P: text::Paragraph>(
+        &self,
+        state: &State<P>,
+        design: Option<&dyn crate::design::Design>,
+    ) -> Vec<Option<Rectangle>> {
         let total_entries = self.data.entries.len();
         let chart_label = self.data.label.as_ref();
-        let default_size = 12.0;
+        let default_size = design
+            .and_then(|d| d.data_label_text().size)
+            .map(|p| p.0)
+            .unwrap_or(12.0);
 
         self.data
             .entries

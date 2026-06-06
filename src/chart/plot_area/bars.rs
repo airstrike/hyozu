@@ -311,7 +311,7 @@ where
         _limits: &Limits,
         domain: &Domain,
         rect: Rectangle,
-        _design: Option<&dyn crate::design::Design>,
+        design: Option<&dyn crate::design::Design>,
     ) -> Node {
         use crate::mark::bar::Direction;
 
@@ -348,7 +348,7 @@ where
         state.plot_bounds = rect;
 
         // Compute label rects for hit-testing
-        state.label_rects = self.compute_label_rects(state);
+        state.label_rects = self.compute_label_rects(state, design);
 
         // The data-label paragraphs are shaped once in the measurement pass
         // (`PlotArea::shape_labels`, which `min_insets` then measures); this
@@ -656,8 +656,17 @@ where
     }
 
     /// Computes label bounding rectangles for hit-testing.
-    fn compute_label_rects(&self, state: &State<Renderer::Paragraph>) -> Vec<Vec<Option<Rectangle>>> {
+    fn compute_label_rects(
+        &self,
+        state: &State<Renderer::Paragraph>,
+        design: Option<&dyn crate::design::Design>,
+    ) -> Vec<Vec<Option<Rectangle>>> {
         let is_horizontal = self.data.direction == crate::mark::bar::Direction::Horizontal;
+
+        let default_size = design
+            .and_then(|d| d.data_label_text().size)
+            .map(|p| p.0)
+            .unwrap_or(12.0);
 
         self.data
             .series
@@ -668,7 +677,7 @@ where
                     return rects.iter().map(|_| None).collect();
                 };
 
-                let label_size = label_config.text.size.map(|p| p.0).unwrap_or(12.0);
+                let label_size = label_config.text.size.map(|p| p.0).unwrap_or(default_size);
 
                 rects
                     .iter()
