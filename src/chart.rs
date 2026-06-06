@@ -540,7 +540,10 @@ fn find_nearest_cartesian_hover<Message>(
 /// the point is in the donut hole, outside the outer radius, or in
 /// an inter-slice gap. Shared by the pie hover scan and the pie click
 /// dispatch in `update` so both use the exact same hit region.
-fn pie_slice_at(local: Point, pie_state: &plot_area::pie::State) -> Option<usize> {
+fn pie_slice_at(
+    local: Point,
+    pie_state: &plot_area::pie::State<<Renderer as crate::core::text::Renderer>::Paragraph>,
+) -> Option<usize> {
     let (cx, cy) = pie_state.center;
     let dx = local.x - cx;
     let dy = local.y - cy;
@@ -568,13 +571,15 @@ fn pie_slice_at(local: Point, pie_state: &plot_area::pie::State) -> Option<usize
 /// pie's center and inside one slice's `[start_angle, end_angle]`
 /// sweep. Returns the first matching slice across pie marks.
 fn find_pie_hover(local: Point, plot_area_tree: &Tree) -> Option<hover::Geometry> {
-    let pie_tag = tree::Tag::of::<plot_area::pie::State>();
+    let pie_tag = tree::Tag::of::<plot_area::pie::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
 
     for (mark_idx, mark_tree) in plot_area_tree.children.iter().enumerate() {
         if mark_tree.tag != pie_tag {
             continue;
         }
-        let pie_state = mark_tree.state.downcast_ref::<plot_area::pie::State>();
+        let pie_state = mark_tree
+            .state
+            .downcast_ref::<plot_area::pie::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
         if let Some(slice_idx) = pie_slice_at(local, pie_state) {
             return Some(hover::Geometry::Pie { mark_idx, slice_idx });
         }
@@ -1004,8 +1009,13 @@ fn choropleth_feature_has_hover_value(
 /// new animated mark adds exactly one branch.
 fn animation_tick_mut(tree: &mut Tree) -> Option<&mut animation::Tick> {
     let tag = tree.tag;
-    if tag == tree::Tag::of::<plot_area::pie::State>() {
-        return Some(&mut tree.state.downcast_mut::<plot_area::pie::State>().tick);
+    if tag == tree::Tag::of::<plot_area::pie::State<<Renderer as crate::core::text::Renderer>::Paragraph>>() {
+        return Some(
+            &mut tree
+                .state
+                .downcast_mut::<plot_area::pie::State<<Renderer as crate::core::text::Renderer>::Paragraph>>()
+                .tick,
+        );
     }
     if tag == tree::Tag::of::<plot_area::bars::State<<Renderer as crate::core::text::Renderer>::Paragraph>>() {
         return Some(
@@ -1086,8 +1096,12 @@ fn animation_tick_mut(tree: &mut Tree) -> Option<&mut animation::Tick> {
 /// from there. The caller is responsible for confirming both nodes
 /// carry a `pie::State`.
 fn replant_pie(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
-    let old_state = old_mark.state.downcast_ref::<plot_area::pie::State>();
-    let new_state = new_mark.state.downcast_mut::<plot_area::pie::State>();
+    let old_state = old_mark
+        .state
+        .downcast_ref::<plot_area::pie::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
+    let new_state = new_mark
+        .state
+        .downcast_mut::<plot_area::pie::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
     if animate {
         new_state.previous_angles = old_state.slice_angles.clone();
         new_state.tick.pending_start = true;
@@ -1321,7 +1335,7 @@ fn replant_violin(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
 /// to the matching `replant_<mark>` snapshot helper. A no-op when
 /// either tree lacks a plot area.
 fn replant_mark_animations(old_children: &[Tree], new_children: &mut [Tree], animate: bool) {
-    let pie_tag = tree::Tag::of::<plot_area::pie::State>();
+    let pie_tag = tree::Tag::of::<plot_area::pie::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
     let bars_tag = tree::Tag::of::<plot_area::bars::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
     let waterfall_tag =
         tree::Tag::of::<plot_area::waterfall::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
@@ -1488,11 +1502,13 @@ fn layout_donut_center<Message, Theme>(
     }
     let content_rect = plot_area_state.content_rect;
 
-    let pie_tag = tree::Tag::of::<plot_area::pie::State>();
+    let pie_tag = tree::Tag::of::<plot_area::pie::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
     let Some(pie_tree) = plot_area_tree.children.iter().find(|t| t.tag == pie_tag) else {
         return layout::Node::new(Size::ZERO);
     };
-    let pie_state = pie_tree.state.downcast_ref::<plot_area::pie::State>();
+    let pie_state = pie_tree
+        .state
+        .downcast_ref::<plot_area::pie::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
     let (pie_center, inner_radius) = pie_state.center_geometry();
 
     // Origin of the plot-area's plane in chart-local coords. Mirrors
@@ -1799,7 +1815,8 @@ where
                     let plot_area_tree = &scene_tree.children[6];
                     let bars_tag =
                         tree::Tag::of::<plot_area::bars::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
-                    let pie_tag = tree::Tag::of::<plot_area::pie::State>();
+                    let pie_tag =
+                        tree::Tag::of::<plot_area::pie::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
                     let treemap_tag = tree::Tag::of::<
                         plot_area::treemap::State<<Renderer as crate::core::text::Renderer>::Paragraph>,
                     >();
@@ -1825,7 +1842,9 @@ where
                                 }
                             }
                         } else if mark_tree.tag == pie_tag {
-                            let pie_state = mark_tree.state.downcast_ref::<plot_area::pie::State>();
+                            let pie_state = mark_tree
+                                .state
+                                .downcast_ref::<plot_area::pie::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
 
                             for (label_idx, maybe_rect) in pie_state.label_rects.iter().enumerate() {
                                 if let Some(rect) = maybe_rect
@@ -1865,7 +1884,9 @@ where
                                 }
                             }
                         } else if mark_tree.tag == pie_tag {
-                            let pie_state = mark_tree.state.downcast_ref::<plot_area::pie::State>();
+                            let pie_state = mark_tree
+                                .state
+                                .downcast_ref::<plot_area::pie::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
                             if let Some(slice_idx) = pie_slice_at(local, pie_state) {
                                 shell.publish(on_action(Action::Clicked(crate::target::Target::Entry {
                                     mark: mark_idx,
@@ -2705,10 +2726,12 @@ fn draw_pie_tooltip_overlay<Message>(
     let Some(child) = plot_area_tree.children.get(mark_idx) else {
         return;
     };
-    if child.tag != tree::Tag::of::<plot_area::pie::State>() {
+    if child.tag != tree::Tag::of::<plot_area::pie::State<<Renderer as crate::core::text::Renderer>::Paragraph>>() {
         return;
     }
-    let pie_state = child.state.downcast_ref::<plot_area::pie::State>();
+    let pie_state = child
+        .state
+        .downcast_ref::<plot_area::pie::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
 
     let background = design.background_color();
     let text_pair = design.text_pair();

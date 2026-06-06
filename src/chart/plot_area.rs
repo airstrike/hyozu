@@ -405,7 +405,7 @@ where
                     Series::Bars(_) => tree::Tag::of::<bars::State<Renderer::Paragraph>>(),
                     Series::BoxPlot(_) => tree::Tag::of::<boxplot::State>(),
                     Series::Choropleth(_) => tree::Tag::of::<choropleth::State>(),
-                    Series::Pie(_) => tree::Tag::of::<pie::State>(),
+                    Series::Pie(_) => tree::Tag::of::<pie::State<Renderer::Paragraph>>(),
                     Series::Gauge(_) => tree::Tag::of::<gauge::State>(),
                     Series::Waterfall(_) => tree::Tag::of::<waterfall::State<Renderer::Paragraph>>(),
                     Series::Xy(_) => tree::Tag::of::<xy::State>(),

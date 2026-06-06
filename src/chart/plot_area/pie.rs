@@ -4,9 +4,9 @@ use crate::core::Size;
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
 use crate::mark::pie::label::{FormatKind, Position, Show};
-use crate::widget::canvas::{Frame, Path, Stroke, Text as CanvasText};
+use crate::widget::canvas::{Frame, Path, Stroke};
 
-use crate::core::text;
+use crate::core::text::{self, paragraph};
 use crate::widget::renderer::geometry;
 
 /// Treats non-finite slice values (NaN, ±∞) as the gap convention:
@@ -70,9 +70,19 @@ pub(crate) fn slice_path(
 }
 
 /// State for Pie — stores pre-calculated slice angles and geometry for hit-testing
-pub struct State {
+pub struct State<P>
+where
+    P: text::Paragraph,
+{
     /// Start and end angles for each slice (in radians)
     pub slice_angles: Vec<(f32, f32)>,
+    /// Slice-label paragraphs, one per slice index (mirroring `slice_angles`),
+    /// shaped once in [`Pie::layout`] and rendered in [`Pie::draw`] via
+    /// [`crate::core::text::Renderer::fill_paragraph`]. Slices that are hidden
+    /// or have no/empty label keep a default (empty) paragraph; `draw` skips
+    /// them with the same visibility / empty-text guards, so the index stays
+    /// aligned with the slice order.
+    pub labels: Vec<paragraph::Plain<P>>,
     /// Center of the pie in local coordinates
     pub center: (f32, f32),
     /// Outer radius
@@ -92,7 +102,10 @@ pub struct State {
     pub tick: animation::Tick,
 }
 
-impl State {
+impl<P> State<P>
+where
+    P: text::Paragraph,
+{
     /// Returns the pie's center point and inner radius in plot-local
     /// coordinates, populated during [`Pie::layout`].
     ///
@@ -130,7 +143,7 @@ where
 impl<'a, Message, Renderer> Pie<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: text::Renderer + geometry::Renderer,
+    Renderer: text::Renderer<Font = crate::core::Font> + geometry::Renderer,
 {
     /// Create a new Pie borrowing data
     pub fn new(data: &'a crate::mark::pie::Pie) -> Self {
@@ -173,9 +186,10 @@ where
     /// Returns the initial tree state for this Pie
     pub(super) fn state(&self) -> Tree {
         Tree {
-            tag: tree::Tag::of::<State>(),
-            state: tree::State::new(State {
+            tag: tree::Tag::of::<State<Renderer::Paragraph>>(),
+            state: tree::State::new(State::<Renderer::Paragraph> {
                 slice_angles: Vec::new(),
+                labels: Vec::new(),
                 center: (0.0, 0.0),
                 outer_radius: 0.0,
                 inner_radius: 0.0,
@@ -194,18 +208,19 @@ where
     pub fn layout(
         &self,
         tree: &mut Tree,
-        _renderer: &Renderer,
+        renderer: &Renderer,
         limits: &Limits,
         _domain: &Domain,
         _rect: crate::core::Rectangle,
     ) -> Node {
-        let state = tree.state.downcast_mut::<State>();
+        let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
 
         let total: f64 = self.data.slices.iter().map(|s| finite_or_zero(s.value)).sum();
 
         if total == 0.0 {
             state.slice_angles.clear();
             state.label_rects.clear();
+            state.labels.clear();
             return Node::new(Size::ZERO);
         }
 
@@ -279,7 +294,77 @@ where
             })
             .collect();
 
+        self.shape_labels(state, renderer, total, &visibility);
+
         Node::new(Size::ZERO)
+    }
+
+    /// Shapes one slice-label paragraph per slice index, theme-free (font
+    /// from `renderer.default_font()` + the label's own family/weight/style,
+    /// size from the label config defaulting to 12 px), so the text is laid
+    /// out here and rendered in `draw` via `fill_paragraph`. Hidden slices,
+    /// slices without a label, and slices whose formatted text is empty keep
+    /// a default (empty) paragraph; the draw pass skips them with the same
+    /// guards, so the index stays aligned with the slice order.
+    fn shape_labels(
+        &self,
+        state: &mut State<Renderer::Paragraph>,
+        renderer: &Renderer,
+        total: f64,
+        visibility: &[bool],
+    ) {
+        let default_font = renderer.default_font();
+        let hint_factor = renderer.scale_factor();
+
+        let slice_count = self.data.slices.len();
+        while state.labels.len() < slice_count {
+            state.labels.push(paragraph::Plain::default());
+        }
+        state.labels.truncate(slice_count);
+
+        for (i, slice) in self.data.slices.iter().enumerate() {
+            let paragraph = &mut state.labels[i];
+
+            if !visibility.get(i).copied().unwrap_or(false) {
+                continue;
+            }
+            let Some(label) = slice.label.as_ref() else {
+                continue;
+            };
+
+            let pct = finite_or_zero(slice.value) / total;
+            let content = self.format_label(label, slice.value, pct);
+            if content.is_empty() {
+                continue;
+            }
+
+            let size = label.text.size.map(|p| p.0).unwrap_or(12.0);
+            let mut font = label.text.resolved_font(default_font);
+            if let Some(w) = label.text.weight {
+                font.weight = w;
+            }
+            if let Some(s) = label.text.style {
+                font.style = s;
+            }
+
+            let _ = paragraph.update(text::Text {
+                content: &content,
+                bounds: Size::INFINITE,
+                size: size.into(),
+                line_height: text::LineHeight::default(),
+                font,
+                align_x: text::Alignment::Left,
+                align_y: crate::core::alignment::Vertical::Top,
+                shaping: text::Shaping::Basic,
+                wrapping: text::Wrapping::None,
+                ellipsis: text::Ellipsis::default(),
+                hint_factor,
+                font_features: Vec::new(),
+                font_variations: Vec::new(),
+                letter_spacing: Default::default(),
+                weight: None,
+            });
+        }
     }
 
     /// Draws the pie/donut chart
@@ -301,7 +386,7 @@ where
     ) where
         Theme: crate::design::Design + ?Sized,
     {
-        let state = tree.state.downcast_ref::<State>();
+        let state = tree.state.downcast_ref::<State<Renderer::Paragraph>>();
 
         if state.slice_angles.is_empty() {
             return;
@@ -386,7 +471,11 @@ where
 
         // Slice labels — suppressed mid-sweep so they don't pop in
         // before the slices they annotate are visible (matches
-        // Recharts' `showLabels={!isAnimating}`).
+        // Recharts' `showLabels={!isAnimating}`). Background fills and
+        // leader lines go into the geometry frame; the glyphs are collected
+        // here and drawn after the frame via the cached paragraphs so they
+        // sit on top of the slices.
+        let mut label_draws: Vec<(usize, crate::core::Point, crate::core::Color)> = Vec::new();
         if total > 0.0 && !animating {
             for (i, ((start_angle, end_angle), slice)) in
                 state.slice_angles.iter().zip(self.data.slices.iter()).enumerate()
@@ -408,8 +497,6 @@ where
                 if label_text.is_empty() {
                     continue;
                 }
-
-                let font_size = label.text.size.unwrap_or(crate::core::Pixels(theme.font_size()));
 
                 if let Some(fill_color_spec) = label.fill
                     && let Some(Some(lr)) = state.label_rects.get(i)
@@ -465,22 +552,25 @@ where
                     frame.stroke(&leader_path, Stroke::default().with_color(leader_color).with_width(1.0));
                 }
 
-                let font = label
-                    .text
-                    .resolved_font(theme.data_label_text().resolved_font(theme.font()));
-
-                frame.fill_text(CanvasText {
-                    content: label_text,
-                    position: crate::core::Point::new(lx, ly),
-                    color: label_color,
-                    size: font_size,
-                    font,
-                    align_x: align_x.into(),
-                    align_y,
-                    line_height: crate::core::text::LineHeight::default(),
-                    shaping: crate::core::text::Shaping::Basic,
-                    ..CanvasText::default()
-                });
+                // `fill_text` shifted the glyph box from `(lx, ly)` by the
+                // paragraph's `min_bounds` per alignment (Left/Top→0,
+                // Center→−½, Right/Bottom→−1); apply the identical shift
+                // against the cached paragraph so `fill_paragraph` (top-left
+                // origin) lands pixel-identically with the polar anchor.
+                if let Some(paragraph) = state.labels.get(i) {
+                    let bounds = paragraph.min_bounds();
+                    let anchor_x = match align_x {
+                        crate::core::alignment::Horizontal::Left => lx,
+                        crate::core::alignment::Horizontal::Center => lx - bounds.width / 2.0,
+                        crate::core::alignment::Horizontal::Right => lx - bounds.width,
+                    };
+                    let anchor_y = match align_y {
+                        crate::core::alignment::Vertical::Top => ly,
+                        crate::core::alignment::Vertical::Center => ly - bounds.height / 2.0,
+                        crate::core::alignment::Vertical::Bottom => ly - bounds.height,
+                    };
+                    label_draws.push((i, crate::core::Point::new(anchor_x, anchor_y), label_color));
+                }
             }
         }
 
@@ -578,6 +668,15 @@ where
         renderer.with_translation(translation, |renderer| {
             renderer.draw_geometry(geometry);
         });
+
+        // Slice-label glyphs sit above the slices (and their background fills
+        // / leader lines) but below the selection highlights, matching the
+        // previous draw order where the labels were baked into `frame`.
+        for (i, anchor, color) in label_draws {
+            if let Some(paragraph) = state.labels.get(i) {
+                renderer.fill_paragraph(paragraph.raw(), anchor + translation, color, layout_bounds);
+            }
+        }
 
         let selection_geometry = selection_frame.into_geometry();
         renderer.with_translation(translation, |renderer| {
