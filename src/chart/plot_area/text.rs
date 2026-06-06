@@ -14,17 +14,25 @@ use crate::core::widget::{Tree, tree};
 use crate::core::{Point, Size};
 use crate::mark::text::TextAlign;
 use crate::mark::xy::CoordKind;
-use crate::widget::canvas::{Frame, Text as CanvasText};
 
-use crate::core::text;
+use crate::core::text::{self, paragraph};
 use crate::widget::renderer::geometry;
 
 /// State for Text — caches the pixel position of each item (already
 /// projected and offset) so `draw` is a pure read with no per-frame
 /// allocation aside from the canvas frame itself.
-pub struct State {
+pub struct State<P>
+where
+    P: text::Paragraph,
+{
     /// Pixel coordinates for each item, post-projection AND post-offset.
     pub pixel_points: Vec<Point>,
+    /// Label paragraphs, one per item index (mirroring `pixel_points`),
+    /// shaped once in `layout` and rendered in `draw` via
+    /// [`crate::core::text::Renderer::fill_paragraph`]. Items with an
+    /// empty label keep a default (empty) paragraph so the index stays
+    /// aligned with the item order; `draw` skips them with the same guard.
+    pub labels: Vec<paragraph::Plain<P>>,
 }
 
 /// A Text overlay series.
@@ -40,7 +48,7 @@ where
 impl<'a, Message, Renderer> Text<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: text::Renderer + geometry::Renderer,
+    Renderer: text::Renderer<Font = crate::core::Font> + geometry::Renderer,
 {
     /// Create a new Text borrowing data.
     pub fn new(data: &'a crate::mark::text::Text) -> Self {
@@ -53,9 +61,10 @@ where
     /// Returns the initial tree state for this Text.
     pub(super) fn state(&self) -> Tree {
         Tree {
-            tag: tree::Tag::of::<State>(),
-            state: tree::State::new(State {
+            tag: tree::Tag::of::<State<Renderer::Paragraph>>(),
+            state: tree::State::new(State::<Renderer::Paragraph> {
                 pixel_points: Vec::new(),
+                labels: Vec::new(),
             }),
             children: Vec::new(),
         }
@@ -73,13 +82,13 @@ where
     pub fn layout(
         &self,
         tree: &mut Tree,
-        _renderer: &Renderer,
+        renderer: &Renderer,
         _limits: &Limits,
         domain: &Domain,
         rect: crate::core::Rectangle,
         geo_plane: Option<&geo::Plane>,
     ) -> Node {
-        let state = tree.state.downcast_mut::<State>();
+        let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
         let (mark_dx, mark_dy) = self.data.offset;
         // Per-item offset (radius-aware bubble-map labels, etc.)
         // overrides the mark-level offset. Mirrors the per-datum
@@ -113,7 +122,50 @@ where
             },
         };
 
+        self.shape_labels(state, renderer);
+
         Node::new(Size::ZERO)
+    }
+
+    /// Shapes one label paragraph per item index, theme-free (font is the
+    /// mark's `Font::default()`, size is the mark-level `size`), so the
+    /// text is laid out here and rendered in `draw` via `fill_paragraph`.
+    /// Items with an empty label keep a default (empty) paragraph; the draw
+    /// pass skips them with the same guard, so the index stays aligned with
+    /// the item order.
+    fn shape_labels(&self, state: &mut State<Renderer::Paragraph>, renderer: &Renderer) {
+        let hint_factor = renderer.scale_factor();
+        let item_count = self.data.items.len();
+
+        while state.labels.len() < item_count {
+            state.labels.push(paragraph::Plain::default());
+        }
+        state.labels.truncate(item_count);
+
+        for (i, item) in self.data.items.iter().enumerate() {
+            let paragraph = &mut state.labels[i];
+            if item.label.is_empty() {
+                continue;
+            }
+
+            let _ = paragraph.update(text::Text {
+                content: &item.label,
+                bounds: Size::INFINITE,
+                size: crate::core::Pixels(self.data.size),
+                line_height: text::LineHeight::default(),
+                font: crate::core::Font::default(),
+                align_x: text::Alignment::Left,
+                align_y: crate::core::alignment::Vertical::Top,
+                shaping: text::Shaping::Basic,
+                wrapping: text::Wrapping::None,
+                ellipsis: text::Ellipsis::default(),
+                hint_factor,
+                font_features: Vec::new(),
+                font_variations: Vec::new(),
+                letter_spacing: Default::default(),
+                weight: None,
+            });
+        }
     }
 
     /// Draws each label at its cached pixel position with the configured
@@ -132,7 +184,7 @@ where
     ) where
         Theme: crate::design::Design + ?Sized,
     {
-        let state = tree.state.downcast_ref::<State>();
+        let state = tree.state.downcast_ref::<State<Renderer::Paragraph>>();
         if state.pixel_points.is_empty() {
             return;
         }
@@ -154,29 +206,35 @@ where
             TextAlign::Right => crate::core::alignment::Horizontal::Right,
         };
 
-        let mut frame = Frame::new(renderer, layout_bounds.size());
+        let translation = crate::core::Vector::new(layout_bounds.x, layout_bounds.y);
         for (i, point) in state.pixel_points.iter().enumerate() {
             let label = &self.data.items[i].label;
             if label.is_empty() {
                 continue;
             }
-            frame.fill_text(CanvasText {
-                content: label.clone(),
-                position: *point,
-                color,
-                size: crate::core::Pixels(self.data.size),
-                font: crate::core::Font::default(),
-                align_x: align_x.into(),
-                align_y: crate::core::alignment::Vertical::Center,
-                line_height: crate::core::text::LineHeight::default(),
-                shaping: crate::core::text::Shaping::Basic,
-                ..CanvasText::default()
-            });
-        }
+            let Some(paragraph) = state.labels.get(i) else {
+                continue;
+            };
 
-        let geometry = frame.into_geometry();
-        renderer.with_translation(crate::core::Vector::new(layout_bounds.x, layout_bounds.y), |renderer| {
-            renderer.draw_geometry(geometry);
-        });
+            // `fill_text` shifted the glyph box from `point` by the
+            // paragraph's `min_bounds` per alignment (Left/Top→0,
+            // Center→−½, Right/Bottom→−1); apply the identical shift against
+            // the cached paragraph so `fill_paragraph` (top-left origin)
+            // lands pixel-identically. `align_y` was always `Center`.
+            let bounds = paragraph.min_bounds();
+            let anchor_x = match align_x {
+                crate::core::alignment::Horizontal::Left => point.x,
+                crate::core::alignment::Horizontal::Center => point.x - bounds.width / 2.0,
+                crate::core::alignment::Horizontal::Right => point.x - bounds.width,
+            };
+            let anchor_y = point.y - bounds.height / 2.0;
+
+            renderer.fill_paragraph(
+                paragraph.raw(),
+                crate::core::Point::new(anchor_x, anchor_y) + translation,
+                color,
+                layout_bounds,
+            );
+        }
     }
 }

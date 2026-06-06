@@ -415,7 +415,7 @@ where
                     Series::Heatmap(_) => tree::Tag::of::<heatmap::State>(),
                     Series::Treemap(_) => tree::Tag::of::<treemap::State>(),
                     Series::Violin(_) => tree::Tag::of::<violin::State>(),
-                    Series::Text(_) => tree::Tag::of::<text::State>(),
+                    Series::Text(_) => tree::Tag::of::<text::State<Renderer::Paragraph>>(),
                 };
 
                 if tree.tag != expected_tag {
