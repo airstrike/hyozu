@@ -374,6 +374,6 @@ impl Design for theme::Theme {
     }
 
     fn corners(&self) -> crate::core::border::Radius {
-        8.0.into()
+        4.0.into()
     }
 }
