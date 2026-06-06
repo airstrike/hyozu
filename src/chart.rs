@@ -1050,8 +1050,13 @@ fn animation_tick_mut(tree: &mut Tree) -> Option<&mut animation::Tick> {
                 .tick,
         );
     }
-    if tag == tree::Tag::of::<plot_area::treemap::State>() {
-        return Some(&mut tree.state.downcast_mut::<plot_area::treemap::State>().tick);
+    if tag == tree::Tag::of::<plot_area::treemap::State<<Renderer as crate::core::text::Renderer>::Paragraph>>() {
+        return Some(
+            &mut tree
+                .state
+                .downcast_mut::<plot_area::treemap::State<<Renderer as crate::core::text::Renderer>::Paragraph>>()
+                .tick,
+        );
     }
     if tag == tree::Tag::of::<plot_area::choropleth::State>() {
         return Some(&mut tree.state.downcast_mut::<plot_area::choropleth::State>().tick);
@@ -1211,8 +1216,12 @@ fn replant_heatmap(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
 /// to interpolate from there. The caller is responsible for confirming
 /// both nodes carry a `treemap::State`.
 fn replant_treemap(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
-    let old_state = old_mark.state.downcast_ref::<plot_area::treemap::State>();
-    let new_state = new_mark.state.downcast_mut::<plot_area::treemap::State>();
+    let old_state = old_mark
+        .state
+        .downcast_ref::<plot_area::treemap::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
+    let new_state = new_mark
+        .state
+        .downcast_mut::<plot_area::treemap::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
     if animate {
         new_state.previous_item_rects = old_state.item_rects.clone();
         new_state.tick.pending_start = true;
@@ -1321,7 +1330,8 @@ fn replant_mark_animations(old_children: &[Tree], new_children: &mut [Tree], ani
     let xy_tag = tree::Tag::of::<plot_area::xy::State>();
     let heatmap_tag =
         tree::Tag::of::<plot_area::heatmap::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
-    let treemap_tag = tree::Tag::of::<plot_area::treemap::State>();
+    let treemap_tag =
+        tree::Tag::of::<plot_area::treemap::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
     let choropleth_tag = tree::Tag::of::<plot_area::choropleth::State>();
     let gauge_tag = tree::Tag::of::<plot_area::gauge::State>();
     let band_tag = tree::Tag::of::<plot_area::band::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
@@ -1790,7 +1800,9 @@ where
                     let bars_tag =
                         tree::Tag::of::<plot_area::bars::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
                     let pie_tag = tree::Tag::of::<plot_area::pie::State>();
-                    let treemap_tag = tree::Tag::of::<plot_area::treemap::State>();
+                    let treemap_tag = tree::Tag::of::<
+                        plot_area::treemap::State<<Renderer as crate::core::text::Renderer>::Paragraph>,
+                    >();
                     let choropleth_tag = tree::Tag::of::<plot_area::choropleth::State>();
 
                     // First pass: hit-test labels (labels win when overlapping shapes)
@@ -1863,7 +1875,9 @@ where
                                 return;
                             }
                         } else if mark_tree.tag == treemap_tag {
-                            let tm_state = mark_tree.state.downcast_ref::<plot_area::treemap::State>();
+                            let tm_state = mark_tree
+                                .state
+                                .downcast_ref::<plot_area::treemap::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
 
                             for (item_idx, rect) in tm_state.item_rects.iter().enumerate() {
                                 if rect.contains(local) {

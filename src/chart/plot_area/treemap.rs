@@ -3,9 +3,9 @@ use crate::animation;
 use crate::core::Size;
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
-use crate::widget::canvas::{Frame, Path, Text as CanvasText};
+use crate::widget::canvas::{Frame, Path};
 
-use crate::core::text;
+use crate::core::text::{self, paragraph};
 use crate::widget::renderer::geometry;
 
 /// Default dark blue/navy palette for treemap charts (business dashboard aesthetic).
@@ -25,7 +25,10 @@ const DEFAULT_PALETTE: &[(u8, u8, u8)] = &[
 /// State for Treemap — stores pre-calculated rectangle positions for
 /// hit-testing AND pre-truncated label strings, so `draw` doesn't allocate
 /// a new String for every item every frame.
-pub struct State {
+pub struct State<P>
+where
+    P: text::Paragraph,
+{
     /// Pixel rectangles for each item.
     pub item_rects: Vec<crate::core::Rectangle>,
     /// Pre-truncated display labels per item, sized to fit each rectangle's
@@ -35,6 +38,14 @@ pub struct State {
     /// over- or under-truncation that auto-corrects on the next layout
     /// (resize, data change).
     pub item_labels: Vec<String>,
+    /// Label paragraphs, one per item index (mirroring `item_labels`),
+    /// shaped once in [`Treemap::layout`] from the already-truncated string
+    /// and rendered in [`Treemap::draw`] via
+    /// [`crate::core::text::Renderer::fill_paragraph`]. Items whose
+    /// truncated label is empty (rectangle too small) keep a default
+    /// (empty) paragraph; `draw` skips them with the same empty-string
+    /// guard, so the index stays aligned with the item order.
+    pub labels: Vec<paragraph::Plain<P>>,
     /// Item rectangles from the most recent layout before the current
     /// one, captured by [`crate::chart::Chart::diff`] when data changes
     /// so the next sweep can interpolate from previous bounds to
@@ -63,7 +74,7 @@ where
 impl<'a, Message, Renderer> Treemap<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: text::Renderer + geometry::Renderer,
+    Renderer: text::Renderer<Font = crate::core::Font> + geometry::Renderer,
 {
     /// Create a new Treemap borrowing data.
     pub fn new(data: &'a crate::mark::treemap::Treemap) -> Self {
@@ -83,10 +94,11 @@ where
     /// Returns the initial tree state for this Treemap.
     pub(super) fn state(&self) -> Tree {
         Tree {
-            tag: tree::Tag::of::<State>(),
-            state: tree::State::new(State {
+            tag: tree::Tag::of::<State<Renderer::Paragraph>>(),
+            state: tree::State::new(State::<Renderer::Paragraph> {
                 item_rects: Vec::new(),
                 item_labels: Vec::new(),
+                labels: Vec::new(),
                 previous_item_rects: Vec::new(),
                 tick: animation::Tick::new(),
             }),
@@ -103,16 +115,18 @@ where
     pub fn layout(
         &self,
         tree: &mut Tree,
-        _renderer: &Renderer,
+        renderer: &Renderer,
         limits: &Limits,
         _domain: &Domain,
         _rect: crate::core::Rectangle,
     ) -> Node {
-        let state = tree.state.downcast_mut::<State>();
+        let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
         let size = limits.max();
 
         if self.data.items.is_empty() {
             state.item_rects.clear();
+            state.item_labels.clear();
+            state.labels.clear();
             return Node::new(Size::ZERO);
         }
 
@@ -136,6 +150,8 @@ where
 
         if total <= 0.0 {
             state.item_rects.clear();
+            state.item_labels.clear();
+            state.labels.clear();
             return Node::new(Size::ZERO);
         }
 
@@ -216,7 +232,52 @@ where
             })
             .collect();
 
+        self.shape_labels(state, renderer, LABEL_FONT_BASELINE);
+
         Node::new(Size::ZERO)
+    }
+
+    /// Shapes one label paragraph per item index from the already-truncated
+    /// `item_labels` string, theme-free (font is `renderer.default_font`,
+    /// size is the same 12 px baseline the truncation budget uses), so the
+    /// text is laid out here and rendered in `draw` via `fill_paragraph`.
+    /// Items whose truncated label is empty (rectangle too small) keep a
+    /// default (empty) paragraph; `draw` skips them with the same
+    /// empty-string guard, so the index stays aligned with the item order.
+    fn shape_labels(&self, state: &mut State<Renderer::Paragraph>, renderer: &Renderer, font_baseline: f32) {
+        let hint_factor = renderer.scale_factor();
+        let default_font = renderer.default_font();
+        let item_count = state.item_labels.len();
+
+        while state.labels.len() < item_count {
+            state.labels.push(paragraph::Plain::default());
+        }
+        state.labels.truncate(item_count);
+
+        for (i, label) in state.item_labels.iter().enumerate() {
+            if label.is_empty() {
+                continue;
+            }
+            let paragraph = &mut state.labels[i];
+
+            let _ = paragraph.update(text::Text {
+                content: label,
+                bounds: Size::INFINITE,
+                size: crate::core::Pixels(font_baseline),
+                line_height: text::LineHeight::default(),
+                font: default_font,
+                align_x: text::Alignment::Left,
+                align_y: crate::core::alignment::Vertical::Top,
+                shaping: text::Shaping::Basic,
+                wrapping: text::Wrapping::None,
+                ellipsis: text::Ellipsis::default(),
+                hint_factor,
+                font_features: Vec::new(),
+                font_variations: Vec::new(),
+                letter_spacing: Default::default(),
+                weight: None,
+            });
+        }
     }
 
     /// Draws the treemap chart.
@@ -235,7 +296,7 @@ where
     ) where
         Theme: crate::design::Design + ?Sized,
     {
-        let state = tree.state.downcast_ref::<State>();
+        let state = tree.state.downcast_ref::<State<Renderer::Paragraph>>();
 
         if state.item_rects.is_empty() {
             return;
@@ -248,12 +309,14 @@ where
         let layout_bounds = layout.bounds();
         let mut frame = Frame::new(renderer, layout_bounds.size());
 
-        // Per-item label padding/font baseline match the constants used in
-        // `layout` so the truncation lines up with where `draw` puts the
-        // text. Theme font size is still honored for the actual rendering;
-        // only the truncation budget is fixed.
+        // Per-item label padding matches the constant used in `layout` so the
+        // text origin lines up with where the truncation budget assumed it.
         let padding = 4.0;
-        let font_size = theme.font_size();
+
+        // Label render list: `(item index, anchor, color)`. Anchors are
+        // layout-local (matching the item rects) and offset by `layout_bounds`
+        // at render time, drawn after the rectangles so glyphs sit on top.
+        let mut label_draws: Vec<(usize, crate::core::Point, crate::core::Color)> = Vec::new();
 
         // With a previous-layout snapshot (data change), each rect's
         // bounds lerp x/y/width/height from prev to cur. Without one
@@ -331,23 +394,18 @@ where
                 continue;
             }
 
-            // Draw label — pre-truncated in layout. Empty string means
-            // "rectangle too small to label".
+            // Collect label — pre-truncated/shaped in layout. Empty string
+            // means "rectangle too small to label". The anchor stays at the
+            // top-left text origin (`fill_text` used Left/Top alignment, so
+            // `fill_paragraph`'s top-left origin needs no min_bounds shift).
             let label_text = state.item_labels.get(i).map(String::as_str).unwrap_or("");
             if !label_text.is_empty() {
                 let label_color = text_pair.resolve(color, Some(background));
-                frame.fill_text(CanvasText {
-                    content: label_text.to_string(),
-                    position: crate::core::Point::new(rect.x + padding, rect.y + padding),
-                    color: label_color,
-                    size: crate::core::Pixels(font_size),
-                    font: crate::core::Font::default(),
-                    align_x: crate::core::alignment::Horizontal::Left.into(),
-                    align_y: crate::core::alignment::Vertical::Top,
-                    line_height: crate::core::text::LineHeight::default(),
-                    shaping: crate::core::text::Shaping::Basic,
-                    ..CanvasText::default()
-                });
+                label_draws.push((
+                    i,
+                    crate::core::Point::new(rect.x + padding, rect.y + padding),
+                    label_color,
+                ));
             }
         }
 
@@ -357,6 +415,13 @@ where
         renderer.with_translation(translation, |renderer| {
             renderer.draw_geometry(geometry);
         });
+
+        // Draw the item labels on top via the cached paragraphs.
+        for (i, anchor, color) in label_draws {
+            if let Some(paragraph) = state.labels.get(i) {
+                renderer.fill_paragraph(paragraph.raw(), anchor + translation, color, layout_bounds);
+            }
+        }
     }
 
     /// Check whether we should use the default navy palette for this item.
