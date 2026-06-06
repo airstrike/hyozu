@@ -119,6 +119,7 @@ where
         limits: &Limits,
         _domain: &Domain,
         _rect: crate::core::Rectangle,
+        design: Option<&dyn crate::design::Design>,
     ) -> Node {
         let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
         let size = limits.max();
@@ -187,15 +188,18 @@ where
         }
 
         // Pre-truncate per-item labels so `draw` doesn't allocate Strings
-        // every frame. Uses a fixed 12 px baseline for char width because
-        // `theme.font_size()` isn't available in `layout` (theme is draw-
-        // only by design). Mismatches with non-default themes auto-correct
-        // on the next relayout (resize, data change).
-        const LABEL_FONT_BASELINE: f32 = 12.0;
+        // every frame. The label baseline comes from the design's
+        // `data_label_text()` size (12 px when the chart has no design), so
+        // the char-width truncation budget and the shaped glyph size stay in
+        // lockstep. `None` keeps the historical 12 px baseline.
+        let label_baseline = design
+            .and_then(|d| d.data_label_text().size)
+            .map(|p| p.0)
+            .unwrap_or(12.0);
         const LABEL_PADDING: f32 = 4.0;
         const MIN_LABEL_WIDTH: f32 = 20.0;
         const MIN_LABEL_HEIGHT: f32 = 14.0;
-        let char_width = LABEL_FONT_BASELINE * 0.6;
+        let char_width = label_baseline * 0.6;
 
         state.item_labels = self
             .data
@@ -232,7 +236,7 @@ where
             })
             .collect();
 
-        self.shape_labels(state, renderer, LABEL_FONT_BASELINE);
+        self.shape_labels(state, renderer, label_baseline, design);
 
         Node::new(Size::ZERO)
     }
@@ -244,9 +248,17 @@ where
     /// Items whose truncated label is empty (rectangle too small) keep a
     /// default (empty) paragraph; `draw` skips them with the same
     /// empty-string guard, so the index stays aligned with the item order.
-    fn shape_labels(&self, state: &mut State<Renderer::Paragraph>, renderer: &Renderer, font_baseline: f32) {
+    fn shape_labels(
+        &self,
+        state: &mut State<Renderer::Paragraph>,
+        renderer: &Renderer,
+        font_baseline: f32,
+        design: Option<&dyn crate::design::Design>,
+    ) {
         let hint_factor = renderer.scale_factor();
-        let default_font = renderer.default_font();
+        let default_font = design
+            .map(|d| d.data_label_text().resolved_font(renderer.default_font()))
+            .unwrap_or_else(|| renderer.default_font());
         let item_count = state.item_labels.len();
 
         while state.labels.len() < item_count {

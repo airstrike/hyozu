@@ -99,6 +99,7 @@ where
         _limits: &Limits,
         domain: &Domain,
         rect: crate::core::Rectangle,
+        design: Option<&dyn crate::design::Design>,
     ) -> Node {
         let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
 
@@ -113,15 +114,20 @@ where
             }
         }
 
-        // Shape the label paragraph theme-free; drawn in `draw` via
-        // `fill_paragraph` so the text isn't reshaped every frame.
+        // Shape the band's edge label. The 11 px size is intrinsic to the
+        // mark; the design only supplies the font base (default font when the
+        // chart has no design), drawn in `draw` via `fill_paragraph` so the
+        // text isn't reshaped every frame.
         if let Some(label_text) = &self.data.label {
+            let default_font = design
+                .map(|d| d.data_label_text().resolved_font(renderer.default_font()))
+                .unwrap_or_else(|| renderer.default_font());
             let _ = state.label.update(text::Text {
                 content: label_text,
                 bounds: Size::INFINITE,
                 size: 11.0.into(),
                 line_height: text::LineHeight::default(),
-                font: renderer.default_font(),
+                font: default_font,
                 align_x: text::Alignment::Left,
                 align_y: crate::core::alignment::Vertical::Top,
                 shaping: text::Shaping::Basic,

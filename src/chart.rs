@@ -1638,15 +1638,24 @@ where
 
         let scene_origin = Point::new(self.padding.left, self.padding.top);
 
+        // The design the chart holds (if any) drives themed font/size
+        // resolution at shape time. iced withholds the theme from
+        // `layout`, so `None` (no explicit `.design(...)`) keeps the
+        // historical `renderer.default_font()` / 12px defaults.
+        let design: Option<&dyn design::Design> = self.design.as_deref().map(|d| d as &dyn design::Design);
+
         // Split-borrow so we can lay out the optional center child after
         // the scene has populated pie state at scene_tree.children[6].
         let (scene_slot, rest) = tree.children.split_at_mut(1);
         let scene_tree = &mut scene_slot[0];
 
         // Delegate layout to scene with padded limits
-        let scene_node = self
-            .scene
-            .layout(scene_tree, renderer, &layout::Limits::new(Size::ZERO, inner_size));
+        let scene_node = self.scene.layout(
+            scene_tree,
+            renderer,
+            &layout::Limits::new(Size::ZERO, inner_size),
+            design,
+        );
 
         let mut layout_children = vec![scene_node.move_to(scene_origin)];
 

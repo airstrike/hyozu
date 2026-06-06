@@ -487,6 +487,7 @@ where
         tree: &mut Tree,
         renderer: &Renderer,
         limits: &crate::core::layout::Limits,
+        design: Option<&dyn crate::design::Design>,
     ) -> crate::core::layout::Node {
         use crate::core::layout::Node;
         use crate::core::{Point, Size};
@@ -663,7 +664,7 @@ where
             let xb = x_bounds.unwrap_or((0.0, 1.0));
             let yb = y_bounds.unwrap_or((0.0, 1.0));
             let plot_tree = &mut tree.children[6];
-            self.plot_area.shape_labels(plot_tree, renderer);
+            self.plot_area.shape_labels(plot_tree, renderer, design);
             self.plot_area
                 .min_insets(plot_tree, crate::core::Size::new(plot_width, plot_height), xb, yb)
         };
@@ -835,6 +836,7 @@ where
             self.y_transform,
             self.secondary_y_transform,
             &self.geo_config,
+            design,
         );
 
         // --- Phase 8: Position all nodes ---

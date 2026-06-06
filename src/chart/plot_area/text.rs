@@ -79,6 +79,7 @@ where
     /// the cartesian or geo plane based on `coord_kind`, then apply the
     /// per-mark `offset`. Geo labels with no geo plane (misconfiguration)
     /// emit an empty `pixel_points`, which makes `draw` short-circuit.
+    #[allow(clippy::too_many_arguments)]
     pub fn layout(
         &self,
         tree: &mut Tree,
@@ -87,6 +88,7 @@ where
         domain: &Domain,
         rect: crate::core::Rectangle,
         geo_plane: Option<&geo::Plane>,
+        design: Option<&dyn crate::design::Design>,
     ) -> Node {
         let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
         let (mark_dx, mark_dy) = self.data.offset;
@@ -122,7 +124,7 @@ where
             },
         };
 
-        self.shape_labels(state, renderer);
+        self.shape_labels(state, renderer, design);
 
         Node::new(Size::ZERO)
     }
@@ -133,8 +135,19 @@ where
     /// Items with an empty label keep a default (empty) paragraph; the draw
     /// pass skips them with the same guard, so the index stays aligned with
     /// the item order.
-    fn shape_labels(&self, state: &mut State<Renderer::Paragraph>, renderer: &Renderer) {
+    fn shape_labels(
+        &self,
+        state: &mut State<Renderer::Paragraph>,
+        renderer: &Renderer,
+        design: Option<&dyn crate::design::Design>,
+    ) {
         let hint_factor = renderer.scale_factor();
+        // The text mark carries its own explicit `size`; the design only
+        // supplies the font base (the mark's `Font::default()` when the chart
+        // has no design).
+        let default_font = design
+            .map(|d| d.data_label_text().resolved_font(crate::core::Font::default()))
+            .unwrap_or_default();
         let item_count = self.data.items.len();
 
         while state.labels.len() < item_count {
@@ -153,7 +166,7 @@ where
                 bounds: Size::INFINITE,
                 size: crate::core::Pixels(self.data.size),
                 line_height: text::LineHeight::default(),
-                font: crate::core::Font::default(),
+                font: default_font,
                 align_x: text::Alignment::Left,
                 align_y: crate::core::alignment::Vertical::Top,
                 shaping: text::Shaping::Basic,

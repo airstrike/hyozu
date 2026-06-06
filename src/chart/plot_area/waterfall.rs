@@ -117,6 +117,7 @@ where
         _limits: &Limits,
         domain: &Domain,
         rect: Rectangle,
+        design: Option<&dyn crate::design::Design>,
     ) -> Node {
         let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
 
@@ -212,7 +213,7 @@ where
         }
 
         state.label_rects = self.compute_label_rects(state);
-        self.shape_labels(state, renderer);
+        self.shape_labels(state, renderer, design);
 
         Node::new(Size::ZERO)
     }
@@ -223,11 +224,21 @@ where
     /// Entries with no resolvable label keep a default (empty) paragraph; the
     /// draw pass skips them with the same `resolve_label`/`show.allows` guards,
     /// so the index stays aligned with the entry order.
-    fn shape_labels(&self, state: &mut State<Renderer::Paragraph>, renderer: &Renderer) {
-        let default_font = renderer.default_font();
+    fn shape_labels(
+        &self,
+        state: &mut State<Renderer::Paragraph>,
+        renderer: &Renderer,
+        design: Option<&dyn crate::design::Design>,
+    ) {
+        let default_font = design
+            .map(|d| d.data_label_text().resolved_font(renderer.default_font()))
+            .unwrap_or_else(|| renderer.default_font());
         let hint_factor = renderer.scale_factor();
         let chart_label = self.data.label.as_ref();
-        let default_size = 12.0;
+        let default_size = design
+            .and_then(|d| d.data_label_text().size)
+            .map(|p| p.0)
+            .unwrap_or(12.0);
 
         let entry_count = self.data.entries.len();
         while state.labels.len() < entry_count {

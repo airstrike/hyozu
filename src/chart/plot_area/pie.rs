@@ -212,8 +212,17 @@ where
         limits: &Limits,
         _domain: &Domain,
         _rect: crate::core::Rectangle,
+        design: Option<&dyn crate::design::Design>,
     ) -> Node {
         let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
+
+        // Base label size: the design's `data_label_text()` size (12 px when
+        // the chart has no design), shared by the rect estimate below and the
+        // paragraph shaping so the reserved box matches the shaped glyphs.
+        let default_size = design
+            .and_then(|d| d.data_label_text().size)
+            .map(|p| p.0)
+            .unwrap_or(12.0);
 
         let total: f64 = self.data.slices.iter().map(|s| finite_or_zero(s.value)).sum();
 
@@ -274,7 +283,7 @@ where
                     return None;
                 }
 
-                let font_size = label.text.size.map(|p| p.0).unwrap_or(12.0);
+                let font_size = label.text.size.map(|p| p.0).unwrap_or(default_size);
                 let char_width = font_size * 0.6;
                 let text_width = text.len() as f32 * char_width + 6.0;
                 let text_height = font_size * 1.2 + 4.0;
@@ -294,7 +303,7 @@ where
             })
             .collect();
 
-        self.shape_labels(state, renderer, total, &visibility);
+        self.shape_labels(state, renderer, total, &visibility, design);
 
         Node::new(Size::ZERO)
     }
@@ -312,8 +321,15 @@ where
         renderer: &Renderer,
         total: f64,
         visibility: &[bool],
+        design: Option<&dyn crate::design::Design>,
     ) {
-        let default_font = renderer.default_font();
+        let default_font = design
+            .map(|d| d.data_label_text().resolved_font(renderer.default_font()))
+            .unwrap_or_else(|| renderer.default_font());
+        let default_size = design
+            .and_then(|d| d.data_label_text().size)
+            .map(|p| p.0)
+            .unwrap_or(12.0);
         let hint_factor = renderer.scale_factor();
 
         let slice_count = self.data.slices.len();
@@ -338,7 +354,7 @@ where
                 continue;
             }
 
-            let size = label.text.size.map(|p| p.0).unwrap_or(12.0);
+            let size = label.text.size.map(|p| p.0).unwrap_or(default_size);
             let mut font = label.text.resolved_font(default_font);
             if let Some(w) = label.text.weight {
                 font.weight = w;

@@ -133,6 +133,7 @@ where
         limits: &Limits,
         _domain: &Domain,
         _rect: crate::core::Rectangle,
+        design: Option<&dyn crate::design::Design>,
     ) -> Node {
         let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
 
@@ -149,7 +150,7 @@ where
         state.sweep_rad = if sweep_rad.is_finite() { sweep_rad } else { 0.0 };
         state.value_angle = proportion * state.sweep_rad;
 
-        self.shape_labels(state, renderer, limits.max(), range);
+        self.shape_labels(state, renderer, limits.max(), range, design);
 
         Node::new(Size::ZERO)
     }
@@ -162,8 +163,20 @@ where
     /// rendered geometry. Hidden / absent elements keep a default (empty)
     /// paragraph; `draw` skips them with the same `show_value` / `unit` /
     /// `subtitle` / `show_tick_labels` guards.
-    fn shape_labels(&self, state: &mut State<Renderer::Paragraph>, renderer: &Renderer, size: Size, range: f64) {
-        let default_font = renderer.default_font();
+    fn shape_labels(
+        &self,
+        state: &mut State<Renderer::Paragraph>,
+        renderer: &Renderer,
+        size: Size,
+        range: f64,
+        design: Option<&dyn crate::design::Design>,
+    ) {
+        // The gauge's glyph sizes stay radius-proportional; the design only
+        // supplies the font family/weight base (12 px / default font when the
+        // chart has no design).
+        let default_font = design
+            .map(|d| d.data_label_text().resolved_font(renderer.default_font()))
+            .unwrap_or_else(|| renderer.default_font());
         let hint_factor = renderer.scale_factor();
 
         let shape = |paragraph: &mut paragraph::Plain<Renderer::Paragraph>, content: &str, px: f32| {

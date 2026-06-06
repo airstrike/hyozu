@@ -311,6 +311,7 @@ where
         _limits: &Limits,
         domain: &Domain,
         rect: Rectangle,
+        _design: Option<&dyn crate::design::Design>,
     ) -> Node {
         use crate::mark::bar::Direction;
 
@@ -730,10 +731,21 @@ where
     /// a draw-time concern). Bars with a non-finite value or empty formatted
     /// text keep a default (empty) paragraph; the draw pass skips them with the
     /// same guards, so the index stays aligned with `bar_idx`.
-    pub(super) fn shape_labels(&self, state: &mut State<Renderer::Paragraph>, renderer: &Renderer) {
+    pub(super) fn shape_labels(
+        &self,
+        state: &mut State<Renderer::Paragraph>,
+        renderer: &Renderer,
+        design: Option<&dyn crate::design::Design>,
+    ) {
         use crate::core::alignment;
 
-        let default_font = renderer.default_font();
+        let default_font = design
+            .map(|d| d.data_label_text().resolved_font(renderer.default_font()))
+            .unwrap_or_else(|| renderer.default_font());
+        let default_size = design
+            .and_then(|d| d.data_label_text().size)
+            .map(|p| p.0)
+            .unwrap_or(12.0);
         let hint_factor = renderer.scale_factor();
 
         while state.labels.len() < self.data.series.len() {
@@ -759,7 +771,7 @@ where
             }
             labels.truncate(bar_count);
 
-            let config_size = label_config.text.size.map(|p| p.0).unwrap_or(12.0);
+            let config_size = label_config.text.size.map(|p| p.0).unwrap_or(default_size);
 
             for (bar_idx, point) in series.points.iter().take(bar_count).enumerate() {
                 let paragraph = &mut labels[bar_idx];

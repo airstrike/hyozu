@@ -102,6 +102,7 @@ where
 
     /// Layout the line - transforms data coordinates to pixel coordinates
     /// and creates child nodes for labels
+    #[allow(clippy::too_many_arguments)]
     pub fn layout(
         &self,
         tree: &mut Tree,
@@ -110,6 +111,7 @@ where
         domain: &Domain,
         rect: Rectangle,
         obstacles: &[Rectangle],
+        design: Option<&dyn crate::design::Design>,
     ) -> Node {
         let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
 
@@ -123,8 +125,15 @@ where
         state.label_rects.clear();
 
         if let Some(label_config) = &self.data.label {
-            let label_size = label_config.text.resolved_size(12.0);
-            let label_font = label_config.text.resolved_font(renderer.default_font());
+            let default_font = design
+                .map(|d| d.data_label_text().resolved_font(renderer.default_font()))
+                .unwrap_or_else(|| renderer.default_font());
+            let default_size = design
+                .and_then(|d| d.data_label_text().size)
+                .map(|p| p.0)
+                .unwrap_or(12.0);
+            let label_size = label_config.text.resolved_size(default_size);
+            let label_font = label_config.text.resolved_font(default_font);
             let hint_factor = renderer.scale_factor();
             let num_points = state.pixel_points.len();
 

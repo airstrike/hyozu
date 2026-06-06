@@ -105,6 +105,7 @@ where
 
     pub(super) fn diff(&self, _tree: &mut Tree) {}
 
+    #[allow(clippy::too_many_arguments)]
     pub fn layout(
         &self,
         tree: &mut Tree,
@@ -113,6 +114,7 @@ where
         domain: &Domain,
         rect: Rectangle,
         obstacles: &[Rectangle],
+        design: Option<&dyn crate::design::Design>,
     ) -> Node {
         let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
 
@@ -201,7 +203,13 @@ where
             .resize_with(self.data.series.len(), Vec::new);
         state.series_label_rects.resize_with(self.data.series.len(), Vec::new);
 
-        let default_font = renderer.default_font();
+        let default_font = design
+            .map(|d| d.data_label_text().resolved_font(renderer.default_font()))
+            .unwrap_or_else(|| renderer.default_font());
+        let default_size = design
+            .and_then(|d| d.data_label_text().size)
+            .map(|p| p.0)
+            .unwrap_or(12.0);
         let hint_factor = renderer.scale_factor();
 
         let all_segments: Vec<(Point, Point)> = state
@@ -223,7 +231,7 @@ where
                 continue;
             }
 
-            let label_size = label_config.text.size.map(|p| p.0).unwrap_or(12.0);
+            let label_size = label_config.text.size.map(|p| p.0).unwrap_or(default_size);
             let label_font = label_config.text.resolved_font(default_font);
 
             let minmax_indices: Vec<usize> = match label_config.show {

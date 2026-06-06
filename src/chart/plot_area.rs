@@ -746,12 +746,12 @@ where
     /// on the data rect — so it runs in the measurement pass; [`min_insets`]
     /// then reads the kept paragraphs' `min_bounds()`, and the final
     /// [`PlotArea::layout`] reuses the same shaped paragraphs (no reshape).
-    pub fn shape_labels(&self, tree: &mut Tree, renderer: &Renderer) {
+    pub fn shape_labels(&self, tree: &mut Tree, renderer: &Renderer, design: Option<&dyn crate::design::Design>) {
         for (i, series) in self.series.iter().enumerate() {
             if let Series::Bars(bars) = series {
                 let series_tree = &mut tree.children[i];
                 let state = series_tree.state.downcast_mut::<bars::State<Renderer::Paragraph>>();
-                bars.shape_labels(state, renderer);
+                bars.shape_labels(state, renderer, design);
             }
         }
     }
@@ -807,6 +807,7 @@ where
         y_transform: crate::scale::Transform,
         secondary_y_transform: crate::scale::Transform,
         geo_config: &GeoConfig,
+        design: Option<&dyn crate::design::Design>,
     ) -> Node {
         let state = tree.state.downcast_mut::<State>();
         let size = limits.max();
@@ -903,13 +904,29 @@ where
             };
             match series {
                 Series::Area(a) => {
-                    a.layout(series_tree, renderer, limits, use_domain, plot_rect, axis_obstacles);
+                    a.layout(
+                        series_tree,
+                        renderer,
+                        limits,
+                        use_domain,
+                        plot_rect,
+                        axis_obstacles,
+                        design,
+                    );
                 }
                 Series::Line(line) => {
-                    line.layout(series_tree, renderer, limits, use_domain, plot_rect, axis_obstacles);
+                    line.layout(
+                        series_tree,
+                        renderer,
+                        limits,
+                        use_domain,
+                        plot_rect,
+                        axis_obstacles,
+                        design,
+                    );
                 }
                 Series::Bars(bars) => {
-                    bars.layout(series_tree, renderer, limits, use_domain, plot_rect);
+                    bars.layout(series_tree, renderer, limits, use_domain, plot_rect, design);
                 }
                 Series::BoxPlot(bp) => {
                     bp.layout(series_tree, renderer, limits, use_domain, plot_rect);
@@ -918,37 +935,45 @@ where
                     c.layout(series_tree, renderer, limits, use_domain, plot_rect, geo_plane_ref);
                 }
                 Series::Pie(pie) => {
-                    pie.layout(series_tree, renderer, limits, use_domain, plot_rect);
+                    pie.layout(series_tree, renderer, limits, use_domain, plot_rect, design);
                 }
                 Series::Gauge(gauge) => {
-                    gauge.layout(series_tree, renderer, limits, use_domain, plot_rect);
+                    gauge.layout(series_tree, renderer, limits, use_domain, plot_rect, design);
                 }
                 Series::Waterfall(wf) => {
-                    wf.layout(series_tree, renderer, limits, use_domain, plot_rect);
+                    wf.layout(series_tree, renderer, limits, use_domain, plot_rect, design);
                 }
                 Series::Xy(xy) => {
                     xy.layout(series_tree, renderer, limits, use_domain, plot_rect, geo_plane_ref);
                 }
                 Series::Rule(rule) => {
-                    rule.layout(series_tree, renderer, limits, use_domain, plot_rect);
+                    rule.layout(series_tree, renderer, limits, use_domain, plot_rect, design);
                 }
                 Series::Band(band) => {
-                    band.layout(series_tree, renderer, limits, use_domain, plot_rect);
+                    band.layout(series_tree, renderer, limits, use_domain, plot_rect, design);
                 }
                 Series::Tick(tick) => {
                     tick.layout(series_tree, renderer, limits, use_domain, plot_rect);
                 }
                 Series::Heatmap(hm) => {
-                    hm.layout(series_tree, renderer, limits, use_domain, plot_rect);
+                    hm.layout(series_tree, renderer, limits, use_domain, plot_rect, design);
                 }
                 Series::Treemap(tm) => {
-                    tm.layout(series_tree, renderer, limits, use_domain, plot_rect);
+                    tm.layout(series_tree, renderer, limits, use_domain, plot_rect, design);
                 }
                 Series::Violin(v) => {
                     v.layout(series_tree, renderer, limits, use_domain, plot_rect);
                 }
                 Series::Text(t) => {
-                    t.layout(series_tree, renderer, limits, use_domain, plot_rect, geo_plane_ref);
+                    t.layout(
+                        series_tree,
+                        renderer,
+                        limits,
+                        use_domain,
+                        plot_rect,
+                        geo_plane_ref,
+                        design,
+                    );
                 }
             }
         }

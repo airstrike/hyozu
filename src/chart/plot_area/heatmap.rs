@@ -173,6 +173,7 @@ where
         _limits: &Limits,
         domain: &Domain,
         rect: Rectangle,
+        design: Option<&dyn crate::design::Design>,
     ) -> Node {
         let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
         state.cell_rects.clear();
@@ -206,7 +207,7 @@ where
             }
         }
 
-        self.shape_labels(state, renderer, rows, cols);
+        self.shape_labels(state, renderer, rows, cols, design);
 
         Node::new(Size::ZERO)
     }
@@ -217,9 +218,22 @@ where
     /// `draw` via `fill_paragraph`. Non-finite values keep a default (empty)
     /// paragraph; `draw` skips them — and any cell hidden by `show_labels` —
     /// with the same guards, so the index stays aligned with the cell order.
-    fn shape_labels(&self, state: &mut State<Renderer::Paragraph>, renderer: &Renderer, rows: usize, cols: usize) {
+    fn shape_labels(
+        &self,
+        state: &mut State<Renderer::Paragraph>,
+        renderer: &Renderer,
+        rows: usize,
+        cols: usize,
+        design: Option<&dyn crate::design::Design>,
+    ) {
         let hint_factor = renderer.scale_factor();
-        let default_font = renderer.default_font();
+        let default_font = design
+            .map(|d| d.data_label_text().resolved_font(renderer.default_font()))
+            .unwrap_or_else(|| renderer.default_font());
+        let default_size = design
+            .and_then(|d| d.data_label_text().size)
+            .map(|p| p.0)
+            .unwrap_or(12.0);
         let cell_count = rows * cols;
 
         while state.labels.len() < cell_count {
@@ -245,7 +259,7 @@ where
                 let _ = paragraph.update(text::Text {
                     content: &content,
                     bounds: Size::INFINITE,
-                    size: crate::core::Pixels(12.0),
+                    size: crate::core::Pixels(default_size),
                     line_height: text::LineHeight::default(),
                     font: default_font,
                     align_x: text::Alignment::Left,
