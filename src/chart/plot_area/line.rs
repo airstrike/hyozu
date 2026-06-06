@@ -93,7 +93,14 @@ where
 
     /// Layout the line - transforms data coordinates to pixel coordinates
     /// and creates child nodes for labels
-    pub fn layout(&self, tree: &mut Tree, _renderer: &Renderer, _limits: &Limits, plane: &Plane) -> Node {
+    pub fn layout(
+        &self,
+        tree: &mut Tree,
+        _renderer: &Renderer,
+        _limits: &Limits,
+        plane: &Plane,
+        obstacles: &[Rectangle],
+    ) -> Node {
         let state = tree.state.downcast_mut::<State>();
 
         // Transform all data points to pixel coordinates
@@ -182,7 +189,7 @@ where
                         label_height,
                         &segments,
                         &state.label_rects,
-                        &plane.obstacles,
+                        obstacles,
                         Some(plane.bounds),
                     ),
                     other => {
@@ -192,7 +199,7 @@ where
                             start_rect,
                             &segments,
                             &state.label_rects,
-                            &plane.obstacles,
+                            obstacles,
                             Some(plane.bounds),
                             10,
                         )

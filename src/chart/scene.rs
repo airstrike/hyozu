@@ -785,14 +785,44 @@ where
             (bounds, secondary_bounds, insets)
         };
 
-        // Sibling-axis pixel extents, used only to build label-avoidance
-        // obstacle bands inside the plot area (removed in a later phase).
-        let axis_bands = crate::chart::plot_area::Insets {
-            left: left_width,
-            right: right_width,
-            top: top_height,
-            bottom: bottom_height,
-        };
+        // Label-avoidance obstacle bands: the sibling axis gutters expressed
+        // as plot-local rectangles (left axis at negative x, bottom axis below
+        // the plot, etc.), sourced from the laid-out axis node sizes. Marks
+        // that place data labels via pathfinding (area, line) keep their labels
+        // out of these regions.
+        let mut axis_obstacles = Vec::new();
+        if left_width > 0.0 {
+            axis_obstacles.push(crate::core::Rectangle {
+                x: -left_width,
+                y: 0.0,
+                width: left_width,
+                height: plot_height,
+            });
+        }
+        if right_width > 0.0 {
+            axis_obstacles.push(crate::core::Rectangle {
+                x: plot_width,
+                y: 0.0,
+                width: right_width,
+                height: plot_height,
+            });
+        }
+        if top_height > 0.0 {
+            axis_obstacles.push(crate::core::Rectangle {
+                x: 0.0,
+                y: -top_height,
+                width: plot_width,
+                height: top_height,
+            });
+        }
+        if bottom_height > 0.0 {
+            axis_obstacles.push(crate::core::Rectangle {
+                x: 0.0,
+                y: plot_height,
+                width: plot_width,
+                height: bottom_height,
+            });
+        }
 
         let plot_area_node = self.plot_area.layout(
             &mut second_children[1],
@@ -801,7 +831,7 @@ where
             axis_bounds,
             secondary_bounds,
             plot_insets,
-            axis_bands,
+            &axis_obstacles,
             self.y_transform,
             self.secondary_y_transform,
             &self.geo_config,

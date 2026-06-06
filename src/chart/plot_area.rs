@@ -112,9 +112,6 @@ pub struct Plane {
     /// Data domain mapped onto [`Plane::bounds`].
     pub domain: Domain,
     pub bounds: Rectangle,
-    /// Obstacle rectangles that labels must avoid (axes, etc.)
-    /// Coordinates are relative to plot area origin.
-    pub obstacles: Vec<Rectangle>,
 }
 
 /// Pixel margins reserved on each edge of the plot area to seat the
@@ -822,7 +819,7 @@ where
         axis_bounds: Option<(f64, f64, f64, f64)>, // (x_min, x_max, y_min, y_max) from primary axes
         secondary_axis_bounds: Option<(f64, f64, f64, f64)>, // bounds from secondary axes
         insets: Insets,                            // Data-rect margins (shared with axis ticks)
-        axis_bands: Insets,                        // Sibling-axis pixel extents (obstacle bands)
+        axis_obstacles: &[Rectangle],              // Plot-local axis gutters labels avoid
         y_transform: crate::scale::Transform,
         secondary_y_transform: crate::scale::Transform,
         geo_config: &GeoConfig,
@@ -843,50 +840,6 @@ where
             y_min = y_max / 1e4;
         }
 
-        // Compute obstacle rectangles from axis layout
-        // These are relative to plot area origin (0,0 is top-left of plot)
-        let mut obstacles = Vec::new();
-
-        // Left axis obstacle (to the left of plot area)
-        if axis_bands.left > 0.0 {
-            obstacles.push(Rectangle {
-                x: -axis_bands.left,
-                y: 0.0,
-                width: axis_bands.left,
-                height: size.height,
-            });
-        }
-
-        // Right axis obstacle (to the right of plot area)
-        if axis_bands.right > 0.0 {
-            obstacles.push(Rectangle {
-                x: size.width,
-                y: 0.0,
-                width: axis_bands.right,
-                height: size.height,
-            });
-        }
-
-        // Top axis obstacle (above plot area)
-        if axis_bands.top > 0.0 {
-            obstacles.push(Rectangle {
-                x: 0.0,
-                y: -axis_bands.top,
-                width: size.width,
-                height: axis_bands.top,
-            });
-        }
-
-        // Bottom axis obstacle (below plot area)
-        if axis_bands.bottom > 0.0 {
-            obstacles.push(Rectangle {
-                x: 0.0,
-                y: size.height,
-                width: size.width,
-                height: axis_bands.bottom,
-            });
-        }
-
         let plot_rect = Rectangle {
             x: insets.left,
             y: insets.top,
@@ -901,7 +854,6 @@ where
                 y_transform,
             },
             bounds: plot_rect,
-            obstacles: obstacles.clone(),
         };
 
         // Build a secondary plane when the scene provides secondary axis
@@ -926,7 +878,6 @@ where
                     y_transform: secondary_y_transform,
                 },
                 bounds: plot_rect,
-                obstacles,
             })
         } else {
             None
@@ -973,10 +924,10 @@ where
             };
             match series {
                 Series::Area(a) => {
-                    a.layout(series_tree, renderer, limits, use_plane);
+                    a.layout(series_tree, renderer, limits, use_plane, axis_obstacles);
                 }
                 Series::Line(line) => {
-                    line.layout(series_tree, renderer, limits, use_plane);
+                    line.layout(series_tree, renderer, limits, use_plane, axis_obstacles);
                 }
                 Series::Bars(bars) => {
                     bars.layout(series_tree, renderer, limits, use_plane);

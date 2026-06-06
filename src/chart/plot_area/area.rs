@@ -95,7 +95,14 @@ where
 
     pub(super) fn diff(&self, _tree: &mut Tree) {}
 
-    pub fn layout(&self, tree: &mut Tree, _renderer: &Renderer, _limits: &Limits, plane: &Plane) -> Node {
+    pub fn layout(
+        &self,
+        tree: &mut Tree,
+        _renderer: &Renderer,
+        _limits: &Limits,
+        plane: &Plane,
+        obstacles: &[Rectangle],
+    ) -> Node {
         let state = tree.state.downcast_mut::<State>();
 
         let zero_y = plane.to_pixel(Datum::ORIGIN).y;
@@ -170,7 +177,7 @@ where
         // Build label info per series. Labels avoid:
         //   - every series' upper envelope (so a later series' label does
         //     not overlap an earlier series' line)
-        //   - axis obstacles from the plane
+        //   - the sibling-axis gutter obstacles
         //   - labels already placed in this or earlier series
         state.series_label_texts.clear();
         state.series_label_positions.clear();
@@ -268,7 +275,7 @@ where
                     label_height,
                     &all_segments,
                     &placed_rects,
-                    &plane.obstacles,
+                    obstacles,
                     Some(plane.bounds),
                 );
 
