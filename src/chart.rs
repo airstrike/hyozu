@@ -1071,8 +1071,13 @@ fn animation_tick_mut(tree: &mut Tree) -> Option<&mut animation::Tick> {
     if tag == tree::Tag::of::<plot_area::choropleth::State>() {
         return Some(&mut tree.state.downcast_mut::<plot_area::choropleth::State>().tick);
     }
-    if tag == tree::Tag::of::<plot_area::gauge::State>() {
-        return Some(&mut tree.state.downcast_mut::<plot_area::gauge::State>().tick);
+    if tag == tree::Tag::of::<plot_area::gauge::State<<Renderer as crate::core::text::Renderer>::Paragraph>>() {
+        return Some(
+            &mut tree
+                .state
+                .downcast_mut::<plot_area::gauge::State<<Renderer as crate::core::text::Renderer>::Paragraph>>()
+                .tick,
+        );
     }
     if tag == tree::Tag::of::<plot_area::band::State<<Renderer as crate::core::text::Renderer>::Paragraph>>() {
         return Some(
@@ -1268,8 +1273,12 @@ fn replant_choropleth(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
 /// to interpolate from there. The caller is responsible for confirming
 /// both nodes carry a `gauge::State`.
 fn replant_gauge(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
-    let old_state = old_mark.state.downcast_ref::<plot_area::gauge::State>();
-    let new_state = new_mark.state.downcast_mut::<plot_area::gauge::State>();
+    let old_state = old_mark
+        .state
+        .downcast_ref::<plot_area::gauge::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
+    let new_state = new_mark
+        .state
+        .downcast_mut::<plot_area::gauge::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
     if animate {
         new_state.previous_value_angle = old_state.value_angle;
         new_state.tick.pending_start = true;
@@ -1347,7 +1356,7 @@ fn replant_mark_animations(old_children: &[Tree], new_children: &mut [Tree], ani
     let treemap_tag =
         tree::Tag::of::<plot_area::treemap::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
     let choropleth_tag = tree::Tag::of::<plot_area::choropleth::State>();
-    let gauge_tag = tree::Tag::of::<plot_area::gauge::State>();
+    let gauge_tag = tree::Tag::of::<plot_area::gauge::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
     let band_tag = tree::Tag::of::<plot_area::band::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
     let boxplot_tag = tree::Tag::of::<plot_area::boxplot::State>();
     let violin_tag = tree::Tag::of::<plot_area::violin::State>();

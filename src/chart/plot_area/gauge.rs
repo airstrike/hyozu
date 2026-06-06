@@ -4,13 +4,16 @@ use crate::core::Size;
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
 use crate::data::axis::tick;
-use crate::widget::canvas::{Frame, Path, Text};
+use crate::widget::canvas::{Frame, Path};
 
-use crate::core::text;
+use crate::core::text::{self, paragraph};
 use crate::widget::renderer::geometry;
 
 /// State for Gauge — stores computed arc parameters
-pub struct State {
+pub struct State<P>
+where
+    P: text::Paragraph,
+{
     /// Value angle in radians (relative to arc start)
     pub value_angle: f32,
     /// Total sweep in radians
@@ -21,9 +24,51 @@ pub struct State {
     /// one. `0.0` on a fresh mount, in which case the animation collapses
     /// to a `0 → value_angle` sweep.
     pub previous_value_angle: f32,
+    /// Center value, unit, and subtitle label paragraphs plus the
+    /// per-tick label paragraphs, shaped once in [`Gauge::layout`] and
+    /// rendered in [`Gauge::draw`] via
+    /// [`crate::core::text::Renderer::fill_paragraph`]. The arc radius (and
+    /// hence every font size and tick label set) is derived from the same
+    /// `limits.max()` the draw pass derives from `layout.bounds()`, which
+    /// are equal for the polar gauge node, so the shaped paragraphs match
+    /// the draw geometry. Hidden / absent elements keep a default (empty)
+    /// paragraph; `draw` skips them with the same guards.
+    pub labels: Labels<P>,
     /// Per-frame entrance/transition lifecycle (progress, pending-start
     /// flag, latest captured `Instant`) advanced by the chart widget.
     pub tick: animation::Tick,
+}
+
+/// The shaped label paragraphs for a gauge: the three center texts and the
+/// arc tick labels. Each is shaped in [`Gauge::layout`] and rendered in
+/// [`Gauge::draw`]; absent ones stay default (empty) and are skipped.
+pub struct Labels<P>
+where
+    P: text::Paragraph,
+{
+    /// Center value text (the big number).
+    pub value: paragraph::Plain<P>,
+    /// Unit label below the value.
+    pub unit: paragraph::Plain<P>,
+    /// Subtitle below the unit.
+    pub subtitle: paragraph::Plain<P>,
+    /// One paragraph per arc tick label, index-aligned with the tick
+    /// values [`compute_tick_values`] produces.
+    pub ticks: Vec<paragraph::Plain<P>>,
+}
+
+impl<P> Default for Labels<P>
+where
+    P: text::Paragraph,
+{
+    fn default() -> Self {
+        Self {
+            value: paragraph::Plain::default(),
+            unit: paragraph::Plain::default(),
+            subtitle: paragraph::Plain::default(),
+            ticks: Vec::new(),
+        }
+    }
 }
 
 /// A Gauge series that renders gauge/meter charts.
@@ -43,7 +88,7 @@ where
 impl<'a, Message, Renderer> Gauge<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: text::Renderer + geometry::Renderer,
+    Renderer: text::Renderer<Font = crate::core::Font> + geometry::Renderer,
 {
     /// Create a new Gauge borrowing data
     pub fn new(data: &'a crate::mark::gauge::Gauge) -> Self {
@@ -63,11 +108,12 @@ where
     /// Returns the initial tree state for this Gauge
     pub(super) fn state(&self) -> Tree {
         Tree {
-            tag: tree::Tag::of::<State>(),
-            state: tree::State::new(State {
+            tag: tree::Tag::of::<State<Renderer::Paragraph>>(),
+            state: tree::State::new(State::<Renderer::Paragraph> {
                 value_angle: 0.0,
                 sweep_rad: 0.0,
                 previous_value_angle: 0.0,
+                labels: Labels::default(),
                 tick: animation::Tick::new(),
             }),
             children: Vec::new(),
@@ -83,12 +129,12 @@ where
     pub fn layout(
         &self,
         tree: &mut Tree,
-        _renderer: &Renderer,
-        _limits: &Limits,
+        renderer: &Renderer,
+        limits: &Limits,
         _domain: &Domain,
         _rect: crate::core::Rectangle,
     ) -> Node {
-        let state = tree.state.downcast_mut::<State>();
+        let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
 
         let range = self.data.max - self.data.min;
         // Treat non-finite value/min/range as a 0 proportion so a stray NaN
@@ -103,7 +149,83 @@ where
         state.sweep_rad = if sweep_rad.is_finite() { sweep_rad } else { 0.0 };
         state.value_angle = proportion * state.sweep_rad;
 
+        self.shape_labels(state, renderer, limits.max(), range);
+
         Node::new(Size::ZERO)
+    }
+
+    /// Shapes the gauge's center value/unit/subtitle and tick labels,
+    /// theme-free (font from `renderer.default_font()`, sizes scaled from the
+    /// arc radius). The radius is derived from `limits.max()` via
+    /// [`arc_radius`], the same value `draw` derives from `layout.bounds()`
+    /// (equal for the polar gauge node), so the shaped glyph sizes match the
+    /// rendered geometry. Hidden / absent elements keep a default (empty)
+    /// paragraph; `draw` skips them with the same `show_value` / `unit` /
+    /// `subtitle` / `show_tick_labels` guards.
+    fn shape_labels(&self, state: &mut State<Renderer::Paragraph>, renderer: &Renderer, size: Size, range: f64) {
+        let default_font = renderer.default_font();
+        let hint_factor = renderer.scale_factor();
+
+        let shape = |paragraph: &mut paragraph::Plain<Renderer::Paragraph>, content: &str, px: f32| {
+            let _ = paragraph.update(text::Text {
+                content,
+                bounds: Size::INFINITE,
+                size: crate::core::Pixels(px),
+                line_height: text::LineHeight::default(),
+                font: default_font,
+                align_x: text::Alignment::Left,
+                align_y: crate::core::alignment::Vertical::Top,
+                shaping: text::Shaping::Basic,
+                wrapping: text::Wrapping::None,
+                ellipsis: text::Ellipsis::default(),
+                hint_factor,
+                font_features: Vec::new(),
+                font_variations: Vec::new(),
+                letter_spacing: Default::default(),
+                weight: None,
+            });
+        };
+
+        let radius = arc_radius(self.data, size);
+        let font_size = radius * 0.35;
+
+        // Center value, unit, subtitle.
+        if self.data.show_value {
+            let value_text = if let Some(fmt) = &self.data.format {
+                (fmt)(self.data.value)
+            } else {
+                format!("{}", self.data.value)
+            };
+            shape(&mut state.labels.value, &value_text, font_size);
+
+            if let Some(unit) = &self.data.unit {
+                shape(&mut state.labels.unit, unit, font_size * 0.5);
+            }
+        }
+        if let Some(subtitle) = &self.data.subtitle {
+            shape(&mut state.labels.subtitle, subtitle, font_size * 0.3);
+        }
+
+        // Tick labels — one paragraph per tick value, index-aligned with
+        // `compute_tick_values`. Shaped whenever ticks + labels are enabled,
+        // regardless of tick `style` (draw skips the `None` style per tick).
+        let tick_font_size = radius * 0.1;
+        if let Some(ticks) = &self.data.ticks
+            && self.data.show_tick_labels
+            && range > 0.0
+        {
+            let tick_values = compute_tick_values(self.data, ticks, range);
+            while state.labels.ticks.len() < tick_values.len() {
+                state.labels.ticks.push(paragraph::Plain::default());
+            }
+            state.labels.ticks.truncate(tick_values.len());
+            for (i, v) in tick_values.iter().enumerate() {
+                let content = format_tick_value(*v);
+                shape(&mut state.labels.ticks[i], &content, tick_font_size);
+            }
+        } else {
+            state.labels.ticks.clear();
+        }
     }
 
     /// Draws the gauge chart
@@ -123,7 +245,7 @@ where
     ) where
         Theme: crate::design::Design + ?Sized,
     {
-        let state = tree.state.downcast_ref::<State>();
+        let state = tree.state.downcast_ref::<State<Renderer::Paragraph>>();
 
         let background = theme.background_color();
         let text_pair = theme.text_pair();
@@ -161,9 +283,6 @@ where
         // For a 270° gauge, gap is at the bottom
         let gap_rad = std::f32::consts::TAU - state.sweep_rad;
         let start_angle = std::f32::consts::FRAC_PI_2 + gap_rad / 2.0;
-
-        // Tick label font size scales with radius
-        let tick_font_size = radius * 0.1;
 
         let range = self.data.max - self.data.min;
         let has_zones = !self.data.zones.is_empty() && range > 0.0;
@@ -325,6 +444,11 @@ where
         // Tick marks and labels — suppressed mid-sweep so labels don't
         // pop in over arc segments that haven't grown into their final
         // positions yet.
+        // Tick-label render list: `(tick index, anchor, color)`. The marks
+        // (lines) go into the geometry frame; the labels are collected here
+        // (paired with the cached tick paragraphs by index) and drawn after
+        // the frame via `fill_paragraph`.
+        let mut tick_label_draws: Vec<(usize, crate::core::Point, crate::core::Color)> = Vec::new();
         if let Some(ticks) = &self.data.ticks
             && !animating
         {
@@ -332,6 +456,7 @@ where
                 &mut frame,
                 self.data,
                 ticks,
+                &state.labels.ticks,
                 cx,
                 cy,
                 inner_radius,
@@ -340,8 +465,7 @@ where
                 state.sweep_rad,
                 range,
                 text_pair,
-                theme,
-                tick_font_size,
+                &mut tick_label_draws,
             );
         }
 
@@ -377,74 +501,80 @@ where
         let font_size = radius * 0.35;
         let mut label_bottom = text_cy;
 
+        // Center value, unit, subtitle, and tick labels are drawn directly
+        // via the cached paragraphs (`fill_paragraph`) after the geometry
+        // frame, so the glyphs sit on top of the arc. Each entry pairs a
+        // cached paragraph (`PieceText` discriminant) with its Center/Center
+        // anchor and color. The `label_bottom` advancement matches the
+        // previous `fill_text` layout exactly.
+        let mut center_draws: Vec<(CenterPiece, crate::core::Point, crate::core::Color)> = Vec::new();
+
+        // Computes the top-left anchor for a Center/Center-aligned paragraph
+        // about `(px, py)` from the cached paragraph's `min_bounds`.
+        let center_anchor = |paragraph: &paragraph::Plain<Renderer::Paragraph>, px: f32, py: f32| {
+            let bounds = paragraph.min_bounds();
+            crate::core::Point::new(px - bounds.width / 2.0, py - bounds.height / 2.0)
+        };
+
         // Center value, unit, and subtitle — suppressed mid-sweep so
         // text doesn't pop in before the arc reaches its final position.
         if self.data.show_value && !animating {
-            let value_text = if let Some(fmt) = &self.data.format {
-                (fmt)(self.data.value)
-            } else {
-                format!("{}", self.data.value)
-            };
-
-            frame.fill_text(Text {
-                content: value_text,
-                position: crate::core::Point::new(cx, text_cy),
-                color: text_color,
-                size: font_size.into(),
-                font: theme.font(),
-                align_x: crate::core::alignment::Horizontal::Center.into(),
-                align_y: crate::core::alignment::Vertical::Center,
-                line_height: crate::core::text::LineHeight::default(),
-                shaping: crate::core::text::Shaping::Basic,
-                ..Text::default()
-            });
+            let anchor = center_anchor(&state.labels.value, cx, text_cy);
+            center_draws.push((CenterPiece::Value, anchor, text_color));
 
             label_bottom = text_cy + font_size * 0.5 + self.data.label_spacing;
 
-            // Draw unit label below value
-            if let Some(unit) = &self.data.unit {
+            // Unit label below value
+            if self.data.unit.is_some() {
                 let unit_size = font_size * 0.5;
-                frame.fill_text(Text {
-                    content: unit.clone(),
-                    position: crate::core::Point::new(cx, label_bottom),
-                    color: crate::core::Color { a: 0.6, ..text_color },
-                    size: unit_size.into(),
-                    font: theme.font(),
-                    align_x: crate::core::alignment::Horizontal::Center.into(),
-                    align_y: crate::core::alignment::Vertical::Center,
-                    line_height: crate::core::text::LineHeight::default(),
-                    shaping: crate::core::text::Shaping::Basic,
-                    ..Text::default()
-                });
+                let anchor = center_anchor(&state.labels.unit, cx, label_bottom);
+                center_draws.push((CenterPiece::Unit, anchor, crate::core::Color { a: 0.6, ..text_color }));
 
                 label_bottom += unit_size * 0.5 + self.data.label_spacing;
             }
         }
 
         // --- Subtitle ---
-        if let Some(subtitle) = &self.data.subtitle
-            && !animating
-        {
-            let sub_size = font_size * 0.3;
-            frame.fill_text(Text {
-                content: subtitle.clone(),
-                position: crate::core::Point::new(cx, label_bottom),
-                color: crate::core::Color { a: 0.5, ..text_color },
-                size: sub_size.into(),
-                font: theme.font(),
-                align_x: crate::core::alignment::Horizontal::Center.into(),
-                align_y: crate::core::alignment::Vertical::Center,
-                line_height: crate::core::text::LineHeight::default(),
-                shaping: crate::core::text::Shaping::Basic,
-                ..Text::default()
-            });
+        if self.data.subtitle.is_some() && !animating {
+            let anchor = center_anchor(&state.labels.subtitle, cx, label_bottom);
+            center_draws.push((CenterPiece::Subtitle, anchor, crate::core::Color {
+                a: 0.5,
+                ..text_color
+            }));
         }
 
+        let translation = crate::core::Vector::new(layout_bounds.x, layout_bounds.y);
         let geometry = frame.into_geometry();
-        renderer.with_translation(crate::core::Vector::new(layout_bounds.x, layout_bounds.y), |renderer| {
+        renderer.with_translation(translation, |renderer| {
             renderer.draw_geometry(geometry);
         });
+
+        // Tick labels on top of the arc.
+        for (i, anchor, color) in tick_label_draws {
+            if let Some(paragraph) = state.labels.ticks.get(i) {
+                renderer.fill_paragraph(paragraph.raw(), anchor + translation, color, layout_bounds);
+            }
+        }
+
+        // Center value / unit / subtitle on top.
+        for (piece, anchor, color) in center_draws {
+            let paragraph = match piece {
+                CenterPiece::Value => &state.labels.value,
+                CenterPiece::Unit => &state.labels.unit,
+                CenterPiece::Subtitle => &state.labels.subtitle,
+            };
+            renderer.fill_paragraph(paragraph.raw(), anchor + translation, color, layout_bounds);
+        }
     }
+}
+
+/// Discriminant for the three center-text paragraphs cached on
+/// [`State::labels`], used to collect their render order in `draw` before
+/// the geometry frame is consumed.
+enum CenterPiece {
+    Value,
+    Unit,
+    Subtitle,
 }
 
 // ---------------------------------------------------------------------------
@@ -746,6 +876,26 @@ fn compute_tick_values(data: &crate::mark::gauge::Gauge, ticks: &tick::Ticks, ra
     }
 }
 
+/// The arc radius for a gauge of the given pixel `size`. The arc reserves a
+/// margin outside itself for the tick marks/labels, then takes the largest
+/// circle that fits, floored at half the available half-extent so a heavy
+/// tick reservation can't collapse the arc. Shared by [`Gauge::layout`] (to
+/// derive font sizes for label shaping) and [`Gauge::draw`] (to place the
+/// geometry), so the shaped paragraphs match the rendered arc — the gauge's
+/// `limits.max()` at layout equals `layout.bounds().size()` at draw.
+fn arc_radius(data: &crate::mark::gauge::Gauge, size: Size) -> f32 {
+    let half = size.width.min(size.height) / 2.0;
+    let tick_margin = if data.ticks.is_some() && data.show_tick_labels {
+        let mark_len = data.ticks.as_ref().map_or(6.0, |t| t.mark_length);
+        mark_len + half * 0.09
+    } else if data.ticks.is_some() {
+        data.ticks.as_ref().map_or(6.0, |t| t.mark_length)
+    } else {
+        0.0
+    };
+    (half - tick_margin).max(half * 0.5)
+}
+
 /// Format a tick value compactly.
 fn format_tick_value(v: f64) -> String {
     if v == v.floor() {
@@ -755,12 +905,17 @@ fn format_tick_value(v: f64) -> String {
     }
 }
 
-/// Draw tick marks and optional labels on the gauge arc.
+/// Draw tick mark lines into `frame` and collect the Center/Center anchors
+/// for the (already-shaped) tick labels into `label_draws`, paired by tick
+/// index with `tick_labels`. The glyphs themselves are drawn by the caller
+/// via `fill_paragraph` after the frame is consumed, so the labels sit on
+/// top of the arc.
 #[allow(clippy::too_many_arguments)]
-fn draw_ticks<R, Theme>(
+fn draw_ticks<R, P>(
     frame: &mut Frame<R>,
     data: &crate::mark::gauge::Gauge,
     ticks: &tick::Ticks,
+    tick_labels: &[paragraph::Plain<P>],
     cx: f32,
     cy: f32,
     inner_radius: f32,
@@ -769,21 +924,22 @@ fn draw_ticks<R, Theme>(
     sweep_rad: f32,
     range: f64,
     text_pair: crate::color::Pair,
-    theme: &Theme,
-    tick_font_size: f32,
+    label_draws: &mut Vec<(usize, crate::core::Point, crate::core::Color)>,
 ) where
     R: geometry::Renderer,
-    Theme: crate::design::Design + ?Sized,
+    P: text::Paragraph,
 {
     let tick_values = compute_tick_values(data, ticks, range);
     let mark_len = ticks.mark_length;
+    // Tick label font size scales with radius, matching [`Gauge::shape_labels`].
+    let tick_font_size = outer_radius * 0.1;
 
     let tick_color = crate::core::Color {
         a: 0.40,
         ..text_pair.on_light
     };
 
-    for v in &tick_values {
+    for (i, v) in tick_values.iter().enumerate() {
         let proportion = ((v - data.min) / range).clamp(0.0, 1.0) as f32;
         let angle = start_angle + proportion * sweep_rad;
 
@@ -818,21 +974,19 @@ fn draw_ticks<R, Theme>(
             };
             let label_pos = crate::core::Point::new(cx + label_r * angle.cos(), cy + label_r * angle.sin());
 
-            frame.fill_text(Text {
-                content: format_tick_value(*v),
-                position: label_pos,
-                color: crate::core::Color {
+            // `fill_text` centered the glyph box on `label_pos`; shift by half
+            // the cached paragraph's `min_bounds` so `fill_paragraph`'s
+            // top-left origin reproduces Center/Center.
+            if let Some(paragraph) = tick_labels.get(i) {
+                let bounds = paragraph.min_bounds();
+                let anchor =
+                    crate::core::Point::new(label_pos.x - bounds.width / 2.0, label_pos.y - bounds.height / 2.0);
+                let color = crate::core::Color {
                     a: 0.5,
                     ..text_pair.on_light
-                },
-                size: tick_font_size.into(),
-                font: theme.font(),
-                align_x: crate::core::alignment::Horizontal::Center.into(),
-                align_y: crate::core::alignment::Vertical::Center,
-                line_height: crate::core::text::LineHeight::default(),
-                shaping: crate::core::text::Shaping::Basic,
-                ..Text::default()
-            });
+                };
+                label_draws.push((i, anchor, color));
+            }
         }
     }
 }

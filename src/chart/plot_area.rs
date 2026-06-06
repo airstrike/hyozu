@@ -406,7 +406,7 @@ where
                     Series::BoxPlot(_) => tree::Tag::of::<boxplot::State>(),
                     Series::Choropleth(_) => tree::Tag::of::<choropleth::State>(),
                     Series::Pie(_) => tree::Tag::of::<pie::State<Renderer::Paragraph>>(),
-                    Series::Gauge(_) => tree::Tag::of::<gauge::State>(),
+                    Series::Gauge(_) => tree::Tag::of::<gauge::State<Renderer::Paragraph>>(),
                     Series::Waterfall(_) => tree::Tag::of::<waterfall::State<Renderer::Paragraph>>(),
                     Series::Xy(_) => tree::Tag::of::<xy::State>(),
                     Series::Rule(_) => tree::Tag::of::<rule::State<Renderer::Paragraph>>(),
