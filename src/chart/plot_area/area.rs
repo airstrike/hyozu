@@ -4,22 +4,31 @@ use super::line::{
 use super::{Domain, to_pixel};
 use crate::animation;
 use crate::core::layout::{Limits, Node};
+use crate::core::text::{self, paragraph};
 use crate::core::widget::{Tree, tree};
 use crate::core::{Point, Rectangle, Size};
 use crate::data::Datum;
 use crate::line::LineStyle;
 use crate::line::label::{Position, Show};
 use crate::widget::canvas::gradient::Linear;
-use crate::widget::canvas::{Fill, Frame, LineCap, LineDash, Path, Stroke, Text as CanvasText};
+use crate::widget::canvas::{Fill, Frame, LineCap, LineDash, Path, Stroke};
 use crate::widget::renderer::geometry;
 
-pub struct State {
+pub struct State<P>
+where
+    P: text::Paragraph,
+{
     /// Upper line pixel points per series
     pub series_points: Vec<Vec<Point>>,
     /// Baseline pixel points per series (for fill polygon)
     pub series_baselines: Vec<Vec<Point>>,
     /// Label texts per series
     pub series_label_texts: Vec<Vec<String>>,
+    /// Data-label paragraphs, shaped once in `layout` and rendered in `draw`
+    /// via [`crate::core::text::Renderer::fill_paragraph`]. Keyed the same as
+    /// `series_label_texts` (outer: series, inner: drawn-label order) so the
+    /// draw pass indexes a label's paragraph directly.
+    pub series_labels: Vec<Vec<paragraph::Plain<P>>>,
     /// Resolved label positions per series
     pub series_label_positions: Vec<Vec<Position>>,
     /// Pixel rectangles for each label per series
@@ -46,7 +55,7 @@ pub struct State {
 pub struct Area<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: crate::core::text::Renderer + geometry::Renderer,
+    Renderer: crate::core::text::Renderer<Font = crate::core::Font> + geometry::Renderer,
 {
     pub(crate) data: &'a crate::mark::area::Area,
     /// Whether the mount/data-change sweep runs. Mirrors
@@ -59,7 +68,7 @@ where
 impl<'a, Message, Renderer> Area<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: crate::core::text::Renderer + geometry::Renderer,
+    Renderer: crate::core::text::Renderer<Font = crate::core::Font> + geometry::Renderer,
 {
     pub fn new(data: &'a crate::mark::area::Area) -> Self {
         Self {
@@ -77,11 +86,12 @@ where
 
     pub(super) fn state(&self) -> Tree {
         Tree {
-            tag: tree::Tag::of::<State>(),
-            state: tree::State::new(State {
+            tag: tree::Tag::of::<State<Renderer::Paragraph>>(),
+            state: tree::State::new(State::<Renderer::Paragraph> {
                 series_points: Vec::new(),
                 series_baselines: Vec::new(),
                 series_label_texts: Vec::new(),
+                series_labels: Vec::new(),
                 series_label_positions: Vec::new(),
                 series_label_rects: Vec::new(),
                 axis_floor_y: 0.0,
@@ -98,13 +108,13 @@ where
     pub fn layout(
         &self,
         tree: &mut Tree,
-        _renderer: &Renderer,
+        renderer: &Renderer,
         _limits: &Limits,
         domain: &Domain,
         rect: Rectangle,
         obstacles: &[Rectangle],
     ) -> Node {
-        let state = tree.state.downcast_mut::<State>();
+        let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
 
         let zero_y = to_pixel(domain, rect, Datum::ORIGIN).y;
         state.axis_floor_y = rect.y + rect.height;
@@ -181,13 +191,18 @@ where
         //   - the sibling-axis gutter obstacles
         //   - labels already placed in this or earlier series
         state.series_label_texts.clear();
+        state.series_labels.clear();
         state.series_label_positions.clear();
         state.series_label_rects.clear();
         state.series_label_texts.resize_with(self.data.series.len(), Vec::new);
+        state.series_labels.resize_with(self.data.series.len(), Vec::new);
         state
             .series_label_positions
             .resize_with(self.data.series.len(), Vec::new);
         state.series_label_rects.resize_with(self.data.series.len(), Vec::new);
+
+        let default_font = renderer.default_font();
+        let hint_factor = renderer.scale_factor();
 
         let all_segments: Vec<(Point, Point)> = state
             .series_points
@@ -209,6 +224,7 @@ where
             }
 
             let label_size = label_config.text.size.map(|p| p.0).unwrap_or(12.0);
+            let label_font = label_config.text.resolved_font(default_font);
 
             let minmax_indices: Vec<usize> = match label_config.show {
                 Show::MinMaxFirst | Show::MinMaxAll | Show::MinMaxLast => {
@@ -305,8 +321,30 @@ where
                 // otherwise bleed past the edge and get clipped.
                 let label_rect = clamp_to_bounds(label_rect, rect);
 
+                // Shape the label paragraph theme-free, keyed in lockstep with
+                // `series_label_texts`. Rendered in `draw` via `fill_paragraph`.
+                let mut paragraph = paragraph::Plain::default();
+                let _ = paragraph.update(text::Text {
+                    content: &label_text,
+                    bounds: Size::INFINITE,
+                    size: label_size.into(),
+                    line_height: text::LineHeight::default(),
+                    font: label_font,
+                    align_x: text::Alignment::Left,
+                    align_y: crate::core::alignment::Vertical::Top,
+                    shaping: text::Shaping::Basic,
+                    wrapping: text::Wrapping::None,
+                    ellipsis: text::Ellipsis::default(),
+                    hint_factor,
+                    font_features: Vec::new(),
+                    font_variations: Vec::new(),
+                    letter_spacing: Default::default(),
+                    weight: None,
+                });
+
                 placed_rects.push(label_rect);
                 state.series_label_texts[series_idx].push(label_text);
+                state.series_labels[series_idx].push(paragraph);
                 state.series_label_positions[series_idx].push(resolved_position);
                 state.series_label_rects[series_idx].push(label_rect);
             }
@@ -330,7 +368,7 @@ where
     ) where
         Theme: crate::design::Design + ?Sized,
     {
-        let state = tree.state.downcast_ref::<State>();
+        let state = tree.state.downcast_ref::<State<Renderer::Paragraph>>();
         let background = theme.background_color();
         let text_pair = theme.text_pair();
         let seed = theme.seed();
@@ -522,19 +560,20 @@ where
         }
 
         // Draw data labels per series. All series share one frame so that
-        // we only emit a single `draw_geometry` for labels regardless of
-        // how many series have labels configured. Suppressed mid-sweep so
+        // we only emit a single `draw_geometry` for label background fills
+        // regardless of how many series have labels configured. The text
+        // glyphs are drawn afterward via the cached paragraphs
+        // (`fill_paragraph`) so they sit on top. Suppressed mid-sweep so
         // labels don't pop in over an envelope still growing into place.
         let mut label_frame = Frame::new(renderer, layout_bounds.size());
         let mut any_label = false;
+        let mut text_draws: Vec<(usize, usize, Point, crate::core::Color)> = Vec::new();
 
         if !animating {
             for (series_idx, series) in self.data.series.iter().enumerate() {
                 let Some(label_config) = &series.label else {
                     continue;
                 };
-
-                let label_size = label_config.text.size.map(|p| p.0).unwrap_or(12.0);
 
                 let base_color = if let Some(c) = series.color {
                     c.resolve(background, text_pair, &seed, None)
@@ -550,19 +589,17 @@ where
                     base_color
                 };
 
-                let label_font = label_config
-                    .text
-                    .resolved_font(theme.data_label_text().resolved_font(theme.font()));
-
                 let label_fill_color = label_config
                     .fill
                     .map(|spec| spec.resolve(background, text_pair, &seed, None));
 
-                let texts = &state.series_label_texts[series_idx];
+                let paragraphs = &state.series_labels[series_idx];
                 let positions = &state.series_label_positions[series_idx];
                 let rects = &state.series_label_rects[series_idx];
 
-                for ((label_rect, label_text), resolved_pos) in rects.iter().zip(texts.iter()).zip(positions.iter()) {
+                for (drawn_idx, ((label_rect, paragraph), resolved_pos)) in
+                    rects.iter().zip(paragraphs.iter()).zip(positions.iter()).enumerate()
+                {
                     any_label = true;
 
                     if let Some(fill_color) = label_fill_color {
@@ -586,18 +623,23 @@ where
                         Position::Right => (label_rect.x, label_rect.y + label_rect.height / 2.0),
                     };
 
-                    label_frame.fill_text(CanvasText {
-                        content: label_text.clone(),
-                        position: Point::new(anchor_x, anchor_y),
-                        color: label_color,
-                        size: label_size.into(),
-                        font: label_font,
-                        align_x: align_x.into(),
-                        align_y,
-                        line_height: crate::core::text::LineHeight::default(),
-                        shaping: crate::core::text::Shaping::Basic,
-                        ..CanvasText::default()
-                    });
+                    // `fill_text` shifted the glyph box from the anchor by the
+                    // paragraph's `min_bounds` per alignment (Center: −½,
+                    // Right/Bottom: −1); apply the identical shift against the
+                    // cached paragraph so `fill_paragraph` (top-left origin)
+                    // lands pixel-identically.
+                    let bounds = paragraph.min_bounds();
+                    let px = match align_x {
+                        crate::core::alignment::Horizontal::Left => anchor_x,
+                        crate::core::alignment::Horizontal::Center => anchor_x - bounds.width / 2.0,
+                        crate::core::alignment::Horizontal::Right => anchor_x - bounds.width,
+                    };
+                    let py = match align_y {
+                        crate::core::alignment::Vertical::Top => anchor_y,
+                        crate::core::alignment::Vertical::Center => anchor_y - bounds.height / 2.0,
+                        crate::core::alignment::Vertical::Bottom => anchor_y - bounds.height,
+                    };
+                    text_draws.push((series_idx, drawn_idx, Point::new(px, py), label_color));
                 }
             }
         }
@@ -607,6 +649,18 @@ where
             renderer.with_translation(translation, |renderer| {
                 renderer.draw_geometry(label_geometry);
             });
+        }
+
+        // Draw the label text on top of any background fills via the cached
+        // paragraphs.
+        for (series_idx, drawn_idx, anchor, color) in text_draws {
+            if let Some(paragraph) = state
+                .series_labels
+                .get(series_idx)
+                .and_then(|labels| labels.get(drawn_idx))
+            {
+                renderer.fill_paragraph(paragraph.raw(), anchor + translation, color, layout_bounds);
+            }
         }
     }
 }

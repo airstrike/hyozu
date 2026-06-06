@@ -335,8 +335,8 @@ fn find_nearest_cartesian_hover<Message>(
     domain: &plot_area::Domain,
     content_rect: Rectangle,
 ) -> Option<hover::Geometry> {
-    let line_tag = tree::Tag::of::<plot_area::line::State>();
-    let area_tag = tree::Tag::of::<plot_area::area::State>();
+    let line_tag = tree::Tag::of::<plot_area::line::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
+    let area_tag = tree::Tag::of::<plot_area::area::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
     let xy_tag = tree::Tag::of::<plot_area::xy::State>();
     let bars_tag = tree::Tag::of::<plot_area::bars::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
 
@@ -378,7 +378,9 @@ fn find_nearest_cartesian_hover<Message>(
     // center into the tessellator.
     for (mark_idx, child) in plot_area_tree.children.iter().enumerate() {
         if !horizontal && child.tag == line_tag {
-            let s = child.state.downcast_ref::<plot_area::line::State>();
+            let s = child
+                .state
+                .downcast_ref::<plot_area::line::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
             for pt in &s.pixel_points {
                 if !pt.x.is_finite() || !pt.y.is_finite() {
                     continue;
@@ -390,7 +392,9 @@ fn find_nearest_cartesian_hover<Message>(
                 }
             }
         } else if !horizontal && child.tag == area_tag {
-            let s = child.state.downcast_ref::<plot_area::area::State>();
+            let s = child
+                .state
+                .downcast_ref::<plot_area::area::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
             for sub in &s.series_points {
                 for pt in sub {
                     if !pt.x.is_finite() || !pt.y.is_finite() {
@@ -465,7 +469,9 @@ fn find_nearest_cartesian_hover<Message>(
 
     for (mark_idx, child) in plot_area_tree.children.iter().enumerate() {
         if !horizontal && child.tag == line_tag {
-            let s = child.state.downcast_ref::<plot_area::line::State>();
+            let s = child
+                .state
+                .downcast_ref::<plot_area::line::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
             for (pt_idx, pt) in s.pixel_points.iter().enumerate() {
                 if !pt.x.is_finite() || !pt.y.is_finite() {
                     continue;
@@ -476,7 +482,9 @@ fn find_nearest_cartesian_hover<Message>(
                 }
             }
         } else if !horizontal && child.tag == area_tag {
-            let s = child.state.downcast_ref::<plot_area::area::State>();
+            let s = child
+                .state
+                .downcast_ref::<plot_area::area::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
             for (ser_idx, sub) in s.series_points.iter().enumerate() {
                 for (pt_idx, pt) in sub.iter().enumerate() {
                     if !pt.x.is_finite() || !pt.y.is_finite() {
@@ -1007,14 +1015,29 @@ fn animation_tick_mut(tree: &mut Tree) -> Option<&mut animation::Tick> {
                 .tick,
         );
     }
-    if tag == tree::Tag::of::<plot_area::waterfall::State>() {
-        return Some(&mut tree.state.downcast_mut::<plot_area::waterfall::State>().tick);
+    if tag == tree::Tag::of::<plot_area::waterfall::State<<Renderer as crate::core::text::Renderer>::Paragraph>>() {
+        return Some(
+            &mut tree
+                .state
+                .downcast_mut::<plot_area::waterfall::State<<Renderer as crate::core::text::Renderer>::Paragraph>>()
+                .tick,
+        );
     }
-    if tag == tree::Tag::of::<plot_area::line::State>() {
-        return Some(&mut tree.state.downcast_mut::<plot_area::line::State>().tick);
+    if tag == tree::Tag::of::<plot_area::line::State<<Renderer as crate::core::text::Renderer>::Paragraph>>() {
+        return Some(
+            &mut tree
+                .state
+                .downcast_mut::<plot_area::line::State<<Renderer as crate::core::text::Renderer>::Paragraph>>()
+                .tick,
+        );
     }
-    if tag == tree::Tag::of::<plot_area::area::State>() {
-        return Some(&mut tree.state.downcast_mut::<plot_area::area::State>().tick);
+    if tag == tree::Tag::of::<plot_area::area::State<<Renderer as crate::core::text::Renderer>::Paragraph>>() {
+        return Some(
+            &mut tree
+                .state
+                .downcast_mut::<plot_area::area::State<<Renderer as crate::core::text::Renderer>::Paragraph>>()
+                .tick,
+        );
     }
     if tag == tree::Tag::of::<plot_area::xy::State>() {
         return Some(&mut tree.state.downcast_mut::<plot_area::xy::State>().tick);
@@ -1031,8 +1054,13 @@ fn animation_tick_mut(tree: &mut Tree) -> Option<&mut animation::Tick> {
     if tag == tree::Tag::of::<plot_area::gauge::State>() {
         return Some(&mut tree.state.downcast_mut::<plot_area::gauge::State>().tick);
     }
-    if tag == tree::Tag::of::<plot_area::band::State>() {
-        return Some(&mut tree.state.downcast_mut::<plot_area::band::State>().tick);
+    if tag == tree::Tag::of::<plot_area::band::State<<Renderer as crate::core::text::Renderer>::Paragraph>>() {
+        return Some(
+            &mut tree
+                .state
+                .downcast_mut::<plot_area::band::State<<Renderer as crate::core::text::Renderer>::Paragraph>>()
+                .tick,
+        );
     }
     if tag == tree::Tag::of::<plot_area::boxplot::State>() {
         return Some(&mut tree.state.downcast_mut::<plot_area::boxplot::State>().tick);
@@ -1082,8 +1110,12 @@ fn replant_bars(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
 /// the next redraw to interpolate from there. The caller is responsible
 /// for confirming both nodes carry a `waterfall::State`.
 fn replant_waterfall(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
-    let old_state = old_mark.state.downcast_ref::<plot_area::waterfall::State>();
-    let new_state = new_mark.state.downcast_mut::<plot_area::waterfall::State>();
+    let old_state = old_mark
+        .state
+        .downcast_ref::<plot_area::waterfall::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
+    let new_state = new_mark
+        .state
+        .downcast_mut::<plot_area::waterfall::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
     if animate {
         new_state.previous_rects = old_state.rects.clone();
         new_state.previous_tops = old_state.tops.clone();
@@ -1098,8 +1130,12 @@ fn replant_waterfall(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
 /// redraw to interpolate from there. The caller is responsible for
 /// confirming both nodes carry a `line::State`.
 fn replant_line(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
-    let old_state = old_mark.state.downcast_ref::<plot_area::line::State>();
-    let new_state = new_mark.state.downcast_mut::<plot_area::line::State>();
+    let old_state = old_mark
+        .state
+        .downcast_ref::<plot_area::line::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
+    let new_state = new_mark
+        .state
+        .downcast_mut::<plot_area::line::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
     if animate {
         new_state.previous_pixel_points = old_state.pixel_points.clone();
         new_state.tick.pending_start = true;
@@ -1114,8 +1150,12 @@ fn replant_line(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
 /// the next redraw to interpolate from there. The caller is
 /// responsible for confirming both nodes carry an `area::State`.
 fn replant_area(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
-    let old_state = old_mark.state.downcast_ref::<plot_area::area::State>();
-    let new_state = new_mark.state.downcast_mut::<plot_area::area::State>();
+    let old_state = old_mark
+        .state
+        .downcast_ref::<plot_area::area::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
+    let new_state = new_mark
+        .state
+        .downcast_mut::<plot_area::area::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
     if animate {
         new_state.previous_series_points = old_state.series_points.clone();
         new_state.previous_series_baselines = old_state.series_baselines.clone();
@@ -1212,8 +1252,12 @@ fn replant_gauge(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
 /// there. The caller is responsible for confirming both nodes carry a
 /// `band::State`.
 fn replant_band(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
-    let old_state = old_mark.state.downcast_ref::<plot_area::band::State>();
-    let new_state = new_mark.state.downcast_mut::<plot_area::band::State>();
+    let old_state = old_mark
+        .state
+        .downcast_ref::<plot_area::band::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
+    let new_state = new_mark
+        .state
+        .downcast_mut::<plot_area::band::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
     if animate {
         new_state.previous_lower_pixel = Some(old_state.lower_pixel);
         new_state.previous_upper_pixel = Some(old_state.upper_pixel);
@@ -1261,15 +1305,16 @@ fn replant_violin(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
 fn replant_mark_animations(old_children: &[Tree], new_children: &mut [Tree], animate: bool) {
     let pie_tag = tree::Tag::of::<plot_area::pie::State>();
     let bars_tag = tree::Tag::of::<plot_area::bars::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
-    let waterfall_tag = tree::Tag::of::<plot_area::waterfall::State>();
-    let line_tag = tree::Tag::of::<plot_area::line::State>();
-    let area_tag = tree::Tag::of::<plot_area::area::State>();
+    let waterfall_tag =
+        tree::Tag::of::<plot_area::waterfall::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
+    let line_tag = tree::Tag::of::<plot_area::line::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
+    let area_tag = tree::Tag::of::<plot_area::area::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
     let xy_tag = tree::Tag::of::<plot_area::xy::State>();
     let heatmap_tag = tree::Tag::of::<plot_area::heatmap::State>();
     let treemap_tag = tree::Tag::of::<plot_area::treemap::State>();
     let choropleth_tag = tree::Tag::of::<plot_area::choropleth::State>();
     let gauge_tag = tree::Tag::of::<plot_area::gauge::State>();
-    let band_tag = tree::Tag::of::<plot_area::band::State>();
+    let band_tag = tree::Tag::of::<plot_area::band::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
     let boxplot_tag = tree::Tag::of::<plot_area::boxplot::State>();
     let violin_tag = tree::Tag::of::<plot_area::violin::State>();
     let Some(old_scene) = old_children.first() else {
@@ -2319,8 +2364,8 @@ fn draw_cartesian_tooltip_overlay<Message>(
     };
 
     // Build tooltip entries and collect pixel positions
-    let line_tag = tree::Tag::of::<plot_area::line::State>();
-    let area_tag = tree::Tag::of::<plot_area::area::State>();
+    let line_tag = tree::Tag::of::<plot_area::line::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
+    let area_tag = tree::Tag::of::<plot_area::area::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
     let xy_tag = tree::Tag::of::<plot_area::xy::State>();
     let bars_tag = tree::Tag::of::<plot_area::bars::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
 
@@ -2345,7 +2390,9 @@ fn draw_cartesian_tooltip_overlay<Message>(
                 let Some(pt) = line.data.points.get(pt_idx) else {
                     continue;
                 };
-                let line_state = child.state.downcast_ref::<plot_area::line::State>();
+                let line_state = child
+                    .state
+                    .downcast_ref::<plot_area::line::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
                 let Some(pixel) = line_state.pixel_points.get(pt_idx).copied() else {
                     continue;
                 };
@@ -2367,7 +2414,9 @@ fn draw_cartesian_tooltip_overlay<Message>(
                 let Some(pt) = ser.points.get(pt_idx) else {
                     continue;
                 };
-                let area_state = child.state.downcast_ref::<plot_area::area::State>();
+                let area_state = child
+                    .state
+                    .downcast_ref::<plot_area::area::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
                 let Some(pixel) = area_state
                     .series_points
                     .get(series_idx)

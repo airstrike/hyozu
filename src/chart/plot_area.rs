@@ -400,17 +400,17 @@ where
                 // node still holds the old state type.  Detect this via
                 // the tag and rebuild the node from scratch.
                 let expected_tag = match series {
-                    Series::Area(_) => tree::Tag::of::<area::State>(),
-                    Series::Line(_) => tree::Tag::of::<line::State>(),
+                    Series::Area(_) => tree::Tag::of::<area::State<Renderer::Paragraph>>(),
+                    Series::Line(_) => tree::Tag::of::<line::State<Renderer::Paragraph>>(),
                     Series::Bars(_) => tree::Tag::of::<bars::State<Renderer::Paragraph>>(),
                     Series::BoxPlot(_) => tree::Tag::of::<boxplot::State>(),
                     Series::Choropleth(_) => tree::Tag::of::<choropleth::State>(),
                     Series::Pie(_) => tree::Tag::of::<pie::State>(),
                     Series::Gauge(_) => tree::Tag::of::<gauge::State>(),
-                    Series::Waterfall(_) => tree::Tag::of::<waterfall::State>(),
+                    Series::Waterfall(_) => tree::Tag::of::<waterfall::State<Renderer::Paragraph>>(),
                     Series::Xy(_) => tree::Tag::of::<xy::State>(),
-                    Series::Rule(_) => tree::Tag::of::<rule::State>(),
-                    Series::Band(_) => tree::Tag::of::<band::State>(),
+                    Series::Rule(_) => tree::Tag::of::<rule::State<Renderer::Paragraph>>(),
+                    Series::Band(_) => tree::Tag::of::<band::State<Renderer::Paragraph>>(),
                     Series::Tick(_) => tree::Tag::of::<tick::State>(),
                     Series::Heatmap(_) => tree::Tag::of::<heatmap::State>(),
                     Series::Treemap(_) => tree::Tag::of::<treemap::State>(),

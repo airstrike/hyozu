@@ -5,13 +5,20 @@ use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
 use crate::data::Datum;
 use crate::mark::band::BandOrientation;
-use crate::widget::canvas::{Frame, Path, Text as CanvasText};
+use crate::widget::canvas::{Frame, Path};
 
-use crate::core::text;
+use crate::core::text::{self, paragraph};
 use crate::widget::renderer::geometry;
 
 /// State for Band — stores pixel-space rectangle spanning the plot area.
-pub struct State {
+pub struct State<P>
+where
+    P: text::Paragraph,
+{
+    /// The band's edge label, shaped once in `layout` and rendered in `draw`
+    /// via [`crate::core::text::Renderer::fill_paragraph`]. Empty (default)
+    /// when the band has no label configured.
+    pub label: paragraph::Plain<P>,
     /// Lower pixel coordinate along the band's orientation axis.
     pub lower_pixel: f32,
     /// Upper pixel coordinate along the band's orientation axis.
@@ -47,7 +54,7 @@ where
 impl<'a, Message, Renderer> Band<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: text::Renderer + geometry::Renderer,
+    Renderer: text::Renderer<Font = crate::core::Font> + geometry::Renderer,
 {
     /// Create a new Band borrowing data
     pub fn new(data: &'a crate::mark::band::Band) -> Self {
@@ -67,8 +74,9 @@ where
     /// Returns the initial tree state for this Band
     pub(super) fn state(&self) -> Tree {
         Tree {
-            tag: tree::Tag::of::<State>(),
-            state: tree::State::new(State {
+            tag: tree::Tag::of::<State<Renderer::Paragraph>>(),
+            state: tree::State::new(State::<Renderer::Paragraph> {
+                label: paragraph::Plain::default(),
                 lower_pixel: 0.0,
                 upper_pixel: 0.0,
                 previous_lower_pixel: None,
@@ -82,16 +90,17 @@ where
     /// Reconcile the tree with current Band state
     pub(super) fn diff(&self, _tree: &mut Tree) {}
 
-    /// Layout the band — convert data values to pixel coordinates.
+    /// Layout the band — convert data values to pixel coordinates and shape
+    /// the edge label.
     pub fn layout(
         &self,
         tree: &mut Tree,
-        _renderer: &Renderer,
+        renderer: &Renderer,
         _limits: &Limits,
         domain: &Domain,
         rect: crate::core::Rectangle,
     ) -> Node {
-        let state = tree.state.downcast_mut::<State>();
+        let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
 
         match self.data.orientation {
             BandOrientation::Horizontal => {
@@ -102,6 +111,28 @@ where
                 state.lower_pixel = to_pixel(domain, rect, Datum::new(self.data.lower, 0.0)).x;
                 state.upper_pixel = to_pixel(domain, rect, Datum::new(self.data.upper, 0.0)).x;
             }
+        }
+
+        // Shape the label paragraph theme-free; drawn in `draw` via
+        // `fill_paragraph` so the text isn't reshaped every frame.
+        if let Some(label_text) = &self.data.label {
+            let _ = state.label.update(text::Text {
+                content: label_text,
+                bounds: Size::INFINITE,
+                size: 11.0.into(),
+                line_height: text::LineHeight::default(),
+                font: renderer.default_font(),
+                align_x: text::Alignment::Left,
+                align_y: crate::core::alignment::Vertical::Top,
+                shaping: text::Shaping::Basic,
+                wrapping: text::Wrapping::None,
+                ellipsis: text::Ellipsis::default(),
+                hint_factor: renderer.scale_factor(),
+                font_features: Vec::new(),
+                font_variations: Vec::new(),
+                letter_spacing: Default::default(),
+                weight: None,
+            });
         }
 
         Node::new(Size::ZERO)
@@ -121,7 +152,7 @@ where
     ) where
         Theme: crate::design::Design + ?Sized,
     {
-        let state = tree.state.downcast_ref::<State>();
+        let state = tree.state.downcast_ref::<State<Renderer::Paragraph>>();
 
         let background = theme.background_color();
         let text_pair = theme.text_pair();
@@ -192,43 +223,53 @@ where
         // Suppressed mid-sweep so it doesn't pop in over edges that
         // haven't reached their final positions yet. Also gated on the
         // anchor being finite — a non-finite `data.lower`/`data.upper`
-        // produces a NaN `ry`/`rx` that crashes `fill_text`.
-        if let Some(label_text) = &self.data.label
-            && !animating
-            && rx.is_finite()
-            && ry.is_finite()
-        {
-            let label_size = 11.0_f32;
-            let (position, align_x, align_y) = match self.data.orientation {
+        // produces a NaN `ry`/`rx` that crashes text rendering.
+        let label_anchor = if self.data.label.is_some() && !animating && rx.is_finite() && ry.is_finite() {
+            let (position, align_x, align_y): (
+                crate::core::Point,
+                crate::core::alignment::Horizontal,
+                crate::core::alignment::Vertical,
+            ) = match self.data.orientation {
                 BandOrientation::Horizontal => (
                     crate::core::Point::new(layout_bounds.width - 4.0, ry + 2.0),
-                    crate::core::alignment::Horizontal::Right.into(),
+                    crate::core::alignment::Horizontal::Right,
                     crate::core::alignment::Vertical::Top,
                 ),
                 BandOrientation::Vertical => (
                     crate::core::Point::new(rx + 4.0, 4.0),
-                    crate::core::alignment::Horizontal::Left.into(),
+                    crate::core::alignment::Horizontal::Left,
                     crate::core::alignment::Vertical::Top,
                 ),
             };
 
-            frame.fill_text(CanvasText {
-                content: label_text.clone(),
-                position,
-                color: base_color,
-                size: label_size.into(),
-                font: theme.font(),
-                align_x,
-                align_y,
-                line_height: crate::core::text::LineHeight::default(),
-                shaping: crate::core::text::Shaping::Basic,
-                ..CanvasText::default()
-            });
-        }
+            // `fill_text` shifted the glyph box from `position` by `min_bounds`
+            // per alignment (Right: −width); apply the identical shift so
+            // `fill_paragraph` (top-left origin) lands pixel-identically.
+            let bounds = state.label.min_bounds();
+            let anchor_x = match align_x {
+                crate::core::alignment::Horizontal::Left => position.x,
+                crate::core::alignment::Horizontal::Center => position.x - bounds.width / 2.0,
+                crate::core::alignment::Horizontal::Right => position.x - bounds.width,
+            };
+            let anchor_y = match align_y {
+                crate::core::alignment::Vertical::Top => position.y,
+                crate::core::alignment::Vertical::Center => position.y - bounds.height / 2.0,
+                crate::core::alignment::Vertical::Bottom => position.y - bounds.height,
+            };
+            Some(crate::core::Point::new(anchor_x, anchor_y))
+        } else {
+            None
+        };
 
+        let translation = crate::core::Vector::new(layout_bounds.x, layout_bounds.y);
         let geometry = frame.into_geometry();
-        renderer.with_translation(crate::core::Vector::new(layout_bounds.x, layout_bounds.y), |renderer| {
+        renderer.with_translation(translation, |renderer| {
             renderer.draw_geometry(geometry);
         });
+
+        // Draw the label text on top of the band fill via the cached paragraph.
+        if let Some(anchor) = label_anchor {
+            renderer.fill_paragraph(state.label.raw(), anchor + translation, base_color, layout_bounds);
+        }
     }
 }

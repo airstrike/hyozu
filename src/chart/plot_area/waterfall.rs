@@ -6,13 +6,22 @@ use crate::core::{Rectangle, Size};
 use crate::data::Datum;
 use crate::mark::waterfall::EntryKind;
 use crate::mark::waterfall::label::Position;
-use crate::widget::canvas::{Frame, Path, Stroke, Text as CanvasText};
+use crate::widget::canvas::{Frame, Path, Stroke};
 
-use crate::core::text;
+use crate::core::text::{self, paragraph};
 use crate::widget::renderer::geometry;
 
 /// State for Waterfall — stores pre-calculated bar rectangles and running totals
-pub struct State {
+pub struct State<P>
+where
+    P: text::Paragraph,
+{
+    /// Data-label paragraphs, one per entry index (mirroring `rects`), shaped
+    /// once in `layout` and rendered in `draw` via
+    /// [`crate::core::text::Renderer::fill_paragraph`]. Entries with no label
+    /// keep a default (empty) paragraph so the index stays aligned with the
+    /// entry order; `draw` skips them with the same guards.
+    pub labels: Vec<paragraph::Plain<P>>,
     /// Pixel rectangles for each bar
     pub rects: Vec<Rectangle>,
     /// The kind of each entry (for coloring)
@@ -60,7 +69,7 @@ struct LabelDraw {
 impl<'a, Message, Renderer> Waterfall<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: text::Renderer + geometry::Renderer,
+    Renderer: text::Renderer<Font = crate::core::Font> + geometry::Renderer,
 {
     /// Create a new Waterfall borrowing data
     pub fn new(data: &'a crate::mark::waterfall::Waterfall) -> Self {
@@ -80,8 +89,9 @@ where
     /// Returns the initial tree state for this Waterfall
     pub(super) fn state(&self) -> Tree {
         Tree {
-            tag: tree::Tag::of::<State>(),
-            state: tree::State::new(State {
+            tag: tree::Tag::of::<State<Renderer::Paragraph>>(),
+            state: tree::State::new(State::<Renderer::Paragraph> {
+                labels: Vec::new(),
                 rects: Vec::new(),
                 kinds: Vec::new(),
                 tops: Vec::new(),
@@ -103,14 +113,15 @@ where
     pub fn layout(
         &self,
         tree: &mut Tree,
-        _renderer: &Renderer,
+        renderer: &Renderer,
         _limits: &Limits,
         domain: &Domain,
         rect: Rectangle,
     ) -> Node {
-        let state = tree.state.downcast_mut::<State>();
+        let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
 
         if self.data.entries.is_empty() {
+            state.labels.clear();
             state.rects.clear();
             state.kinds.clear();
             state.tops.clear();
@@ -201,11 +212,67 @@ where
         }
 
         state.label_rects = self.compute_label_rects(state);
+        self.shape_labels(state, renderer);
 
         Node::new(Size::ZERO)
     }
 
-    fn compute_label_rects(&self, state: &State) -> Vec<Option<Rectangle>> {
+    /// Shapes one label paragraph per entry index, theme-free (font from the
+    /// renderer default + the chart label's own family/weight/style), so the
+    /// text is laid out here and rendered in `draw` via `fill_paragraph`.
+    /// Entries with no resolvable label keep a default (empty) paragraph; the
+    /// draw pass skips them with the same `resolve_label`/`show.allows` guards,
+    /// so the index stays aligned with the entry order.
+    fn shape_labels(&self, state: &mut State<Renderer::Paragraph>, renderer: &Renderer) {
+        let default_font = renderer.default_font();
+        let hint_factor = renderer.scale_factor();
+        let chart_label = self.data.label.as_ref();
+        let default_size = 12.0;
+
+        let entry_count = self.data.entries.len();
+        while state.labels.len() < entry_count {
+            state.labels.push(paragraph::Plain::default());
+        }
+        state.labels.truncate(entry_count);
+
+        for (i, entry) in self.data.entries.iter().enumerate() {
+            let paragraph = &mut state.labels[i];
+
+            let Some(LabelDraw { text, size, .. }) = resolve_label(entry, chart_label, default_size) else {
+                continue;
+            };
+
+            let mut font = chart_label
+                .map(|l| l.text.resolved_font(default_font))
+                .unwrap_or(default_font);
+            if let Some(w) = chart_label.and_then(|l| l.text.weight) {
+                font.weight = w;
+            }
+            if let Some(s) = chart_label.and_then(|l| l.text.style) {
+                font.style = s;
+            }
+
+            let _ = paragraph.update(text::Text {
+                content: &text,
+                bounds: Size::INFINITE,
+                size: size.into(),
+                line_height: text::LineHeight::default(),
+                font,
+                align_x: text::Alignment::Left,
+                align_y: crate::core::alignment::Vertical::Top,
+                shaping: text::Shaping::Basic,
+                wrapping: text::Wrapping::None,
+                ellipsis: text::Ellipsis::default(),
+                hint_factor,
+                font_features: Vec::new(),
+                font_variations: Vec::new(),
+                letter_spacing: Default::default(),
+                weight: None,
+            });
+        }
+    }
+
+    fn compute_label_rects<P: text::Paragraph>(&self, state: &State<P>) -> Vec<Option<Rectangle>> {
         let total_entries = self.data.entries.len();
         let chart_label = self.data.label.as_ref();
         let default_size = 12.0;
@@ -266,7 +333,7 @@ where
     ) where
         Theme: crate::design::Design + ?Sized,
     {
-        let state = tree.state.downcast_ref::<State>();
+        let state = tree.state.downcast_ref::<State<Renderer::Paragraph>>();
 
         if state.rects.is_empty() {
             return;
@@ -397,21 +464,20 @@ where
         }
 
         // Labels — suppressed mid-sweep so they don't pop in over bars
-        // that haven't grown into their final positions yet.
+        // that haven't grown into their final positions yet. Background fills
+        // go into the geometry frame; the text glyphs are drawn afterward via
+        // the cached paragraphs (`fill_paragraph`) so they sit on top.
         let chart_label = self.data.label.as_ref();
         let theme_default_size = theme.font_size();
         let total_entries = self.data.entries.len();
+        let mut label_draws: Vec<(usize, crate::core::Point, crate::core::Color)> = Vec::new();
 
         if !animating {
             for (i, (rect, entry)) in state.rects.iter().zip(self.data.entries.iter()).enumerate() {
                 if !rect.x.is_finite() || !rect.y.is_finite() || !rect.width.is_finite() || !rect.height.is_finite() {
                     continue;
                 }
-                let LabelDraw {
-                    text: label_text,
-                    position,
-                    size,
-                } = match resolve_label(entry, chart_label, theme_default_size) {
+                let LabelDraw { position, .. } = match resolve_label(entry, chart_label, theme_default_size) {
                     Some(d) => d,
                     None => continue,
                 };
@@ -448,36 +514,41 @@ where
                     _ => label_color_spec.resolve(bar_colors[i], text_pair, &seed, Some(background)),
                 };
 
-                let base_font = theme.data_label_text().resolved_font(theme.font());
-                let mut font = chart_label
-                    .map(|l| l.text.resolved_font(base_font))
-                    .unwrap_or(base_font);
-                if let Some(w) = chart_label.and_then(|l| l.text.weight) {
-                    font.weight = w;
-                }
-                if let Some(s) = chart_label.and_then(|l| l.text.style) {
-                    font.style = s;
-                }
-
-                frame.fill_text(CanvasText {
-                    content: label_text,
-                    position: crate::core::Point::new(lx, ly),
-                    color: label_color,
-                    size: size.into(),
-                    font,
-                    align_x: align_x.into(),
-                    align_y,
-                    line_height: crate::core::text::LineHeight::default(),
-                    shaping: crate::core::text::Shaping::Basic,
-                    ..CanvasText::default()
-                });
+                // `fill_text` shifted the glyph box from `(lx, ly)` by the
+                // paragraph's `min_bounds` per alignment (Center: −½,
+                // Right/Bottom: −1); apply the identical shift against the
+                // cached paragraph so `fill_paragraph` (top-left origin) lands
+                // pixel-identically.
+                let Some(paragraph) = state.labels.get(i) else {
+                    continue;
+                };
+                let bounds = paragraph.min_bounds();
+                let anchor_x = match align_x {
+                    crate::core::alignment::Horizontal::Left => lx,
+                    crate::core::alignment::Horizontal::Center => lx - bounds.width / 2.0,
+                    crate::core::alignment::Horizontal::Right => lx - bounds.width,
+                };
+                let anchor_y = match align_y {
+                    crate::core::alignment::Vertical::Top => ly,
+                    crate::core::alignment::Vertical::Center => ly - bounds.height / 2.0,
+                    crate::core::alignment::Vertical::Bottom => ly - bounds.height,
+                };
+                label_draws.push((i, crate::core::Point::new(anchor_x, anchor_y), label_color));
             }
         }
 
+        let translation = crate::core::Vector::new(layout_bounds.x, layout_bounds.y);
         let geometry = frame.into_geometry();
-        renderer.with_translation(crate::core::Vector::new(layout_bounds.x, layout_bounds.y), |renderer| {
+        renderer.with_translation(translation, |renderer| {
             renderer.draw_geometry(geometry);
         });
+
+        // Draw the data-label text on top via the cached paragraphs.
+        for (i, anchor, color) in label_draws {
+            if let Some(paragraph) = state.labels.get(i) {
+                renderer.fill_paragraph(paragraph.raw(), anchor + translation, color, layout_bounds);
+            }
+        }
     }
 }
 

@@ -4,9 +4,9 @@ use crate::core::Size;
 use crate::core::layout::{Limits, Node};
 use crate::core::widget::{Tree, tree};
 use crate::line::LineStyle;
-use crate::widget::canvas::{Frame, LineCap, LineDash, Path, Stroke, Text as CanvasText};
+use crate::widget::canvas::{Frame, LineCap, LineDash, Path, Stroke};
 
-use crate::core::text;
+use crate::core::text::{self, paragraph};
 use crate::widget::renderer::geometry;
 
 use crate::core::{Point, Rectangle};
@@ -14,11 +14,19 @@ use crate::line::label::{Position, Show};
 use crate::line::marker;
 
 /// State for a Line - stores positioned line points and label info
-pub struct State {
+pub struct State<P>
+where
+    P: text::Paragraph,
+{
     /// Pixel coordinates of line points (relative to plane origin)
     pub pixel_points: Vec<Point>,
     /// Label texts for points that have labels
     pub label_texts: Vec<String>,
+    /// Data-label paragraphs, shaped once in `layout` and rendered in `draw`
+    /// via [`crate::core::text::Renderer::fill_paragraph`]. Keyed the same as
+    /// `label_texts`/`label_rects` (one entry per drawn label, in placement
+    /// order) so the draw pass indexes a label's paragraph directly.
+    pub labels: Vec<paragraph::Plain<P>>,
     /// Resolved positions for each label (after hit-testing)
     pub label_positions: Vec<Position>,
     /// Pixel rectangles for each label (for drawing)
@@ -53,7 +61,7 @@ where
 impl<'a, Message, Renderer> Line<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: text::Renderer + geometry::Renderer,
+    Renderer: text::Renderer<Font = crate::core::Font> + geometry::Renderer,
 {
     /// Create a new Line borrowing data
     pub fn new(data: &'a crate::line::Line) -> Self {
@@ -73,10 +81,11 @@ where
     /// Returns the initial tree state for this Line
     pub(super) fn state(&self) -> Tree {
         Tree {
-            tag: tree::Tag::of::<State>(),
-            state: tree::State::new(State {
+            tag: tree::Tag::of::<State<Renderer::Paragraph>>(),
+            state: tree::State::new(State::<Renderer::Paragraph> {
                 pixel_points: Vec::new(),
                 label_texts: Vec::new(),
+                labels: Vec::new(),
                 label_positions: Vec::new(),
                 label_rects: Vec::new(),
                 previous_pixel_points: Vec::new(),
@@ -96,24 +105,27 @@ where
     pub fn layout(
         &self,
         tree: &mut Tree,
-        _renderer: &Renderer,
+        renderer: &Renderer,
         _limits: &Limits,
         domain: &Domain,
         rect: Rectangle,
         obstacles: &[Rectangle],
     ) -> Node {
-        let state = tree.state.downcast_mut::<State>();
+        let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
 
         // Transform all data points to pixel coordinates
         state.pixel_points = self.data.points.iter().map(|p| to_pixel(domain, rect, *p)).collect();
 
         // Build label info if configured
         state.label_texts.clear();
+        state.labels.clear();
         state.label_positions.clear();
         state.label_rects.clear();
 
         if let Some(label_config) = &self.data.label {
             let label_size = label_config.text.resolved_size(12.0);
+            let label_font = label_config.text.resolved_font(renderer.default_font());
+            let hint_factor = renderer.scale_factor();
             let num_points = state.pixel_points.len();
 
             // Find min/max Y indices for MinMax modes
@@ -158,7 +170,7 @@ where
             for (idx, (pixel_point, data_point)) in state.pixel_points.iter().zip(self.data.points.iter()).enumerate() {
                 // Non-finite coordinates are gaps — no label, no placement
                 // search (which would otherwise let a NaN rect bypass the
-                // bounds check and crash `fill_text`).
+                // bounds check and crash text tessellation).
                 if !pixel_point.x.is_finite() || !pixel_point.y.is_finite() {
                     continue;
                 }
@@ -205,7 +217,29 @@ where
                     }
                 };
 
+                // Shape the label paragraph theme-free, keyed in lockstep with
+                // `label_texts`. Rendered in `draw` via `fill_paragraph`.
+                let mut paragraph = paragraph::Plain::default();
+                let _ = paragraph.update(text::Text {
+                    content: &label_text,
+                    bounds: Size::INFINITE,
+                    size: label_size.into(),
+                    line_height: text::LineHeight::default(),
+                    font: label_font,
+                    align_x: text::Alignment::Left,
+                    align_y: crate::core::alignment::Vertical::Top,
+                    shaping: text::Shaping::Basic,
+                    wrapping: text::Wrapping::None,
+                    ellipsis: text::Ellipsis::default(),
+                    hint_factor,
+                    font_features: Vec::new(),
+                    font_variations: Vec::new(),
+                    letter_spacing: Default::default(),
+                    weight: None,
+                });
+
                 state.label_texts.push(label_text);
+                state.labels.push(paragraph);
                 state.label_positions.push(resolved_position);
                 state.label_rects.push(label_rect);
             }
@@ -231,7 +265,7 @@ where
     ) where
         Theme: crate::design::Design + ?Sized,
     {
-        let state = tree.state.downcast_ref::<State>();
+        let state = tree.state.downcast_ref::<State<Renderer::Paragraph>>();
 
         if state.pixel_points.len() < 2 {
             return;
@@ -341,10 +375,6 @@ where
         if let Some(label_config) = &self.data.label
             && !animating
         {
-            let label_size = label_config
-                .text
-                .resolved_size(theme.data_label_text().resolved_size(12.0));
-
             // Resolve label color (defaults to line color)
             let label_color = if let Some(label_color_spec) = label_config.color {
                 label_color_spec.resolve(background, text_pair, &seed, None)
@@ -352,24 +382,19 @@ where
                 color
             };
 
-            // Resolve the label font once per series — family, weight, and
-            // style all flow from the label's `text::Style`, falling back to
-            // the theme's data-label default for anything unset.
-            let label_font = label_config
-                .text
-                .resolved_font(theme.data_label_text().resolved_font(theme.font()));
-
             let label_fill_color = label_config
                 .fill
                 .map(|spec| spec.resolve(background, text_pair, &seed, None));
 
             let mut label_frame = Frame::new(renderer, layout_bounds.size());
+            let mut text_anchors: Vec<(usize, Point)> = Vec::new();
 
-            for ((label_rect, label_text), resolved_pos) in state
+            for (idx, ((label_rect, paragraph), resolved_pos)) in state
                 .label_rects
                 .iter()
-                .zip(state.label_texts.iter())
+                .zip(state.labels.iter())
                 .zip(state.label_positions.iter())
+                .enumerate()
             {
                 // Background fill, if configured. The placement search already
                 // produced a tight rect for the text, so we just use it.
@@ -394,24 +419,38 @@ where
                     Position::Right => (label_rect.x, label_rect.y + label_rect.height / 2.0),
                 };
 
-                label_frame.fill_text(CanvasText {
-                    content: label_text.clone(),
-                    position: Point::new(anchor_x, anchor_y),
-                    color: label_color,
-                    size: label_size.into(),
-                    font: label_font,
-                    align_x: align_x.into(),
-                    align_y,
-                    line_height: crate::core::text::LineHeight::default(),
-                    shaping: crate::core::text::Shaping::Basic,
-                    ..CanvasText::default()
-                });
+                // `fill_text` shifted the glyph box from the anchor by the
+                // paragraph's `min_bounds` per alignment (Center: −½,
+                // Right/Bottom: −1); apply the identical shift against the
+                // cached paragraph so `fill_paragraph` (top-left origin) lands
+                // pixel-identically.
+                let bounds = paragraph.min_bounds();
+                let px = match align_x {
+                    crate::core::alignment::Horizontal::Left => anchor_x,
+                    crate::core::alignment::Horizontal::Center => anchor_x - bounds.width / 2.0,
+                    crate::core::alignment::Horizontal::Right => anchor_x - bounds.width,
+                };
+                let py = match align_y {
+                    crate::core::alignment::Vertical::Top => anchor_y,
+                    crate::core::alignment::Vertical::Center => anchor_y - bounds.height / 2.0,
+                    crate::core::alignment::Vertical::Bottom => anchor_y - bounds.height,
+                };
+                text_anchors.push((idx, Point::new(px, py)));
             }
 
+            let translation = crate::core::Vector::new(layout_bounds.x, layout_bounds.y);
             let label_geometry = label_frame.into_geometry();
-            renderer.with_translation(crate::core::Vector::new(layout_bounds.x, layout_bounds.y), |renderer| {
+            renderer.with_translation(translation, |renderer| {
                 renderer.draw_geometry(label_geometry);
             });
+
+            // Draw the label text on top of any background fills via the
+            // cached paragraphs.
+            for (idx, anchor) in text_anchors {
+                if let Some(paragraph) = state.labels.get(idx) {
+                    renderer.fill_paragraph(paragraph.raw(), anchor + translation, label_color, layout_bounds);
+                }
+            }
         }
     }
 }
