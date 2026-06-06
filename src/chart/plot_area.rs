@@ -412,7 +412,7 @@ where
                     Series::Rule(_) => tree::Tag::of::<rule::State<Renderer::Paragraph>>(),
                     Series::Band(_) => tree::Tag::of::<band::State<Renderer::Paragraph>>(),
                     Series::Tick(_) => tree::Tag::of::<tick::State>(),
-                    Series::Heatmap(_) => tree::Tag::of::<heatmap::State>(),
+                    Series::Heatmap(_) => tree::Tag::of::<heatmap::State<Renderer::Paragraph>>(),
                     Series::Treemap(_) => tree::Tag::of::<treemap::State>(),
                     Series::Violin(_) => tree::Tag::of::<violin::State>(),
                     Series::Text(_) => tree::Tag::of::<text::State<Renderer::Paragraph>>(),

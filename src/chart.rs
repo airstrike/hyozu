@@ -1042,8 +1042,13 @@ fn animation_tick_mut(tree: &mut Tree) -> Option<&mut animation::Tick> {
     if tag == tree::Tag::of::<plot_area::xy::State>() {
         return Some(&mut tree.state.downcast_mut::<plot_area::xy::State>().tick);
     }
-    if tag == tree::Tag::of::<plot_area::heatmap::State>() {
-        return Some(&mut tree.state.downcast_mut::<plot_area::heatmap::State>().tick);
+    if tag == tree::Tag::of::<plot_area::heatmap::State<<Renderer as crate::core::text::Renderer>::Paragraph>>() {
+        return Some(
+            &mut tree
+                .state
+                .downcast_mut::<plot_area::heatmap::State<<Renderer as crate::core::text::Renderer>::Paragraph>>()
+                .tick,
+        );
     }
     if tag == tree::Tag::of::<plot_area::treemap::State>() {
         return Some(&mut tree.state.downcast_mut::<plot_area::treemap::State>().tick);
@@ -1187,8 +1192,12 @@ fn replant_xy(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
 /// to interpolate from there. The caller is responsible for confirming
 /// both nodes carry a `heatmap::State`.
 fn replant_heatmap(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
-    let old_state = old_mark.state.downcast_ref::<plot_area::heatmap::State>();
-    let new_state = new_mark.state.downcast_mut::<plot_area::heatmap::State>();
+    let old_state = old_mark
+        .state
+        .downcast_ref::<plot_area::heatmap::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
+    let new_state = new_mark
+        .state
+        .downcast_mut::<plot_area::heatmap::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
     if animate {
         new_state.previous_cell_colors = old_state.cell_colors.borrow().clone();
         new_state.tick.pending_start = true;
@@ -1310,7 +1319,8 @@ fn replant_mark_animations(old_children: &[Tree], new_children: &mut [Tree], ani
     let line_tag = tree::Tag::of::<plot_area::line::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
     let area_tag = tree::Tag::of::<plot_area::area::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
     let xy_tag = tree::Tag::of::<plot_area::xy::State>();
-    let heatmap_tag = tree::Tag::of::<plot_area::heatmap::State>();
+    let heatmap_tag =
+        tree::Tag::of::<plot_area::heatmap::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
     let treemap_tag = tree::Tag::of::<plot_area::treemap::State>();
     let choropleth_tag = tree::Tag::of::<plot_area::choropleth::State>();
     let gauge_tag = tree::Tag::of::<plot_area::gauge::State>();

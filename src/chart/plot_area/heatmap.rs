@@ -8,8 +8,10 @@ use crate::core::widget::{Tree, tree};
 use crate::core::{Color, Point, Rectangle, Size};
 use crate::data::Datum;
 use crate::palette::Palette;
-use crate::widget::canvas::{Frame, Path, Text as CanvasText};
+use crate::widget::canvas::{Frame, Path};
 use crate::widget::renderer::geometry;
+
+use crate::core::text::{self, paragraph};
 
 /// Per-channel linear interpolation between `prev` and `cur`. At
 /// `progress == 0.0` returns `prev`; at `1.0` returns `cur` exactly.
@@ -68,8 +70,19 @@ fn compute_value_range(values: &[f64]) -> (f64, f64) {
 /// State for Heatmap - stores positioned cell rectangles, the cached
 /// data-derived value range, and the per-cell fill colors written by
 /// `draw` for animation snapshotting.
-pub struct State {
+pub struct State<P>
+where
+    P: text::Paragraph,
+{
     pub cell_rects: Vec<Rectangle>,
+    /// Cell-value label paragraphs, one per cell index (row-major, mirroring
+    /// `cell_rects`), shaped once in [`Heatmap::layout`] and rendered in
+    /// [`Heatmap::draw`] via [`crate::core::text::Renderer::fill_paragraph`].
+    /// Every potential label is shaped here regardless of whether the cell is
+    /// large enough or the value finite; `draw` applies the same
+    /// `show_labels` / `value.is_finite()` guards to decide which to render,
+    /// so the index stays aligned with the cell order.
+    pub labels: Vec<paragraph::Plain<P>>,
     /// Cached `(min, max)` of the heatmap's values resolved against the
     /// color scale's domain override. Theme-independent; computed in
     /// [`Heatmap::layout`] and read by [`Heatmap::draw`] so the gradient
@@ -111,7 +124,7 @@ where
 impl<'a, Message, Renderer> Heatmap<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: crate::core::text::Renderer + geometry::Renderer,
+    Renderer: crate::core::text::Renderer<Font = crate::core::Font> + geometry::Renderer,
 {
     /// Create a new Heatmap borrowing data.
     pub fn new(data: &'a crate::mark::heatmap::Heatmap) -> Self {
@@ -131,9 +144,10 @@ where
     /// Returns the initial tree state for this Heatmap.
     pub(super) fn state(&self) -> Tree {
         Tree {
-            tag: tree::Tag::of::<State>(),
-            state: tree::State::new(State {
+            tag: tree::Tag::of::<State<Renderer::Paragraph>>(),
+            state: tree::State::new(State::<Renderer::Paragraph> {
                 cell_rects: Vec::new(),
+                labels: Vec::new(),
                 value_range: (0.0, 1.0),
                 cell_colors: RefCell::new(Vec::new()),
                 previous_cell_colors: Vec::new(),
@@ -155,12 +169,12 @@ where
     pub fn layout(
         &self,
         tree: &mut Tree,
-        _renderer: &Renderer,
+        renderer: &Renderer,
         _limits: &Limits,
         domain: &Domain,
         rect: Rectangle,
     ) -> Node {
-        let state = tree.state.downcast_mut::<State>();
+        let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
         state.cell_rects.clear();
 
         let rows = self.data.rows();
@@ -172,6 +186,7 @@ where
             .resolved_domain(|| compute_value_range(&self.data.values));
 
         if rows == 0 || cols == 0 {
+            state.labels.clear();
             return Node::new(Size::ZERO);
         }
 
@@ -191,7 +206,61 @@ where
             }
         }
 
+        self.shape_labels(state, renderer, rows, cols);
+
         Node::new(Size::ZERO)
+    }
+
+    /// Shapes one cell-value label paragraph per cell index (row-major),
+    /// theme-free (font is `Font::default`, size is the fixed 12 px baseline
+    /// the draw pass also uses), so the text is laid out here and rendered in
+    /// `draw` via `fill_paragraph`. Non-finite values keep a default (empty)
+    /// paragraph; `draw` skips them — and any cell hidden by `show_labels` —
+    /// with the same guards, so the index stays aligned with the cell order.
+    fn shape_labels(&self, state: &mut State<Renderer::Paragraph>, renderer: &Renderer, rows: usize, cols: usize) {
+        let hint_factor = renderer.scale_factor();
+        let default_font = renderer.default_font();
+        let cell_count = rows * cols;
+
+        while state.labels.len() < cell_count {
+            state.labels.push(paragraph::Plain::default());
+        }
+        state.labels.truncate(cell_count);
+
+        if !self.data.show_labels {
+            return;
+        }
+
+        for row in 0..rows {
+            for col in 0..cols {
+                let idx = row * cols + col;
+                let value = self.data.get(row, col);
+                if !value.is_finite() {
+                    continue;
+                }
+
+                let content = (self.data.label_format)(value);
+                let paragraph = &mut state.labels[idx];
+
+                let _ = paragraph.update(text::Text {
+                    content: &content,
+                    bounds: Size::INFINITE,
+                    size: crate::core::Pixels(12.0),
+                    line_height: text::LineHeight::default(),
+                    font: default_font,
+                    align_x: text::Alignment::Left,
+                    align_y: crate::core::alignment::Vertical::Top,
+                    shaping: text::Shaping::Basic,
+                    wrapping: text::Wrapping::None,
+                    ellipsis: text::Ellipsis::default(),
+                    hint_factor,
+                    font_features: Vec::new(),
+                    font_variations: Vec::new(),
+                    letter_spacing: Default::default(),
+                    weight: None,
+                });
+            }
+        }
     }
 
     /// Draws the heatmap cells and optional labels.
@@ -210,7 +279,7 @@ where
     ) where
         Theme: crate::design::Design + ?Sized,
     {
-        let state = tree.state.downcast_ref::<State>();
+        let state = tree.state.downcast_ref::<State<Renderer::Paragraph>>();
         let layout_bounds = layout.bounds();
         let background = theme.background_color();
         let text_pair = theme.text_pair();
@@ -220,7 +289,11 @@ where
         let cols = self.data.cols();
 
         let mut cell_frame = Frame::new(renderer, layout_bounds.size());
-        let mut label_frame = Frame::new(renderer, layout_bounds.size());
+
+        // Cell-label render list: `(cell index, anchor, color)`. Anchors are
+        // layout-local (matching the cell rects) and offset by `layout_bounds`
+        // at render time, drawn after the cell geometry so glyphs sit on top.
+        let mut label_draws: Vec<(usize, Point, Color)> = Vec::new();
 
         // ── Resolve color scale ───────────────────────────────────
         // Theme-dependent (a palette referencing seed slots resolves
@@ -288,23 +361,21 @@ where
                 // Labels suppressed mid-sweep so they don't pop in over
                 // cells that haven't reached their final color yet.
                 if self.data.show_labels && !animating && value.is_finite() {
-                    let label_text = (self.data.label_format)(value);
-
                     let label_color =
                         crate::color::Color::CONTRAST.resolve(cur_color, text_pair, &seed, Some(background));
 
-                    label_frame.fill_text(CanvasText {
-                        content: label_text,
-                        position: Point::new(rect.x + rect.width / 2.0, rect.y + rect.height / 2.0),
-                        color: label_color,
-                        size: 12.0.into(),
-                        font: theme.font(),
-                        align_x: crate::core::alignment::Horizontal::Center.into(),
-                        align_y: crate::core::alignment::Vertical::Center,
-                        line_height: crate::core::text::LineHeight::default(),
-                        shaping: crate::core::text::Shaping::Basic,
-                        ..CanvasText::default()
-                    });
+                    // `fill_text` centered the glyph box on the cell center;
+                    // `fill_paragraph` draws from the top-left, so shift the
+                    // anchor by half the cached paragraph's `min_bounds` on
+                    // each axis to reproduce Center/Center placement.
+                    if let Some(paragraph) = state.labels.get(idx) {
+                        let bounds = paragraph.min_bounds();
+                        let anchor = Point::new(
+                            rect.x + rect.width / 2.0 - bounds.width / 2.0,
+                            rect.y + rect.height / 2.0 - bounds.height / 2.0,
+                        );
+                        label_draws.push((idx, anchor, label_color));
+                    }
                 }
             }
         }
@@ -322,11 +393,11 @@ where
             renderer.draw_geometry(cell_geometry);
         });
 
-        if self.data.show_labels && !animating {
-            let label_geometry = label_frame.into_geometry();
-            renderer.with_translation(translation, |renderer| {
-                renderer.draw_geometry(label_geometry);
-            });
+        // Draw the cell-value labels on top via the cached paragraphs.
+        for (idx, anchor, color) in label_draws {
+            if let Some(paragraph) = state.labels.get(idx) {
+                renderer.fill_paragraph(paragraph.raw(), anchor + translation, color, layout_bounds);
+            }
         }
     }
 }
