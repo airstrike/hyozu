@@ -514,7 +514,7 @@ where
         // --- Phase 1: Title (always at top, full width) ---
         let (title_height, title_node) = if let Some(title) = &self.title {
             if let Some(title_tree) = tree.children.get_mut(0) {
-                let node = title.layout(title_tree, renderer, &lim(available.width, available.height));
+                let node = title.layout(title_tree, renderer, &lim(available.width, available.height), design);
                 let h = node.size().height;
                 (h, Some(node))
             } else {
@@ -528,7 +528,7 @@ where
         let (legend_side_width, legend_side_node) = if legend_is_side {
             if let (Some(legend), Some(legend_tree)) = (&self.legend, tree.children.get_mut(1)) {
                 let remaining_h = available.height - title_height;
-                let node = legend.layout(legend_tree, renderer, &lim(available.width, remaining_h));
+                let node = legend.layout(legend_tree, renderer, &lim(available.width, remaining_h), design);
                 let w = node.size().width;
                 (w, Some(node))
             } else {
@@ -622,7 +622,7 @@ where
         // --- Phase 5: Above/Below legend measurement (needs plot_width for wrapping) ---
         let (legend_tb_height, legend_tb_node) = if !legend_is_side {
             if let (Some(legend), Some(legend_tree)) = (&self.legend, tree.children.get_mut(1)) {
-                let node = legend.layout(legend_tree, renderer, &lim(plot_width, available.height));
+                let node = legend.layout(legend_tree, renderer, &lim(plot_width, available.height), design);
                 let h = node.size().height;
                 (h, Some(node))
             } else {

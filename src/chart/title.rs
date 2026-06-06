@@ -57,15 +57,25 @@ where
     }
 
     /// Layout the title, measuring text and calculating size
-    pub fn layout(&self, tree: &mut Tree, renderer: &Renderer, limits: &Limits) -> Node {
+    pub fn layout(
+        &self,
+        tree: &mut Tree,
+        renderer: &Renderer,
+        limits: &Limits,
+        design: Option<&dyn crate::design::Design>,
+    ) -> Node {
         let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
 
-        // Resolve font/size before measurement. When `design` isn't reachable
-        // here, fall back to the historical defaults: renderer.default_font()
-        // and 16.0 pixels. The draw() path layers the actual theme defaults
-        // on top.
-        let font = self.style.resolved_font(renderer.default_font());
-        let size: crate::core::Pixels = self.style.resolved_size(16.0).into();
+        // Resolve font/size before measurement: per-chart style wins, then the
+        // design's `title_text()` default, then the renderer/library fallback
+        // (16px). On `None` this collapses to `renderer.default_font()` / 16.0,
+        // matching the historical default and the draw() path.
+        let base_font = design
+            .map(|d| d.title_text().resolved_font(renderer.default_font()))
+            .unwrap_or_else(|| renderer.default_font());
+        let base_size = design.and_then(|d| d.title_text().size).map(|p| p.0).unwrap_or(16.0);
+        let font = self.style.resolved_font(base_font);
+        let size: crate::core::Pixels = self.style.resolved_size(base_size).into();
 
         let _ = state.paragraph.update(text::Text {
             content: self.text,

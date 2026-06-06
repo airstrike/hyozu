@@ -186,7 +186,13 @@ where
     pub(super) fn diff(&self, _tree: &mut Tree) {}
 
     /// Layout the legend.
-    pub fn layout(&self, tree: &mut Tree, renderer: &Renderer, limits: &Limits) -> Node {
+    pub fn layout(
+        &self,
+        tree: &mut Tree,
+        renderer: &Renderer,
+        limits: &Limits,
+        design: Option<&dyn crate::design::Design>,
+    ) -> Node {
         if self.entries.is_empty() {
             {
                 let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
@@ -201,7 +207,20 @@ where
         }
 
         let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
-        let font_size = self.text.resolved_size(DEFAULT_FONT_SIZE);
+
+        // Per-chart legend style wins, then the design's `legend_text()`
+        // default, then the renderer/library fallback (10px). On `None` this
+        // collapses to `renderer.default_font()` / `DEFAULT_FONT_SIZE`,
+        // matching the historical default and the draw() path.
+        let base_font = design
+            .map(|d| d.legend_text().resolved_font(renderer.default_font()))
+            .unwrap_or_else(|| renderer.default_font());
+        let base_size = design
+            .and_then(|d| d.legend_text().size)
+            .map(|p| p.0)
+            .unwrap_or(DEFAULT_FONT_SIZE);
+        let label_font = self.text.resolved_font(base_font);
+        let font_size = self.text.resolved_size(base_size);
         let table_mode = self.entries.iter().any(|e| e.value.is_some());
         state.table_mode = table_mode;
 
@@ -232,7 +251,7 @@ where
                 bounds: Size::INFINITE,
                 size: font_size.into(),
                 line_height: text::LineHeight::default(),
-                font: self.text.resolved_font(renderer.default_font()),
+                font: label_font,
                 align_x: text::Alignment::Left,
                 align_y: crate::core::alignment::Vertical::Top,
                 shaping: text::Shaping::Basic,
@@ -262,7 +281,7 @@ where
                         bounds: Size::INFINITE,
                         size: font_size.into(),
                         line_height: text::LineHeight::default(),
-                        font: self.text.resolved_font(renderer.default_font()),
+                        font: label_font,
                         align_x: text::Alignment::Left,
                         align_y: crate::core::alignment::Vertical::Top,
                         shaping: text::Shaping::Basic,
