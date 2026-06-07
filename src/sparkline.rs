@@ -1,9 +1,8 @@
-use crate::core::renderer::Renderer as _;
 use crate::core::widget::tree;
 use crate::core::{Element, Layout, Length, Rectangle, Size, Widget, layout, mouse};
 use crate::design;
-use crate::widget::Renderer;
 use crate::widget::canvas::{Frame, Path, Stroke};
+use crate::widget::renderer::geometry;
 
 /// Which points to highlight.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,7 +31,7 @@ struct HighlightRule {
 /// A minimal inline chart for embedding in table cells, dashboards, etc.
 ///
 /// Supports line and bar rendering with highlighted points of interest.
-pub struct Sparkline<'a, Message, Theme = crate::core::Theme> {
+pub struct Sparkline<'a, Message, Theme = crate::core::Theme, Renderer = crate::widget::Renderer> {
     values: &'a [f64],
     width: Length,
     height: Length,
@@ -40,7 +39,7 @@ pub struct Sparkline<'a, Message, Theme = crate::core::Theme> {
     stroke_width: f32,
     kind: Kind,
     highlights: Vec<HighlightRule>,
-    _marker: std::marker::PhantomData<(Message, Theme)>,
+    _marker: std::marker::PhantomData<(Message, Theme, Renderer)>,
 }
 
 /// Creates a sparkline widget from a slice of values.
@@ -57,7 +56,7 @@ pub fn sparkline<'a, Message, Theme>(values: &'a [f64]) -> Sparkline<'a, Message
     }
 }
 
-impl<'a, Message, Theme> Sparkline<'a, Message, Theme> {
+impl<'a, Message, Theme, Renderer> Sparkline<'a, Message, Theme, Renderer> {
     /// Sets the width of the sparkline.
     pub fn width(mut self, width: impl Into<Length>) -> Self {
         self.width = width.into();
@@ -155,9 +154,10 @@ impl Computed {
     }
 }
 
-impl<'a, Message, Theme> Widget<Message, Theme, Renderer> for Sparkline<'a, Message, Theme>
+impl<'a, Message, Theme, Renderer> Widget<Message, Theme, Renderer> for Sparkline<'a, Message, Theme, Renderer>
 where
     Theme: design::Design + 'a,
+    Renderer: geometry::Renderer,
 {
     fn tag(&self) -> tree::Tag {
         tree::Tag::stateless()
@@ -225,7 +225,10 @@ where
     }
 }
 
-impl<'a, Message, Theme> Sparkline<'a, Message, Theme> {
+impl<'a, Message, Theme, Renderer> Sparkline<'a, Message, Theme, Renderer>
+where
+    Renderer: geometry::Renderer,
+{
     fn draw_line(&self, renderer: &mut Renderer, bounds: Rectangle, base_color: crate::core::Color, comp: &Computed) {
         let inset = self.stroke_width + 2.0; // room for stroke + dots
         let plot_w = bounds.width - inset * 2.0;
@@ -266,8 +269,8 @@ impl<'a, Message, Theme> Sparkline<'a, Message, Theme> {
             frame.fill(&dot, rule.color);
         }
 
-        renderer.with_translation(crate::core::Vector::new(bounds.x, bounds.y), |_| {
-            frame.into_geometry();
+        renderer.with_translation(crate::core::Vector::new(bounds.x, bounds.y), |renderer| {
+            renderer.draw_geometry(frame.into_geometry());
         });
     }
 
@@ -301,18 +304,20 @@ impl<'a, Message, Theme> Sparkline<'a, Message, Theme> {
             frame.fill(&rect, color);
         }
 
-        renderer.with_translation(crate::core::Vector::new(bounds.x, bounds.y), |_| {
-            frame.into_geometry();
+        renderer.with_translation(crate::core::Vector::new(bounds.x, bounds.y), |renderer| {
+            renderer.draw_geometry(frame.into_geometry());
         });
     }
 }
 
-impl<'a, Message, Theme> From<Sparkline<'a, Message, Theme>> for Element<'a, Message, Theme, Renderer>
+impl<'a, Message, Theme, Renderer> From<Sparkline<'a, Message, Theme, Renderer>>
+    for Element<'a, Message, Theme, Renderer>
 where
     Message: 'a,
     Theme: design::Design + 'a,
+    Renderer: geometry::Renderer + 'a,
 {
-    fn from(sparkline: Sparkline<'a, Message, Theme>) -> Self {
+    fn from(sparkline: Sparkline<'a, Message, Theme, Renderer>) -> Self {
         Element::new(sparkline)
     }
 }
