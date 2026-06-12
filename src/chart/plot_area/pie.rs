@@ -42,6 +42,17 @@ pub(crate) fn effective_gap(gap: f32, corner: f32, slice_count: usize) -> f32 {
     }
 }
 
+/// How far the gap-explode offset can push a slice past the base
+/// radius: half the explicit gap. Subtracted from the radius by both
+/// [`Pie::layout`] and [`Pie::draw`] (which must stay in lock-step) so
+/// an authored gap shrinks the pie to fit instead of pushing slices
+/// outside the plot bounds. The corner-derived petal gap is not
+/// subtracted — it is bounded by the corner radius (a few px) and
+/// stays inside the 5% margin both passes already reserve.
+pub(crate) fn gap_shrink(gap: f32, slice_count: usize) -> f32 {
+    if slice_count <= 1 { 0.0 } else { gap.max(0.0) / 2.0 }
+}
+
 /// Builds the path for one pie/donut slice: the gap-explode offset (each
 /// slice nudged out along its bisector by `gap_offset`) plus corner
 /// rounding via [`super::sector::push_sector_path`].
@@ -243,7 +254,8 @@ where
         let cx = size.width / 2.0;
         let cy = size.height / 2.0;
         let pad = if needs_outside_pad { OUTSIDE_LABEL_PAD } else { 0.0 };
-        let radius = ((size.width.min(size.height) / 2.0 - pad).max(0.0)) * 0.95;
+        let shrink = gap_shrink(self.data.gap, self.data.slices.len());
+        let radius = ((size.width.min(size.height) / 2.0 - pad - shrink).max(0.0)) * 0.95;
         let inner_radius = radius * self.hole;
 
         state.center = (cx, cy);
@@ -433,7 +445,8 @@ where
         let cx = layout_bounds.width / 2.0;
         let cy = layout_bounds.height / 2.0;
         let pad = if needs_outside_pad { OUTSIDE_LABEL_PAD } else { 0.0 };
-        let radius = ((layout_bounds.width.min(layout_bounds.height) / 2.0 - pad).max(0.0)) * 0.95;
+        let shrink = gap_shrink(self.data.gap, self.data.slices.len());
+        let radius = ((layout_bounds.width.min(layout_bounds.height) / 2.0 - pad - shrink).max(0.0)) * 0.95;
         let inner_radius = radius * self.hole;
 
         // Half the effective inter-slice gap — the distance each slice is
