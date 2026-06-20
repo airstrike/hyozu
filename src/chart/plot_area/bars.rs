@@ -248,9 +248,7 @@ where
             let Some(label_config) = &series.label else {
                 continue;
             };
-            if label_config.position != Position::Above {
-                continue;
-            }
+            let is_above = label_config.position == Position::Above;
 
             let Some(labels) = state.labels.get(series_idx) else {
                 continue;
@@ -285,6 +283,16 @@ where
                 } else {
                     bounds.height + 4.0
                 };
+
+                // For inside positions, only reserve inset space when the
+                // label won't fit inside its bar (it will be promoted to
+                // Above at draw time).
+                if !is_above {
+                    let bar_value_pixels = v * extent;
+                    if label_extent_along_value_axis <= bar_value_pixels {
+                        continue;
+                    }
+                }
 
                 // Assumes the other-end inset on the same axis is 0 (safe
                 // under-estimate of extent; any actual other-end inset makes
@@ -699,12 +707,22 @@ where
                             .map(|p| p.0)
                             .unwrap_or(label_size);
 
-                        let (lx, ly, align_x, align_y) = label_position(rect, label_config.position, is_horizontal);
-
                         // Estimate text bounds
                         let char_width = size * 0.6;
                         let text_width = text.len() as f32 * char_width + 6.0; // 3px padding each side
                         let text_height = size * 1.2 + 4.0; // 2px padding top/bottom
+
+                        let label_extent = if is_horizontal { text_width } else { text_height };
+                        let label_cross = if is_horizontal { text_height } else { text_width };
+                        let (lx, ly, align_x, align_y, _) = label_position(
+                            rect,
+                            label_config.position,
+                            is_horizontal,
+                            0.0,
+                            label_extent,
+                            label_cross,
+                            size,
+                        );
 
                         // Convert alignment + position to top-left origin rect
                         let x = match align_x {
@@ -1074,12 +1092,33 @@ where
                         continue;
                     }
 
-                    // Calculate label position using shared helper
-                    let (label_x, label_y, align_x, align_y) =
-                        label_position(rect, label_config.position, is_horizontal);
-
-                    // Merge per-point label overrides
+                    let paragraph = state.labels.get(series_idx).and_then(|s| s.get(bar_idx));
+                    let (label_extent, label_cross) = paragraph
+                        .map(|p| {
+                            let b = p.min_bounds();
+                            if is_horizontal {
+                                (b.width, b.height)
+                            } else {
+                                (b.height, b.width)
+                            }
+                        })
+                        .unwrap_or((0.0, 0.0));
                     let point_label = series.point_label(bar_idx);
+                    let font_size = point_label
+                        .and_then(|l| l.size())
+                        .or(label_config.text.size)
+                        .map(|p| p.0)
+                        .unwrap_or_else(|| theme.data_label_text().size.map(|p| p.0).unwrap_or(12.0));
+                    let (label_x, label_y, align_x, align_y, effective_position) = label_position(
+                        rect,
+                        label_config.position,
+                        is_horizontal,
+                        max_end_radius,
+                        label_extent,
+                        label_cross,
+                        font_size,
+                    );
+
                     let effective_fill = point_label.and_then(|l| l.fill().copied()).or(label_config.fill);
 
                     // Draw fill background if specified
@@ -1105,7 +1144,7 @@ where
                     // Use per-bar resolved color for contrast
                     let this_bar_color = all_bar_colors[series_idx][bar_idx];
 
-                    let label_color = match label_config.position {
+                    let label_color = match effective_position {
                         Position::Above => {
                             let label_point = crate::core::Point::new(label_x, label_y);
 
@@ -1283,77 +1322,104 @@ where
 }
 
 /// Computes label position and alignment for a bar rectangle.
+///
+/// Returns the anchor point, text alignment, and the effective position
+/// (which may differ from `position` when the label doesn't fit inside the
+/// bar and gets promoted to `Above`).
 fn label_position(
     rect: &Rectangle,
     position: Position,
     is_horizontal: bool,
+    corner_radius: f32,
+    label_extent: f32,
+    label_cross: f32,
+    font_size: f32,
 ) -> (
     f32,
     f32,
     crate::core::alignment::Horizontal,
     crate::core::alignment::Vertical,
+    Position,
 ) {
     use crate::core::alignment::{Horizontal, Vertical};
 
-    // Gap between a data label and the bar edge it sits against. Labels
-    // tucked inside the bar (End/Base) get a roomier inset so the text isn't
-    // cramped against the rounded value end; labels floating just outside
-    // (Above) keep a smaller gap.
-    const INSIDE: f32 = 8.0;
     const OUTSIDE: f32 = 4.0;
+    const CROSS_SLACK: f32 = 1.0;
+
+    let bar_cross = if is_horizontal { rect.height } else { rect.width };
+    let bar_value = if is_horizontal { rect.width } else { rect.height };
+    let effective_r = corner_radius.min(bar_cross / 2.0).max(font_size * 0.25);
+
+    let fits_value = label_extent + effective_r * 2.0 <= bar_value;
+    let fits_cross = label_cross + CROSS_SLACK * 2.0 <= bar_cross;
+    let fits_inside = fits_value && fits_cross;
+
+    let effective = match position {
+        Position::Above => Position::Above,
+        other if fits_inside => other,
+        _ => Position::Above,
+    };
 
     if is_horizontal {
-        match position {
+        match effective {
             Position::Above => (
                 rect.x + rect.width + OUTSIDE,
                 rect.y + rect.height / 2.0,
                 Horizontal::Left,
                 Vertical::Center,
+                effective,
             ),
             Position::End => (
-                rect.x + rect.width - INSIDE,
+                rect.x + rect.width - effective_r,
                 rect.y + rect.height / 2.0,
                 Horizontal::Right,
                 Vertical::Center,
+                effective,
             ),
             Position::Center => (
                 rect.x + rect.width / 2.0,
                 rect.y + rect.height / 2.0,
                 Horizontal::Center,
                 Vertical::Center,
+                effective,
             ),
             Position::Base => (
-                rect.x + INSIDE,
+                rect.x + effective_r,
                 rect.y + rect.height / 2.0,
                 Horizontal::Left,
                 Vertical::Center,
+                effective,
             ),
         }
     } else {
-        match position {
+        match effective {
             Position::Above => (
                 rect.x + rect.width / 2.0,
                 rect.y - OUTSIDE,
                 Horizontal::Center,
                 Vertical::Bottom,
+                effective,
             ),
             Position::End => (
                 rect.x + rect.width / 2.0,
-                rect.y + INSIDE,
+                rect.y + effective_r,
                 Horizontal::Center,
                 Vertical::Top,
+                effective,
             ),
             Position::Center => (
                 rect.x + rect.width / 2.0,
                 rect.y + rect.height / 2.0,
                 Horizontal::Center,
                 Vertical::Center,
+                effective,
             ),
             Position::Base => (
                 rect.x + rect.width / 2.0,
-                rect.y + rect.height - INSIDE,
+                rect.y + rect.height - effective_r,
                 Horizontal::Center,
                 Vertical::Bottom,
+                effective,
             ),
         }
     }
