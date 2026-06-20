@@ -430,6 +430,8 @@ where
     /// Edge label insets to prevent overhang at axis boundaries.
     /// For horizontal axes: (left, right). For vertical axes: (top, bottom).
     pub label_insets: (f32, f32),
+    pub tick_space: f32,
+    pub label_offset: f32,
 }
 
 /// A Guide wraps an Axis and handles UI layout with proper text measurement.
@@ -1089,6 +1091,8 @@ where
                 tick_positions: Vec::new(),
                 bounds: Bounds::exact(0.0, 1.0),
                 label_insets: (0.0, 0.0),
+                tick_space: 0.0,
+                label_offset: 0.0,
             }),
             children,
         }
@@ -1151,7 +1155,17 @@ where
         }
 
         let tick_length = 5.0;
-        let label_offset = 8.0;
+        let has_chrome = self.axis.shows_ticks() || self.axis.shows_line();
+        let tick_space = if self.axis.shows_ticks() { tick_length } else { 0.0 };
+        let label_offset = if has_chrome {
+            8.0
+        } else {
+            let base = design.and_then(|d| d.axis_text().size).map(|p| p.0).unwrap_or(12.0);
+            let resolved = self.axis.labels.text.resolved_size(base);
+            resolved * 0.5
+        };
+        state.tick_space = tick_space;
+        state.label_offset = label_offset;
         let max_size = limits.max();
 
         match self.axis.orientation() {
@@ -1621,8 +1635,8 @@ where
                 let paragraph = &state.labels[i];
                 let paragraph_bounds = paragraph.min_bounds();
 
-                let tick_length = 5.0;
-                let label_offset = 8.0;
+                let tick_space = state.tick_space;
+                let label_offset = state.label_offset;
 
                 let orientation = self.axis.orientation();
                 let text_align = self.axis.labels.align.unwrap_or(match orientation {
@@ -1640,10 +1654,10 @@ where
                             TextAlign::Center => child_bounds.x - w / 2.0,
                             TextAlign::Right => child_bounds.x - w,
                         };
-                        Point::new(x, bounds.y + tick_length + label_offset)
+                        Point::new(x, bounds.y + tick_space + label_offset)
                     }
                     Orientation::Left => {
-                        let col_w = bounds.width - tick_length - label_offset;
+                        let col_w = bounds.width - tick_space - label_offset;
                         let x = match text_align {
                             TextAlign::Left => bounds.x,
                             TextAlign::Center => bounds.x + (col_w - w) / 2.0,
@@ -1652,8 +1666,8 @@ where
                         Point::new(x, child_bounds.y - paragraph_bounds.height / 2.0)
                     }
                     Orientation::Right => {
-                        let col_start = bounds.x + tick_length + label_offset;
-                        let col_w = bounds.width - tick_length - label_offset;
+                        let col_start = bounds.x + tick_space + label_offset;
+                        let col_w = bounds.width - tick_space - label_offset;
                         let x = match text_align {
                             TextAlign::Left => col_start,
                             TextAlign::Center => col_start + (col_w - w) / 2.0,
@@ -1669,7 +1683,7 @@ where
                         };
                         Point::new(
                             x,
-                            bounds.y + bounds.height - tick_length - label_offset - paragraph_bounds.height,
+                            bounds.y + bounds.height - tick_space - label_offset - paragraph_bounds.height,
                         )
                     }
                 };

@@ -1,7 +1,7 @@
 use hyozu::data::Action;
 use hyozu::mark::bar::label::Position;
 use hyozu::{Data, bar, bars, chart, item, props};
-use iced::widget::{center, column, container, row, slider, text};
+use iced::widget::{center, checkbox, column, container, row, slider, text};
 use iced::{Center, Element, Fill, Function, Task, Theme};
 
 pub fn main() -> iced::Result {
@@ -21,6 +21,7 @@ struct App {
     corner_radius: f32,
     bar_size: f32,
     label_size: f32,
+    show_axis: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -28,6 +29,7 @@ enum Message {
     Set(item::Item),
     CornerRadius(f32),
     LabelSize(f32),
+    ShowAxis(bool),
 }
 
 const LABELS: [&str; 10] = [
@@ -39,7 +41,7 @@ impl App {
         let bar_size = 0.75;
         let label_size = 12.0;
 
-        let data = Self::build_data(bar_size, label_size);
+        let data = Self::build_data(bar_size, label_size, true);
 
         (
             Self {
@@ -47,12 +49,13 @@ impl App {
                 corner_radius: 4.0,
                 bar_size,
                 label_size,
+                show_axis: true,
             },
             Task::none(),
         )
     }
 
-    fn build_data(bar_size: f32, label_size: f32) -> Data {
+    fn build_data(bar_size: f32, label_size: f32, show_axis: bool) -> Data {
         let series = bar([5000.0, 800.0, 400.0, 200.0, 100.0, 50.0, 30.0, 15.0, 5.0, 2.0]).with_labels(
             Position::End + hyozu::text::Style::new().size(label_size) + (|v: f64| format!("{}", v as i64)),
         );
@@ -60,7 +63,7 @@ impl App {
         Data::from(bars([series]).horizontal().with_size(bar_size))
             .y_axis_labels(LABELS)
             .x_axis(|a| a.none())
-            .y_axis(|a| a.show_line(false).show_grid(false))
+            .y_axis(|a| a.show_line(show_axis).show_grid(false))
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -76,7 +79,11 @@ impl App {
             }
             Message::LabelSize(v) => {
                 self.label_size = v;
-                self.data = Self::build_data(self.bar_size, v);
+                self.data = Self::build_data(self.bar_size, v, self.show_axis);
+            }
+            Message::ShowAxis(v) => {
+                self.show_axis = v;
+                self.data = Self::build_data(self.bar_size, self.label_size, v);
             }
         }
         Task::none()
@@ -116,6 +123,7 @@ impl App {
                 ]
                 .spacing(5)
                 .align_y(Center),
+                checkbox(self.show_axis).label("Y-Axis").on_toggle(Message::ShowAxis),
             ]
             .spacing(30)
             .align_y(Center),
