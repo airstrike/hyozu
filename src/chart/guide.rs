@@ -1101,9 +1101,9 @@ where
     /// Reconcile the tree with current Guide state
     pub(super) fn diff(&self, tree: &mut Tree) {
         let bounds = self.compute_axis_bounds();
-        let (label_info, _) = self.ticks_and_labels(bounds, None);
+        let (mut label_info, _) = self.ticks_and_labels(bounds, None);
 
-        tree.diff_children_custom(&label_info, |_tree, _tick| {}, |_tick| Tree::empty());
+        tree.diff_children_custom(&mut label_info, |_tree, _tick| {}, |_tick| Tree::empty());
     }
 
     /// Layout the guide, measuring text labels and positioning ticks.

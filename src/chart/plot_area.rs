@@ -391,10 +391,10 @@ where
     }
 
     /// Reconcile the tree with current PlotArea state
-    pub(super) fn diff(&self, tree: &mut Tree) {
+    pub(super) fn diff(&mut self, tree: &mut Tree) {
         // Diff each series
         tree.diff_children_custom(
-            &self.series,
+            &mut self.series,
             |tree, series| {
                 // When the mark type changes (e.g. Bars → Pie), the tree
                 // node still holds the old state type.  Detect this via

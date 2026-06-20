@@ -1564,20 +1564,7 @@ where
         tree::State::new(State::default())
     }
 
-    fn children(&self) -> Vec<Tree> {
-        // Tree-shape invariant:
-        //   children[0] = Scene's tree
-        //   children[1] = donut center child (only when `Kind::Donut` carries a `Center`)
-        let mut children = vec![self.scene.state()];
-        if let Kind::Donut(d) = &self.kind
-            && let Some(c) = &d.center
-        {
-            children.push(Tree::new(&c.element));
-        }
-        children
-    }
-
-    fn diff(&self, tree: &mut Tree) {
+    fn diff(&mut self, tree: &mut Tree) {
         let state = tree.state.downcast_mut::<State>();
         if state.generation != self.generation {
             state.generation = self.generation;
@@ -1587,7 +1574,13 @@ where
             // of mounting from `0`. Done positionally — each pie mark
             // stays at its plot-area child index across rebuilds, since
             // the data's mark vector drives both layouts.
-            let mut old_children = std::mem::replace(&mut tree.children, self.children());
+            let mut new_children = vec![self.scene.state()];
+            if let Kind::Donut(d) = &self.kind
+                && let Some(c) = &d.center
+            {
+                new_children.push(Tree::new(&c.element));
+            }
+            let mut old_children = std::mem::replace(&mut tree.children, new_children);
             replant_mark_animations(&old_children, &mut tree.children, self.animate);
             replant_geo_plane(&mut old_children, &mut tree.children);
             return;
@@ -1595,13 +1588,13 @@ where
         self.scene.diff(&mut tree.children[0]);
 
         // Reconcile the optional donut center child at children[1].
-        match &self.kind {
-            Kind::Donut(d) => match &d.center {
+        match &mut self.kind {
+            Kind::Donut(d) => match &mut d.center {
                 Some(c) => {
                     if tree.children.len() < 2 {
                         tree.children.push(Tree::new(&c.element));
                     } else {
-                        tree.children[1].diff(c.element.as_widget());
+                        tree.children[1].diff(c.element.as_widget_mut());
                     }
                 }
                 None => {
@@ -2143,12 +2136,12 @@ where
             annotation_tree = &mut state.annotation_tree;
         }
 
-        let annotation = hover_fn(&entry);
+        let mut annotation = hover_fn(&entry);
         // Reconcile the persisted tree with this frame's element.
         // When the closure returns the same widget shape (same hover
         // target), per-widget state survives; on shape changes the
         // tree rebuilds.
-        annotation_tree.diff(&annotation.content);
+        annotation_tree.diff(&mut annotation.content);
 
         Some(overlay::Element::new(Box::new(AnnotationOverlay {
             annotation,

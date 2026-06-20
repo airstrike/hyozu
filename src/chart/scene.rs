@@ -153,7 +153,7 @@ where
     ///
     /// Key insight from iced's tree.rs: if tags don't match, recreate the tree.
     /// This handles None→Some transitions where the tree was Tree::empty().
-    pub(super) fn diff(&self, tree: &mut Tree) {
+    pub(super) fn diff(&mut self, tree: &mut Tree) {
         // Scene always has exactly 7 children (some may be empty Trees)
         // For each component, check if the tree matches what we expect.
         // If not (e.g., was None/empty, now Some), recreate the child tree.
