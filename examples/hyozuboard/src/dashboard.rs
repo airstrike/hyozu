@@ -1,5 +1,5 @@
 use iced::widget::{container, pick_list, row, scrollable, text, tooltip};
-use iced::{Center, Element, Fill, Font, font};
+use iced::{Center, Element, Fill, Font, Length, font};
 
 use sweeten::widget::tile_grid::{self, CellHeight, grid_content, title_bar};
 
@@ -119,7 +119,7 @@ fn label<'a>(card: &'a model::card::Card, theme: &'a iced::Theme) -> iced::widge
                 .center(16)
                 .style(style::info_icon),
             container(text(desc).size(11))
-                .max_width(260)
+                .width(Length::Fit.max(260))
                 .padding(8)
                 .style(style::tooltip),
             tooltip::Position::Bottom,

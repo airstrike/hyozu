@@ -41,14 +41,14 @@ impl App {
 
         let config: Configuration<dashboard::Tile> = Configuration::new(theme::COLS)
             .float(true)
-            .with_item(0, 0, 3, 1, tile("card_revenue", &mut cards_by_id))
-            .with_item(0, 1, 3, 1, tile("card_leverage", &mut cards_by_id))
-            .with_item(3, 0, 6, 2, dashboard::Tile::Placeholder)
-            .with_item(9, 0, 3, 1, tile("card_arr", &mut cards_by_id))
-            .with_item(9, 1, 3, 1, tile("card_burn", &mut cards_by_id))
-            .with_item(0, 2, 6, 2, tile("card_markets", &mut cards_by_id))
-            .with_item(6, 2, 6, 2, tile("card_news", &mut cards_by_id))
-            .with_item(6, 4, 6, 2, tile("card_geo_profit", &mut cards_by_id));
+            .with_item([0, 0, 3, 1], tile("card_revenue", &mut cards_by_id))
+            .with_item([0, 1, 3, 1], tile("card_leverage", &mut cards_by_id))
+            .with_item([3, 0, 6, 2], dashboard::Tile::Placeholder)
+            .with_item([9, 0, 3, 1], tile("card_arr", &mut cards_by_id))
+            .with_item([9, 1, 3, 1], tile("card_burn", &mut cards_by_id))
+            .with_item([0, 2, 6, 2], tile("card_markets", &mut cards_by_id))
+            .with_item([6, 2, 6, 2], tile("card_news", &mut cards_by_id))
+            .with_item([6, 4, 6, 2], tile("card_geo_profit", &mut cards_by_id));
 
         let mut grid = tile_grid::State::with_configuration(config);
 

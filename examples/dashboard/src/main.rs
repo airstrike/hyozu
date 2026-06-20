@@ -613,12 +613,12 @@ impl Screen {
         };
 
         let mut grid = tile_grid::State::new(COLS);
-        grid.add(0, 0, 3, 2, tile(WidgetKind::Overview));
-        grid.add(0, 2, 3, 4, tile(WidgetKind::TurnoverBand));
-        grid.add(0, 6, 3, 3, tile(WidgetKind::TurnoverSegment));
-        grid.add(3, 0, 5, 4, tile(WidgetKind::OwnerSegment));
-        grid.add(3, 4, 5, 5, tile(WidgetKind::Details));
-        grid.add(8, 0, 4, 9, tile(WidgetKind::Revenues));
+        grid.add([0, 0, 3, 2], tile(WidgetKind::Overview));
+        grid.add([0, 2, 3, 4], tile(WidgetKind::TurnoverBand));
+        grid.add([0, 6, 3, 3], tile(WidgetKind::TurnoverSegment));
+        grid.add([3, 0, 5, 4], tile(WidgetKind::OwnerSegment));
+        grid.add([3, 4, 5, 5], tile(WidgetKind::Details));
+        grid.add([8, 0, 4, 9], tile(WidgetKind::Revenues));
 
         Self {
             model,

@@ -141,10 +141,10 @@ impl Dashboard {
 
         let config: Configuration<Tile> = Configuration::new(COLS)
             .float(true)
-            .with_item(0, 0, 3, 2, Tile::Panel(Panel::Kpi))
-            .with_item(3, 0, 6, 2, Tile::Panel(Panel::Map))
-            .with_item(9, 0, 3, 2, Tile::Panel(Panel::Rail))
-            .with_item(0, 2, 12, 1, Tile::Panel(Panel::Line));
+            .with_item([0, 0, 3, 2], Tile::Panel(Panel::Kpi))
+            .with_item([3, 0, 6, 2], Tile::Panel(Panel::Map))
+            .with_item([9, 0, 3, 2], Tile::Panel(Panel::Rail))
+            .with_item([0, 2, 12, 1], Tile::Panel(Panel::Line));
         let grid = tile_grid::State::with_configuration(config);
 
         let slicer_tasks: Vec<Task<Message>> = slicer_state
