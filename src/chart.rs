@@ -1566,7 +1566,9 @@ where
 
     fn diff(&mut self, tree: &mut Tree) {
         let state = tree.state.downcast_mut::<State>();
-        if state.generation != self.generation {
+        // Plant children when the generation changes, or when they're empty
+        // (the unplanted initial state).
+        if state.generation != self.generation || tree.children.is_empty() {
             state.generation = self.generation;
             // Wholesale rebuild loses pie tree state, so snapshot the
             // previous slice angles per pie and replant them on the new
