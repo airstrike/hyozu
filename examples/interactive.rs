@@ -364,7 +364,7 @@ impl App {
                 column![
                     text("Bar Size").size(14),
                     row![
-                        slider(0.1..=1.0, size, on_size).step(0.05).width(Fill),
+                        slider(0.1..=1.0, size, on_size).step(0.05f32).width(Fill),
                         text(format!("{size:.2}")),
                     ]
                     .spacing(10)
@@ -374,7 +374,7 @@ impl App {
                 column![
                     text("Bar Spacing").size(14),
                     row![
-                        slider(0.0..=1.0, spacing, on_spacing).step(0.05).width(Fill),
+                        slider(0.0..=1.0, spacing, on_spacing).step(0.05f32).width(Fill),
                         text(format!("{spacing:.2}")),
                     ]
                     .spacing(10)
@@ -412,7 +412,7 @@ impl App {
                 column![
                     text("Hole Size").size(14),
                     row![
-                        slider(0.0..=0.9, hole, on_hole).step(0.05).width(Fill),
+                        slider(0.0..=0.9, hole, on_hole).step(0.05f32).width(Fill),
                         text(format!("{hole:.2}")),
                     ]
                     .spacing(10)
@@ -777,7 +777,7 @@ impl App {
             column![
                 text("Font Size").size(14),
                 row![
-                    slider(8.0..=24.0, current_size, on_size).step(1.0).width(Fill),
+                    slider(8.0..=24.0, current_size, on_size).step(1.0f32).width(Fill),
                     text(format!("{current_size:.0}")),
                 ]
                 .spacing(10)
@@ -899,7 +899,7 @@ impl App {
             column![
                 text("Font Size").size(14),
                 row![
-                    slider(8.0..=24.0, current_size, on_size).step(1.0).width(Fill),
+                    slider(8.0..=24.0, current_size, on_size).step(1.0f32).width(Fill),
                     text(format!("{current_size:.0}")),
                 ]
                 .spacing(10)

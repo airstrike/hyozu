@@ -117,7 +117,7 @@ impl App {
                     row![
                         row![
                             text("Bar Length:"),
-                            Element::from(slider(0.1..=1.0, self.size, props::bar::Size).step(0.01).width(200))
+                            Element::from(slider(0.1..=1.0, self.size, props::bar::Size).step(0.01f32).width(200))
                                 .map(item::Bars.with(0))
                                 .map(Message::Set),
                             text!("{:.0}%", self.size * 100.0).width(40).align_x(End),
@@ -128,7 +128,7 @@ impl App {
                             text("Spacing:"),
                             Element::from(
                                 slider(0.0..=1.0, self.spacing, props::bar::Spacing)
-                                    .step(0.01)
+                                    .step(0.01f32)
                                     .width(200)
                             )
                             .map(item::Bars.with(0))

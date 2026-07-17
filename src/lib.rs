@@ -16,7 +16,8 @@ pub mod target;
 pub mod theme;
 
 // Make our imports look like iced's built-in widgets
-use {iced_core as core, iced_widget as widget};
+use iced_core as core;
+use iced_widget as widget;
 
 // Re-export iced::Function for `.with()` partial application
 pub use core::Function;
