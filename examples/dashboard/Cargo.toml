@@ -6,5 +6,5 @@ publish = false
 
 [dependencies]
 hyozu = { path = "../.." }
-sweeten = { path = "../../../sweeten" }
+sweeten = { git = "https://github.com/airstrike/sweeten", branch = "dev" }
 iced = { version = "0.15.0-dev", features = ["canvas"] }

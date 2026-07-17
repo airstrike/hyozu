@@ -1,0 +1,8 @@
+[advisories]
+ignore = [
+    # quick-xml < 0.41 pulled in by wayland-scanner (build-time codegen for
+    # winit's wayland backend). No wayland-scanner release depends on
+    # quick-xml >= 0.41 yet; drop these once one exists.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+]
