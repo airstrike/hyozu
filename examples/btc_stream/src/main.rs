@@ -20,7 +20,7 @@ use hyozu::{Data, chart, line};
 
 use iced::task::{self, sipper};
 use iced::widget::{Space, button, column, container, row, text};
-use iced::{Border, Element, Fill, Font, Shrink, Task, Theme};
+use iced::{Border, Element, Fill, Font, Shrink, Task, Theme, Widget};
 
 const WINDOW_SIZE: usize = 60;
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
@@ -70,8 +70,8 @@ pub fn main() -> iced::Result {
         .window_size([700.0, 400.0])
         .title("hyozu • btc_stream")
         .settings(iced::Settings {
-            default_text_size: 12.into(),
-            default_font: Font::MONOSPACE,
+            text_size: 12.into(),
+            font: Font::MONOSPACE,
             ..Default::default()
         })
         .theme(hyozu::theme::hyozu_dark())
@@ -263,7 +263,6 @@ impl App {
                     .padding([4, 8])
                     .style(move |theme, status| segment_button(theme, status, selected))
                     .on_press(Message::SetTradingPair(pair))
-                    .into()
             });
             container(row(buttons))
                 .style(|theme: &Theme| {
@@ -314,7 +313,7 @@ impl App {
             column![header, text("waiting for data...")].spacing(10)
         };
 
-        container(content).padding(15).into()
+        container(content).padding(15).boxed()
     }
 }
 

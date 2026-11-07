@@ -1,7 +1,7 @@
 use hyozu::mark::pie;
 use hyozu::{data, palette, pie as pie_fn};
 use iced::widget::{center, column, pick_list, row};
-use iced::{Center, Fill, Subscription, Task, Theme, keyboard};
+use iced::{Center, Fill, Subscription, Task, Theme, Widget, keyboard};
 
 pub fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
@@ -129,7 +129,7 @@ impl App {
                 .spacing(20),
         )
         .padding(20)
-        .into()
+        .boxed()
     }
 
     fn theme(&self) -> Theme {

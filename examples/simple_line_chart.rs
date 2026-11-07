@@ -1,5 +1,5 @@
-use iced::Task;
 use iced::widget::center;
+use iced::{Task, Widget};
 
 use hyozu::{Tooltip, band, chart, data, line};
 
@@ -49,6 +49,6 @@ impl App {
     fn view(&self) -> iced::Element<'_, Message> {
         center(chart(&self.data).on_action(Message::ChartAction).padding(40))
             .padding(20)
-            .into()
+            .boxed()
     }
 }

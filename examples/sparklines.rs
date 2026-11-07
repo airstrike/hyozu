@@ -1,6 +1,6 @@
 use iced::Alignment::*;
-use iced::widget::{Container, center, container, scrollable, table, text};
-use iced::{Center, Color, Element, Fill, Font, Theme, color, font};
+use iced::widget::{Container, Text, center, container, scrollable, table, text};
+use iced::{Center, Color, Element, Fill, Font, Theme, Widget, color, font};
 
 use hyozu::sparkline;
 use hyozu::sparkline::Highlight;
@@ -14,7 +14,7 @@ pub fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
         .title("hyozu • sparklines")
         .theme(Theme::Light)
-        .default_font(Font::new("Geist"))
+        .font(Font::new("Geist"))
         .window_size([900.0, 500.0])
         .centered()
         .run()
@@ -58,29 +58,28 @@ impl App {
             table::column(header("RATE CHG."), |p: &Product| signed_pct(p.rate_chg, 1, p.is_total)).align_x(End),
             table::column(header("LOSS RATIO\n8Q"), |p: &Product| -> Element<'_, Message> {
                 if p.is_total || p.loss_ratio_8q.is_empty() {
-                    center("").into()
+                    center("").boxed()
                 } else {
                     sparkline(&p.loss_ratio_8q)
                         .width(80)
                         .color(color!(0x37474F))
                         .stroke_width(1.5)
                         .highlight(Highlight::Last, color!(0x37474F))
-                        .into()
+                        .boxed()
                 }
             })
-            .center()
+            .align_x(Center)
+            .align_y(Center)
             .width(100),
         ];
 
-        let table = Element::from(
-            table(columns, &self.products)
-                .padding_x(12.0)
-                .padding_y(8.0)
-                .separator_x(0.0)
-                .separator_y(1.0),
-        );
+        let table = table(columns, &self.products)
+            .padding_x(12.0)
+            .padding_y(8.0)
+            .separator_x(0.0)
+            .separator_y(1.0);
 
-        center(scrollable(container(table).padding(1).style(container::bordered_box)).spacing(10)).into()
+        center(scrollable(container(table).padding(1).style(container::bordered_box)).spacing(10)).boxed()
     }
 }
 
@@ -94,11 +93,12 @@ fn header<'a>(label: &str) -> Element<'a, Message> {
             .align_x(Center)
             .style(|_: &Theme| text::Style {
                 color: Some(color!(0x888888)),
+                selection: None,
             }),
     )
     .padding([2, 5])
     .center_y(Fill)
-    .into()
+    .boxed()
 }
 
 fn cell_font(is_total: bool) -> Font {
@@ -109,7 +109,7 @@ fn cell<'a>(content: impl ToString, is_total: bool) -> Element<'a, Message> {
     container(text(content.to_string()).font(cell_font(is_total)).size(13))
         .center_y(Fill)
         .padding([2, 5])
-        .into()
+        .boxed()
 }
 
 fn signed_pct<'a>(value: f64, decimals: usize, is_total: bool) -> Element<'a, Message> {
@@ -127,10 +127,10 @@ fn signed_pct<'a>(value: f64, decimals: usize, is_total: bool) -> Element<'a, Me
     )
     .padding([2, 5])
     .center_y(Fill)
-    .into()
+    .boxed()
 }
 
-fn ratio_cell<'a>(value: f64, low: f64, high: f64, is_total: bool) -> Container<'a, Message> {
+fn ratio_cell<'a>(value: f64, low: f64, high: f64, is_total: bool) -> Container<'a, Text<'a>> {
     let bg = ratio_color(value, low, high);
     center(
         text(format!("{value:.1}%"))

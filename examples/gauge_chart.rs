@@ -1,6 +1,6 @@
 use hyozu::{Action, Function, Map, data, gauge, item, props};
 use iced::widget::{center, column, pick_list, row};
-use iced::{Center, Fill, Subscription, Task, Theme, keyboard, window};
+use iced::{Center, Fill, Subscription, Task, Theme, Widget, keyboard, window};
 use std::time::Instant;
 
 pub fn main() -> iced::Result {
@@ -173,7 +173,7 @@ impl App {
                 .spacing(20),
         )
         .padding(20)
-        .into()
+        .boxed()
     }
 
     fn theme(&self) -> Theme {

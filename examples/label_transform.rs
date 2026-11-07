@@ -3,13 +3,13 @@ use hyozu::data::Action;
 use hyozu::{Data, bar, bars, chart, item, props};
 use iced::Alignment::End;
 use iced::widget::{center, column, container, row, slider, text};
-use iced::{Center, Element, Fill, Function, Task, Theme};
+use iced::{Center, Element, Fill, Function, Task, Theme, Widget};
 
 pub fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
         .title("hyozu • customizing spacing and axis labels")
         .settings(iced::Settings {
-            default_text_size: 13.into(),
+            text_size: 13.into(),
             ..Default::default()
         })
         .theme(iced::Theme::Light)
@@ -117,16 +117,18 @@ impl App {
                     row![
                         row![
                             text("Bar Length:"),
-                            Element::from(slider(0.1..=1.0, self.size, props::bar::Size).step(0.01f32).width(200))
-                                .map(item::Bars.with(0))
-                                .map(Message::Set),
+                            Widget::<props::bar::Property>::boxed(
+                                slider(0.1..=1.0, self.size, props::bar::Size).step(0.01f32).width(200)
+                            )
+                            .map(item::Bars.with(0))
+                            .map(Message::Set),
                             text!("{:.0}%", self.size * 100.0).width(40).align_x(End),
                         ]
                         .spacing(5)
                         .align_y(Center),
                         row![
                             text("Spacing:"),
-                            Element::from(
+                            Widget::<props::bar::Property>::boxed(
                                 slider(0.0..=1.0, self.spacing, props::bar::Spacing)
                                     .step(0.01f32)
                                     .width(200)
@@ -159,6 +161,6 @@ impl App {
             .spacing(20),
         )
         .padding(20)
-        .into()
+        .boxed()
     }
 }

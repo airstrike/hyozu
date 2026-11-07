@@ -2,13 +2,13 @@ use hyozu::data::Action;
 use hyozu::mark::bar::label::Position;
 use hyozu::{Data, bar, bars, chart, item, props};
 use iced::widget::{center, checkbox, column, container, row, slider, text};
-use iced::{Center, Element, Fill, Function, Task, Theme};
+use iced::{Center, Element, Fill, Function, Task, Theme, Widget};
 
 pub fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
         .window_size([800.0, 500.0])
         .settings(iced::Settings {
-            default_text_size: 11.into(),
+            text_size: 11.into(),
             ..Default::default()
         })
         .title("hyozu - label geometry")
@@ -103,7 +103,7 @@ impl App {
                 .align_y(Center),
                 row![
                     text("Bar Height:"),
-                    Element::from(
+                    Widget::<props::bar::Property>::boxed(
                         slider(0.1..=1.0, self.bar_size, props::bar::Size)
                             .step(0.01f32)
                             .width(Fill)
@@ -145,6 +145,6 @@ impl App {
             .spacing(20),
         )
         .padding(20)
-        .into()
+        .boxed()
     }
 }

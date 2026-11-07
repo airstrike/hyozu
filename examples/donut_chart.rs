@@ -3,7 +3,7 @@ use hyozu::widget::fit_text;
 use hyozu::{Color, data, donut, legend, palette};
 use iced::font::Weight;
 use iced::widget::{center, column, container, pick_list, row, space, text};
-use iced::{Border, Center, Fill, Subscription, Task, Theme, keyboard};
+use iced::{Border, Center, Fill, Subscription, Task, Theme, Widget, keyboard};
 
 pub fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
@@ -187,7 +187,7 @@ impl App {
 
         center(column![theme_picker, card].spacing(20).align_x(Center))
             .padding(20)
-            .into()
+            .boxed()
     }
 
     fn theme(&self) -> Theme {

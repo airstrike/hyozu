@@ -4,7 +4,7 @@ use crate::icon;
 
 use hyozu::Data;
 use iced::widget::{button, column, container, row, scrollable, text, text_editor};
-use iced::{Element, Fill, Font, Length};
+use iced::{Element, Fill, Font, Length, Widget};
 
 // ---------------------------------------------------------------------------
 // State
@@ -45,7 +45,7 @@ impl Detail {
         }
     }
 
-    pub fn view<'a>(&'a self, variant: &'a Variant, data: &'a Data, is_dark: bool) -> Element<'a, Message> {
+    pub fn view<'a>(&'a self, variant: &'a Variant, data: &'a Data) -> Element<'a, Message> {
         let back_btn = button(icon::arrow_left().size(16))
             .padding([4, 8])
             .on_press(Message::Back)
@@ -56,15 +56,9 @@ impl Detail {
 
         let chart_widget = hyozu::chart(data).height(300).padding(10);
 
-        let highlight_theme = if is_dark {
-            iced::highlighter::Theme::Base16Mocha
-        } else {
-            iced::highlighter::Theme::InspiredGitHub
-        };
-
         let editor = text_editor(&self.code)
             .on_action(Message::EditorAction)
-            .highlight("rs", highlight_theme)
+            .highlight("rs")
             .font(Font::MONOSPACE)
             .size(12);
 
@@ -78,6 +72,6 @@ impl Detail {
         .width(Fill)
         .height(Fill);
 
-        container(content).width(Fill).height(Length::Fill).into()
+        container(content).width(Fill).height(Length::Fill).boxed()
     }
 }

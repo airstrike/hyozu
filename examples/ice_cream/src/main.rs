@@ -21,7 +21,7 @@ use hyozu::ProjectionKind;
 use hyozu::data::legend;
 use hyozu::geo::{self, GeoData, MapScope};
 use iced::widget::{center, column, container, text};
-use iced::{Color, Element, Fill, Font, Task, Theme, color};
+use iced::{Color, Element, Fill, Font, Task, Theme, Widget, color};
 
 /// Warm contrast color for the bubble overlay so flagship stores read
 /// against the blue choropleth instead of disappearing into it.
@@ -210,13 +210,13 @@ impl App {
             return center(text(format!("Failed to load: {err}")).size(18))
                 .width(Fill)
                 .height(Fill)
-                .into();
+                .boxed();
         }
         if self.states.is_none() {
             return center(text("Fetching US states…").size(18))
                 .width(Fill)
                 .height(Fill)
-                .into();
+                .boxed();
         }
 
         let chart = hyozu::chart(&self.chart_data)
@@ -229,7 +229,7 @@ impl App {
         column![header(), container(chart).padding(8).width(Fill).height(Fill)]
             .width(Fill)
             .height(Fill)
-            .into()
+            .boxed()
     }
 
     /// Builds the Data: choropleth (states colored by revenue) + bubble
@@ -305,7 +305,7 @@ impl App {
 fn header() -> Element<'static, Message> {
     let title = text("Sundae Drive").size(22);
     let subtitle = text("Revenue · United States").size(13).color(color!(0x666666));
-    container(column![title, subtitle].spacing(2)).padding([10, 16]).into()
+    container(column![title, subtitle].spacing(2)).padding([10, 16]).boxed()
 }
 
 // ── Async fetch ────────────────────────────────────────────────────
@@ -328,8 +328,8 @@ fn main() -> iced::Result {
         .title("Sundae Drive — Sales Map")
         .theme(|_state: &App| Theme::Light)
         .settings(iced::Settings {
-            default_text_size: 13.into(),
-            default_font: Font::DEFAULT,
+            text_size: 13.into(),
+            font: Font::DEFAULT,
             ..Default::default()
         })
         .run()

@@ -10,7 +10,7 @@
 //! snaps to the real typeface.
 
 use iced::widget::{center, column, row, text};
-use iced::{Font, Length, Task, Theme};
+use iced::{Font, Length, Task, Theme, Widget};
 
 use hyozu::axis::Placement::BetweenTicks;
 use hyozu::bar::label::Above;
@@ -106,7 +106,7 @@ impl App {
 
         center(column![header, chart, key, status].spacing(16))
             .padding(20)
-            .into()
+            .boxed()
     }
 }
 
@@ -133,5 +133,5 @@ fn info_row<'a>(label: &'a str, value: &'a str) -> iced::Element<'a, Message> {
         text(value).size(12).font(Font::MONOSPACE).color([0.4, 0.4, 0.4]),
     ]
     .spacing(12)
-    .into()
+    .boxed()
 }

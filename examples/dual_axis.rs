@@ -1,5 +1,5 @@
 use iced::widget::center;
-use iced::{Task, Theme};
+use iced::{Task, Theme, Widget};
 
 use hyozu::mark::bar::label::Position as BarLabelPos;
 use hyozu::mark::line::label::Position as LineLabelPos;
@@ -47,7 +47,7 @@ impl App {
                 }),
         )
         .padding(20)
-        .into()
+        .boxed()
     }
 
     fn update(&mut self, _: Message) -> Task<Message> {

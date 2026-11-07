@@ -3,14 +3,14 @@ use hyozu::data::Action;
 use hyozu::{Data, Map, bar, bars, chart, item, props};
 use iced::widget::{center, column, pick_list, radio, row};
 use iced::{Center, Fill, Function, Subscription, Task, Theme, keyboard};
-use iced_widget::checkbox;
+use iced_widget::{Widget, checkbox};
 
 pub fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
         .window_size([800.0, 600.0])
         .settings(iced::Settings {
-            default_text_size: 13.into(),
-            default_font: iced::Font::with_family("GT Pressura Mono"),
+            text_size: 13.into(),
+            font: iced::Font::with_family("GT Pressura Mono"),
             ..Default::default()
         })
         .title("Hyozu - Bar Chart with Labels")
@@ -221,7 +221,7 @@ impl App {
                 .spacing(20),
         )
         .padding(20)
-        .into()
+        .boxed()
     }
 
     fn theme(&self) -> Theme {

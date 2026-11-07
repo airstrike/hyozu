@@ -8,19 +8,19 @@ use category::Category;
 use charts::{ChartId, Variant};
 
 use hyozu::Data;
-use iced::widget::{button, column, container, row, scrollable, text};
-use iced::{Element, Fill, Font, Shrink, Task, Theme};
+use iced::widget::{Column, button, column, container, row, scrollable, text};
+use iced::{Element, Fill, Font, Shrink, Task, Theme, Widget};
 
 pub fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
         .window_size([1200.0, 800.0])
         .title("hyozu gallery")
         .settings(iced::Settings {
-            default_text_size: 13.into(),
-            default_font: Font::MONOSPACE,
+            text_size: 13.into(),
+            font: Font::MONOSPACE,
             ..Default::default()
         })
-        .font(icon::FONT)
+        .fonts([icon::FONT])
         .theme(|state: &App| state.theme.clone())
         .run()
 }
@@ -116,11 +116,11 @@ impl App {
                 let id = self.active_chart.unwrap();
                 let variant = &self.variants[id.0];
                 let data = &self.data[id.0];
-                detail.view(variant, data, self.dark).map(Message::Detail)
+                detail.view(variant, data).map(Message::Detail).boxed()
             }
         };
 
-        row![sidebar, content].into()
+        row![sidebar, content].boxed()
     }
 
     // -- Sidebar -----------------------------------------------------------
@@ -149,7 +149,7 @@ impl App {
             .on_press(Message::ToggleDark)
             .style(button::text);
 
-        let spacer = container(column![]).height(Fill);
+        let spacer = container(Column::<Element<'_, Message>>::new()).height(Fill);
 
         let sidebar_content = column![sidebar_col, spacer, theme_btn]
             .spacing(6)
@@ -166,7 +166,7 @@ impl App {
                     ..Default::default()
                 }
             })
-            .into()
+            .boxed()
     }
 
     // -- Chart grid --------------------------------------------------------
@@ -188,13 +188,18 @@ impl App {
             }
 
             if pair.len() == 1 {
-                chart_row = chart_row.push(container(column![]).width(Fill).height(Shrink));
+                chart_row = chart_row.push(
+                    container(Column::<Element<'_, Message>>::new())
+                        .width(Fill)
+                        .height(Shrink)
+                        .boxed(),
+                );
             }
 
             grid_col = grid_col.push(chart_row);
         }
 
-        scrollable(grid_col).width(Fill).height(Fill).into()
+        scrollable(grid_col).width(Fill).height(Fill).boxed()
     }
 
     // -- Single chart card -------------------------------------------------
@@ -211,7 +216,7 @@ impl App {
             .on_press(Message::SelectChart(id))
             .style(card_button_style);
 
-        container(card).width(Fill).into()
+        container(card).width(Fill).boxed()
     }
 }
 
@@ -226,7 +231,7 @@ fn sidebar_button(label: &str, active: bool, msg: Message) -> Element<'_, Messag
         .on_press(msg)
         .style(move |theme, status| sidebar_button_style(theme, status, active));
 
-    btn.into()
+    btn.boxed()
 }
 
 fn sidebar_button_style(theme: &Theme, status: button::Status, active: bool) -> button::Style {

@@ -1,6 +1,6 @@
 use hyozu::{Data, bars, chart};
 use iced::widget::center;
-use iced::{Task, Theme};
+use iced::{Task, Theme, Widget};
 
 pub fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
@@ -36,6 +36,6 @@ impl App {
     }
 
     fn view(&self) -> iced::Element<'_, Message> {
-        center(chart(&self.data).design(&Theme::Dark).width(800).height(600)).into()
+        center(chart(&self.data).design(&Theme::Dark).width(800).height(600)).boxed()
     }
 }

@@ -1,5 +1,5 @@
 use iced::widget::center;
-use iced::{Task, Theme};
+use iced::{Task, Theme, Widget};
 
 use hyozu::data;
 use hyozu::mark::heatmap::heatmap;
@@ -57,7 +57,7 @@ impl App {
     fn view(&self) -> iced::Element<'_, Message> {
         center(hyozu::chart(&self.data).design(&Theme::Dark).padding(40))
             .padding(20)
-            .into()
+            .boxed()
     }
 
     fn update(&mut self, _: Message) -> Task<Message> {

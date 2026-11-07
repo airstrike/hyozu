@@ -1,5 +1,5 @@
 use iced::widget::{center, column, pick_list, row};
-use iced::{Center, Fill, Subscription, Task, Theme, keyboard};
+use iced::{Center, Fill, Subscription, Task, Theme, Widget, keyboard};
 
 use hyozu::data;
 use hyozu::waterfall::EntryKind::*;
@@ -131,7 +131,7 @@ impl App {
                 .spacing(20),
         )
         .padding(20)
-        .into()
+        .boxed()
     }
 
     fn theme(&self) -> Theme {

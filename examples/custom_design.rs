@@ -7,7 +7,7 @@
 //! - Both are independent and neither needs to be iced::Theme
 
 use iced::widget::{button, center, column, container, row, space, text};
-use iced::{Color, Task};
+use iced::{Color, Task, Widget};
 
 use hyozu::line::marker::Shape;
 use hyozu::{chart, data, line, lines};
@@ -107,7 +107,7 @@ impl App {
 
         let chart = chart(&self.data).design(&self.palette).style(hyozu::chart::filled);
 
-        center(column![controls, chart].spacing(20)).padding(20).into()
+        center(column![controls, chart].spacing(20)).padding(20).boxed()
     }
 }
 
@@ -122,7 +122,7 @@ fn btn<'a>(label: &'a str, selected: bool, msg: Message) -> Element<'a, Message>
             }
         })
         .on_press(msg)
-        .into()
+        .boxed()
 }
 
 /// Simple color swatch.
@@ -135,7 +135,7 @@ fn swatch<'a>(color: &'a Color) -> Element<'a, Message> {
             border: iced::Border::default().rounded(4),
             ..Default::default()
         })
-        .into()
+        .boxed()
 }
 
 // Custom Palette for chart Design. Completely separate from Theme
@@ -439,10 +439,17 @@ mod theme {
             fn style(&self, class: &Self::Class<'_>) -> Style {
                 class(self)
             }
+
+            fn selection(&self) -> iced::Color {
+                self.border
+            }
         }
 
         fn default(_: &Theme) -> Style {
-            Style { color: None }
+            Style {
+                color: None,
+                selection: None,
+            }
         }
     }
 }

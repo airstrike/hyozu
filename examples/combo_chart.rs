@@ -26,7 +26,7 @@
 //! series, no line on the right axis), the bug is in hyozu.
 
 use iced::widget::center;
-use iced::{Task, Theme};
+use iced::{Task, Theme, Widget};
 
 use hyozu::data::mark::bar::Layout as BarLayout;
 use hyozu::{LineStyle, Mark, bar, bars, data, line};
@@ -137,7 +137,7 @@ impl App {
                 }),
         )
         .padding(20)
-        .into()
+        .boxed()
     }
 
     fn update(&mut self, _: Message) -> Task<Message> {

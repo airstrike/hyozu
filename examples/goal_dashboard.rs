@@ -1,5 +1,5 @@
 use iced::widget::center;
-use iced::{Element, Font, Task, color};
+use iced::{Element, Font, Task, Widget, color};
 
 use hyozu::mark::bar::label::Position;
 use hyozu::{Mark, bar, bars, data, encoding, tick};
@@ -98,7 +98,7 @@ impl App {
     fn view(&self) -> Element<'_, Message> {
         center(hyozu::chart(&self.data).design(&self.design).padding(40))
             .padding(20)
-            .into()
+            .boxed()
     }
 
     fn update(&mut self, _: Message) -> Task<Message> {

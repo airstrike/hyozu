@@ -10,7 +10,7 @@
 //! baseline.
 
 use iced::widget::{column, container};
-use iced::{Center, Task};
+use iced::{Center, Task, Widget};
 use iced_widget::checkbox;
 
 use hyozu::{Data, chart, data, line};
@@ -66,7 +66,7 @@ impl App {
                 .align_x(Center),
         )
         .padding(20)
-        .into()
+        .boxed()
     }
 }
 

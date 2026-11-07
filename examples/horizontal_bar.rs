@@ -1,5 +1,5 @@
 use iced::widget::center;
-use iced::{Element, Font, Task, Theme, color};
+use iced::{Element, Font, Task, Theme, Widget, color};
 
 use hyozu::mark::bar::label::Position;
 use hyozu::{Tooltip, bar, bars, data, encoding};
@@ -68,7 +68,7 @@ impl App {
                 }),
         )
         .padding(20)
-        .into()
+        .boxed()
     }
 
     fn update(&mut self, _: Message) -> Task<Message> {

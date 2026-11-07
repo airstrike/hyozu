@@ -1,5 +1,5 @@
-use iced::Task;
 use iced::widget::center;
+use iced::{Task, Widget};
 
 use hyozu::mark::area::LineStyle;
 use hyozu::mark::area::label::{Label, Position, Show};
@@ -56,6 +56,6 @@ impl App {
     fn view(&self) -> iced::Element<'_, Message> {
         center(chart(&self.data).on_action(Message::ChartAction).padding(40))
             .padding(20)
-            .into()
+            .boxed()
     }
 }

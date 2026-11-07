@@ -4,7 +4,7 @@
 //! Each time range uses appropriate data granularity.
 
 use iced::widget::{button, column, container, row, text};
-use iced::{Fill, Task};
+use iced::{Fill, Task, Widget};
 
 use hyozu::axis::Alignment;
 use hyozu::{chart, data, line};
@@ -205,7 +205,7 @@ impl App {
         ]
         .spacing(20);
 
-        container(content).width(Fill).height(Fill).padding(20).into()
+        container(content).width(Fill).height(Fill).padding(20).boxed()
     }
 }
 
@@ -220,7 +220,7 @@ fn btn<'a, Message: Clone + 'a>(label: &'a str, selected: bool, msg: Message) ->
             }
         })
         .on_press(msg)
-        .into()
+        .boxed()
 }
 
 /// Simple deterministic RNG for reproducible price simulation.

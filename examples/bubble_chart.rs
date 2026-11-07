@@ -1,6 +1,6 @@
 use hyozu::{Color, chart, data, encoding, legend, xy};
-use iced::Task;
 use iced::widget::center;
+use iced::{Task, Widget};
 
 pub fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
@@ -69,6 +69,6 @@ impl App {
     fn view(&self) -> iced::Element<'_, Message> {
         center(chart(&self.data).on_action(Message::ChartAction).padding(40))
             .padding(20)
-            .into()
+            .boxed()
     }
 }

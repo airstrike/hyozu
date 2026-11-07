@@ -1,5 +1,5 @@
-use iced::widget::{center, column, container, pick_list, radio, row, scrollable, slider, text};
-use iced::{Center, Fill, Function, Pixels, Subscription, Task, Theme, keyboard};
+use iced::widget::{Column, center, column, container, pick_list, radio, row, scrollable, slider, text};
+use iced::{Center, Fill, Function, Pixels, Subscription, Task, Theme, Widget, keyboard};
 
 use hyozu::axis::Placement;
 use hyozu::data::Action;
@@ -11,8 +11,8 @@ pub fn main() -> iced::Result {
         .window_size([1050.0, 700.0])
         .antialiasing(true)
         .settings(iced::Settings {
-            default_text_size: 13.into(),
-            default_font: iced::Font::with_family("GT Pressura Mono"),
+            text_size: 13.into(),
+            font: iced::Font::with_family("GT Pressura Mono"),
             ..Default::default()
         })
         .title("Hyozu - Interactive Chart")
@@ -400,10 +400,10 @@ impl App {
                 .spacing(4),
             ]
             .spacing(12)
-            .into()
+            .boxed()
         } else {
             // hole moved off Pie data spec to Donut widget; expose via donut() builder
-            column![].spacing(12).into()
+            Column::<iced::Element<'_, Message>>::new().spacing(12).boxed()
         };
 
         // Palette and theme
@@ -490,7 +490,7 @@ impl App {
 
         center(row![sidebar, chart_area].spacing(0).height(Fill).width(Fill))
             .padding(10)
-            .into()
+            .boxed()
     }
 
     fn bar_color_section(&self) -> iced::Element<'_, Message> {
@@ -507,7 +507,7 @@ impl App {
         };
 
         let Some(si) = selected_series_idx else {
-            return column![].into();
+            return Column::<iced::Element<'_, Message>>::new().boxed();
         };
 
         if let Some((series_idx, point_idx)) = selected_entry {
@@ -542,7 +542,7 @@ impl App {
                 }))
             });
 
-            column![text("Bar Color").size(14), color_radios,].spacing(4).into()
+            column![text("Bar Color").size(14), color_radios,].spacing(4).boxed()
         } else {
             // Series selected — show series color picker
             let current_color = self
@@ -575,7 +575,7 @@ impl App {
                 }))
             });
 
-            column![text("Series Color").size(14), color_radios,].spacing(4).into()
+            column![text("Series Color").size(14), color_radios,].spacing(4).boxed()
         }
     }
 
@@ -586,7 +586,7 @@ impl App {
         };
 
         let Some(slice_idx) = selected_slice else {
-            return column![].into();
+            return Column::<iced::Element<'_, Message>>::new().boxed();
         };
 
         // Get current slice color
@@ -618,7 +618,7 @@ impl App {
             }))
         });
 
-        column![text("Slice Color").size(14), color_radios,].spacing(4).into()
+        column![text("Slice Color").size(14), color_radios,].spacing(4).boxed()
     }
 
     fn bar_label_controls_section(&self) -> iced::Element<'_, Message> {
@@ -628,13 +628,13 @@ impl App {
         let (series_idx, entry_idx) = match self.bar_data.selection() {
             Some(Target::SeriesLabel { series, .. }) => (*series, None),
             Some(Target::EntryLabel { series, index, .. }) => (*series, Some(*index)),
-            _ => return column![].into(),
+            _ => return Column::<iced::Element<'_, Message>>::new().boxed(),
         };
 
         // Read current label state from the series
         let series = match self.bar_data.bars(0).and_then(|b| b.series(series_idx)) {
             Some(s) => s,
-            None => return column![].into(),
+            None => return Column::<iced::Element<'_, Message>>::new().boxed(),
         };
 
         // Resolve current values: point override -> series label
@@ -797,7 +797,7 @@ impl App {
             column![text("Fill").size(14), fill_radios,].spacing(4),
         ]
         .spacing(12)
-        .into()
+        .boxed()
     }
 
     fn pie_label_controls_section(&self) -> iced::Element<'_, Message> {
@@ -805,7 +805,7 @@ impl App {
 
         let slice_idx = match self.pie_data.selection() {
             Some(Target::EntryLabel { index, .. }) => *index,
-            _ => return column![].into(),
+            _ => return Column::<iced::Element<'_, Message>>::new().boxed(),
         };
 
         // Read current label state from the slice
@@ -816,7 +816,7 @@ impl App {
             .and_then(|s| s.get_label());
 
         let Some(label) = label else {
-            return column![].into();
+            return Column::<iced::Element<'_, Message>>::new().boxed();
         };
 
         let current_size = label.size().map(|p| p.0).unwrap_or(12.0);
@@ -919,7 +919,7 @@ impl App {
             column![text("Fill").size(14), fill_radios,].spacing(4),
         ]
         .spacing(12)
-        .into()
+        .boxed()
     }
 
     fn theme(&self) -> Theme {

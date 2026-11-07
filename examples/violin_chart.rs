@@ -1,5 +1,5 @@
-use iced::Task;
 use iced::widget::center;
+use iced::{Task, Widget};
 
 use hyozu::data;
 use hyozu::mark::violin::{violin, violin_from_data};
@@ -55,6 +55,6 @@ impl App {
     fn view(&self) -> iced::Element<'_, Message> {
         center(hyozu::chart(&self.data).on_action(Message::ChartAction).padding(40))
             .padding(20)
-            .into()
+            .boxed()
     }
 }

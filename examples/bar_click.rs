@@ -16,7 +16,7 @@
 //! `series_result.x()[index]` `MemberRef` to pin into the slicer.
 
 use iced::widget::{column, container, text};
-use iced::{Center, Element, Length, Task};
+use iced::{Center, Element, Length, Task, Widget};
 
 use hyozu::bar::label;
 use hyozu::data::Action;
@@ -107,7 +107,7 @@ impl App {
                 .width(Length::Fill),
         )
         .padding(16)
-        .into()
+        .boxed()
     }
 }
 

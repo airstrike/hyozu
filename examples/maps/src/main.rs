@@ -11,7 +11,7 @@ mod icon;
 use std::sync::Arc;
 
 use iced::widget::{button, center, column, container, pick_list, row, text};
-use iced::{Element, Fill, Font, Task, Theme};
+use iced::{Element, Fill, Font, Task, Theme, Widget};
 
 use hyozu::ProjectionKind;
 use hyozu::geo::{self, GeoData, MapScope};
@@ -1066,14 +1066,14 @@ impl App {
             return center(text("Loading map data...").size(20))
                 .width(Fill)
                 .height(Fill)
-                .into();
+                .boxed();
         }
 
         if self.countries.is_none() {
             return center(text("Failed to load map data.").size(20))
                 .width(Fill)
                 .height(Fill)
-                .into();
+                .boxed();
         }
 
         let toolbar = self.view_toolbar();
@@ -1104,7 +1104,7 @@ impl App {
                 _ => hyozu::hover::Annotation::new(text("")),
             });
 
-        column![toolbar, region_bar, chart].width(Fill).height(Fill).into()
+        column![toolbar, region_bar, chart].width(Fill).height(Fill).boxed()
     }
 
     // -- Toolbar -------------------------------------------------------
@@ -1115,10 +1115,10 @@ impl App {
                 .padding([4, 8])
                 .on_press(Message::Back)
                 .style(button::text)
-                .into()
+                .boxed()
         } else {
             // Invisible placeholder to keep layout stable
-            container(text("")).width(28).into()
+            container(text("")).width(28).boxed()
         };
 
         let title = text("World Factbook Explorer").size(16);
@@ -1162,7 +1162,7 @@ impl App {
             .padding([8, 16])
             .align_y(iced::Alignment::Center)
             .width(Fill)
-            .into()
+            .boxed()
     }
 
     // -- Region bar ----------------------------------------------------
@@ -1199,7 +1199,7 @@ impl App {
                     ..Default::default()
                 }
             })
-            .into()
+            .boxed()
     }
 
     // -- Chart data ----------------------------------------------------
@@ -1289,11 +1289,11 @@ fn main() -> iced::Result {
         .window_size([1200.0, 800.0])
         .title("World Factbook Explorer")
         .settings(iced::Settings {
-            default_text_size: 13.into(),
-            default_font: Font::MONOSPACE,
+            text_size: 13.into(),
+            font: Font::MONOSPACE,
             ..Default::default()
         })
-        .font(icon::FONT)
+        .fonts([icon::FONT])
         .theme(|state: &App| state.theme.clone())
         .run()
 }
