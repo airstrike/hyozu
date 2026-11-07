@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use iced::widget::column;
-use iced::{Element, Fill, Theme};
+use iced::{Element, Fill, Theme, Widget};
 
 use crate::model;
 
@@ -83,5 +83,5 @@ pub fn view<'a>(
         .padding(iced::padding::all(10).top(0))
         .width(Fill)
         .height(Fill)
-        .into()
+        .boxed()
 }

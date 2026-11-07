@@ -10,7 +10,7 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use iced::widget::{column, container, text};
-use iced::{Element, Length, Task};
+use iced::{Element, Length, Task, Widget};
 
 use hyozu::MapScope;
 use polars_core::prelude::DataFrame;
@@ -97,14 +97,14 @@ impl App {
             App::Loading(_) => container(text("Loading\u{2026}").size(24))
                 .center_x(Length::Fill)
                 .center_y(Length::Fill)
-                .into(),
+                .boxed(),
             App::Failed(err) => {
                 container(column![text("Failed to load").size(24), text(format!("{err}")).size(14),].spacing(8))
                     .center_x(Length::Fill)
                     .center_y(Length::Fill)
-                    .into()
+                    .boxed()
             }
-            App::Loaded(dashboard) => dashboard.view().map(Message::Dashboard),
+            App::Loaded(dashboard) => dashboard.view().map(Message::Dashboard).boxed(),
         }
     }
 

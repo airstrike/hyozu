@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use iced::widget::{button, column, container, row, scrollable, text};
-use iced::{Alignment, Element, Fill, Length, Task};
+use iced::{Alignment, Element, Fill, Length, Task, Widget};
 
 use hyozu::{Action, GeoData};
 use sweeten::widget::tile_grid::{self, CellHeight, Configuration, grid_content, title_bar};
@@ -387,7 +387,7 @@ impl Dashboard {
         .width(Fill)
         .height(Fill)
         .style(style::page)
-        .into()
+        .boxed()
     }
 
     fn render_header(&self) -> Element<'_, Message> {
@@ -416,7 +416,7 @@ impl Dashboard {
         ]
         .spacing(8)
         .align_y(Alignment::Center)
-        .into()
+        .boxed()
     }
 
     /// Render the body of a single panel based on its query state and any
@@ -430,8 +430,8 @@ impl Dashboard {
                     .height(Length::Fill)
                     .style(hyozu::chart::transparent)
                     .on_action(Message::MapClicked)
-                    .into(),
-                None => text("(map data unavailable)").size(14).into(),
+                    .boxed(),
+                None => text("(map data unavailable)").size(14).boxed(),
             },
             (Panel::Rail, Some(QueryState::Ok(results))) => match self.rail_data.as_ref() {
                 Some(data) => rail::render(data),
@@ -441,8 +441,8 @@ impl Dashboard {
                 Some(data) => line::render(data),
                 None => line::fallback(results),
             },
-            (_, None) => text("(no task)").size(14).into(),
-            (_, Some(QueryState::Running)) => text("Running\u{2026}").size(14).into(),
+            (_, None) => text("(no task)").size(14).boxed(),
+            (_, Some(QueryState::Running)) => text("Running\u{2026}").size(14).boxed(),
             (_, Some(QueryState::Err(message))) => render_error(message),
         }
     }
@@ -494,9 +494,9 @@ fn strip_dim(slicer: Tuple, dim: &str) -> Tuple {
 fn render_error(message: &str) -> Element<'_, Message> {
     let is_no_data = message.starts_with("resolve: dimension ") && message.contains("unknown member at path ");
     if is_no_data {
-        text("No data available for this selection").size(14).into()
+        text("No data available for this selection").size(14).boxed()
     } else {
-        text(message).size(14).into()
+        text(message).size(14).boxed()
     }
 }
 

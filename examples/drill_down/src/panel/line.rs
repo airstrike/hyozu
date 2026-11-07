@@ -6,7 +6,7 @@
 //! `Mark::Line`.
 
 use iced::widget::{Renderer, pick_list, row, text};
-use iced::{Alignment, Element, Length, Theme};
+use iced::{Alignment, Element, Length, Theme, Widget};
 
 use tatami::query::{Options, Tuple};
 use tatami::schema::Schema;
@@ -94,7 +94,7 @@ pub fn render<'a>(data: &'a hyozu::Data) -> Element<'a, dashboard::Message, Them
     hyozu::chart(data)
         .height(Length::Fixed(200.0))
         .style(hyozu::chart::transparent)
-        .into()
+        .boxed()
 }
 
 /// Fallback text for shapes the panel can't render.
@@ -102,7 +102,7 @@ pub fn render<'a>(data: &'a hyozu::Data) -> Element<'a, dashboard::Message, Them
 pub fn fallback(results: &tatami::Results) -> Element<'static, dashboard::Message, Theme, Renderer> {
     text(format!("unexpected line shape: {}", variant_tag(results)))
         .size(14)
-        .into()
+        .boxed()
 }
 
 /// Chrome row — rows dim / rows level / metric pickers.
@@ -132,9 +132,9 @@ pub fn chrome<'a>(
                 .placeholder("(level)")
                 .text_size(12)
                 .width(Length::Fixed(140.0))
-                .into()
+                .boxed()
         }
-        axis::Pick::None => text("").into(),
+        axis::Pick::None => text("").boxed(),
     };
 
     let metric_selected = state
@@ -157,7 +157,7 @@ pub fn chrome<'a>(
         .spacing(12)
         .align_y(Alignment::Center)
         .wrap()
-        .into()
+        .boxed()
 }
 
 fn variant_tag(results: &tatami::Results) -> &'static str {

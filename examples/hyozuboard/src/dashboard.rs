@@ -1,5 +1,5 @@
 use iced::widget::{container, pick_list, row, scrollable, text, tooltip};
-use iced::{Center, Element, Fill, Font, Length, font};
+use iced::{Center, Element, Fill, Font, Length, Widget, font};
 
 use sweeten::widget::tile_grid::{self, CellHeight, grid_content, title_bar};
 
@@ -97,10 +97,10 @@ pub fn view(state: &State) -> Element<'_, Message> {
         .width(Fill)
         .height(Fill)
         .style(style::page)
-        .into()
+        .boxed()
 }
 
-fn label<'a>(card: &'a model::card::Card, theme: &'a iced::Theme) -> iced::widget::Row<'a, Message> {
+fn label<'a>(card: &'a model::card::Card, theme: &'a iced::Theme) -> iced::widget::Row<Element<'a, Message>> {
     let muted = theme::muted(theme);
 
     let title = text(card.header.label.to_uppercase())
@@ -125,10 +125,10 @@ fn label<'a>(card: &'a model::card::Card, theme: &'a iced::Theme) -> iced::widge
             tooltip::Position::Bottom,
         )
         .gap(4)
-        .into()
+        .boxed()
     });
 
-    row(std::iter::once(title.into()).chain(info))
+    row(std::iter::once(title.boxed()).chain(info))
         .spacing(6)
         .align_y(Center)
 }
@@ -137,7 +137,7 @@ fn selectors<'a>(
     tile_id: tile_grid::ItemId,
     card: &'a model::card::Card,
     state: &'a card::State,
-) -> iced::widget::Row<'a, Message> {
+) -> iced::widget::Row<Element<'a, Message>> {
     row(card.selectors.iter().map(|(key, selector)| {
         let selected: Option<String> = state.selections.get(key).cloned();
         let key = key.clone();
@@ -146,7 +146,7 @@ fn selectors<'a>(
             .on_select(move |val| Message::SelectorChanged(tile_id, key.clone(), val))
             .text_size(10)
             .padding([3, 8])
-            .into()
+            .boxed()
     }))
     .spacing(6)
     .align_y(Center)

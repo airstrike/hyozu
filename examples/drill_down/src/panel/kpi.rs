@@ -7,7 +7,7 @@
 //! [`crate::DashboardSpec`]; there's no runtime picker.
 
 use iced::widget::{Column, Renderer, Row, container, text};
-use iced::{Alignment, Element, Length, Theme};
+use iced::{Alignment, Element, Length, Theme, Widget};
 
 use tatami::query::{Options, Tuple};
 use tatami::schema::{Name, Schema};
@@ -110,7 +110,7 @@ pub fn render<'a>(
                 Row::with_children(finished)
                     .spacing(12)
                     .align_y(Alignment::Start)
-                    .into(),
+                    .boxed(),
             );
         }
     }
@@ -119,13 +119,13 @@ pub fn render<'a>(
             Row::with_children(row_children)
                 .spacing(12)
                 .align_y(Alignment::Start)
-                .into(),
+                .boxed(),
         );
     }
 
     container(Column::with_children(rows).spacing(12))
         .padding([8, 12])
-        .into()
+        .boxed()
 }
 
 /// Render one chip: big value on top, metric name beneath.
@@ -140,17 +140,20 @@ fn chip<'a>(
     };
     let label = pick.and_then(|p| metric::label(schema, p)).unwrap_or("(unset)");
 
-    Column::with_children([text(value_text).size(22).into(), text(label.to_owned()).size(11).into()])
-        .spacing(2)
-        .align_x(Alignment::Start)
-        .width(Length::Fill)
-        .into()
+    Column::with_children([
+        text(value_text).size(22).boxed(),
+        text(label.to_owned()).size(11).boxed(),
+    ])
+    .spacing(2)
+    .align_x(Alignment::Start)
+    .width(Length::Fill)
+    .boxed()
 }
 
 /// KPI has no title-bar controls — chips are display-only.
 #[must_use]
 pub fn chrome<'a>() -> Element<'a, dashboard::Message, Theme, Renderer> {
-    Row::new().into()
+    Row::<Element<'a, dashboard::Message, Theme, Renderer>>::new().boxed()
 }
 
 fn format_cell(cell: &tatami::Cell) -> String {

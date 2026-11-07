@@ -1,5 +1,5 @@
 use iced::widget::{container, row, space, text, tooltip};
-use iced::{Center, Element, Theme};
+use iced::{Center, Element, Theme, Widget};
 
 use crate::{model, theme};
 
@@ -7,12 +7,12 @@ pub fn view<'a, Message: 'a>(card: &'a model::card::Card, theme: &'a Theme) -> E
     let muted = theme::muted(theme);
 
     row(pills(card, muted)
-        .chain(std::iter::once(space::horizontal().into()))
+        .chain(std::iter::once(space::horizontal().boxed()))
         .chain(meta(card, muted))
         .chain(source_icon(card, muted)))
     .spacing(4)
     .align_y(Center)
-    .into()
+    .boxed()
 }
 
 fn pills<'a, Message: 'a>(
@@ -23,7 +23,7 @@ fn pills<'a, Message: 'a>(
         container(text!("{value}").size(10).color(muted))
             .padding([2, 6])
             .style(style::pill)
-            .into()
+            .boxed()
     })
 }
 
@@ -41,8 +41,8 @@ fn meta<'a, Message: 'a>(
     let time = theme::humanize(&card.footer.updated);
 
     [
-        text(author_name).size(9).color(muted).into(),
-        text(time).size(9).color(muted).into(),
+        text(author_name).size(9).color(muted).boxed(),
+        text(time).size(9).color(muted).boxed(),
     ]
     .into_iter()
 }
@@ -63,7 +63,7 @@ fn source_icon<'a, Message: 'a>(card: &'a model::card::Card, muted: iced::Color)
         None => source.system.clone(),
     };
 
-    Some(tooltip(icon, text(tip).size(10), tooltip::Position::Top).gap(4).into())
+    Some(tooltip(icon, text(tip).size(10), tooltip::Position::Top).gap(4).boxed())
 }
 
 mod style {

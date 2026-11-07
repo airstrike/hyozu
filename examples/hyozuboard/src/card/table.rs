@@ -1,5 +1,5 @@
 use iced::widget::{column, container, row, scrollable, text};
-use iced::{Element, Fill, Font, Theme, font};
+use iced::{Element, Fill, Font, Theme, Widget, font};
 
 use crate::model::sizing::Show;
 use crate::{card, model, theme};
@@ -33,13 +33,13 @@ pub fn view<'a, Message: 'a>(
     let all_rows: Vec<Element<'a, Message>> = header.into_iter().chain(data).collect();
 
     if all_rows.is_empty() {
-        return text("No matching rows").size(12).color(muted).into();
+        return text("No matching rows").size(12).color(muted).boxed();
     }
 
     scrollable(column(all_rows).spacing(4).width(Fill))
         .width(Fill)
         .height(Fill)
-        .into()
+        .boxed()
 }
 
 fn matches_selectors(
@@ -62,10 +62,10 @@ fn header_row<'a, Message: 'a>(cols: &[&model::table::Column], muted: iced::Colo
             })
             .color(muted)
             .width(Fill)
-            .into()
+            .boxed()
     }))
     .spacing(8)
-    .into()
+    .boxed()
 }
 
 fn data_row<'a, Message: 'a>(
@@ -73,7 +73,9 @@ fn data_row<'a, Message: 'a>(
     row_data: &std::collections::BTreeMap<String, serde_json::Value>,
     muted: iced::Color,
 ) -> Element<'a, Message> {
-    row(cols.iter().map(|col| cell(col, row_data, muted))).spacing(8).into()
+    row(cols.iter().map(|col| cell(col, row_data, muted)))
+        .spacing(8)
+        .boxed()
 }
 
 fn cell<'a, Message: 'a>(
@@ -91,11 +93,11 @@ fn cell<'a, Message: 'a>(
         .padding([2, 6])
         .style(style::tag)
         .width(60)
-        .into(),
+        .boxed(),
 
-        model::table::Kind::Timestamp => text(theme::humanize(raw)).size(11).color(muted).into(),
+        model::table::Kind::Timestamp => text(theme::humanize(raw)).size(11).color(muted).boxed(),
 
-        _ => text(raw.to_string()).size(12).width(Fill).into(),
+        _ => text(raw.to_string()).size(12).width(Fill).boxed(),
     }
 }
 

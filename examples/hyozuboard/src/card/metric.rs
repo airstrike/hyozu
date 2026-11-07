@@ -1,5 +1,5 @@
 use iced::widget::{column, text};
-use iced::{Element, Fill, Font, Theme, font};
+use iced::{Element, Fill, Font, Theme, Widget, font};
 
 use crate::model::sizing::Show;
 use crate::{card, model, theme};
@@ -13,7 +13,7 @@ pub fn view<'a, Message: 'a>(
     let record = body.data.iter().find(|r| r.matches(&state.selections));
 
     let Some(record) = record else {
-        return text("No data").size(11).color(theme::muted(theme)).into();
+        return text("No data").size(11).color(theme::muted(theme)).boxed();
     };
 
     let value = state.shows(card_model, Show::Value).then(|| {
@@ -23,7 +23,7 @@ pub fn view<'a, Message: 'a>(
                 weight: font::Weight::Bold,
                 ..Font::DEFAULT
             })
-            .into()
+            .boxed()
     });
 
     let delta = state
@@ -39,7 +39,7 @@ pub fn view<'a, Message: 'a>(
             text(delta_text)
                 .size(11)
                 .color(theme::direction_color(delta.direction, theme))
-                .into()
+                .boxed()
         });
 
     let chart = state
@@ -51,14 +51,14 @@ pub fn view<'a, Message: 'a>(
                 .style(hyozu::chart::transparent)
                 .width(Fill)
                 .height(Fill)
-                .into()
+                .boxed()
         });
 
     column([value, delta, chart].into_iter().flatten())
         .spacing(2)
         .width(Fill)
         .height(Fill)
-        .into()
+        .boxed()
 }
 
 /// Build chart data from a metric body and a matched record.

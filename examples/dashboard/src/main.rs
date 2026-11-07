@@ -1,6 +1,6 @@
 use iced::Alignment::End;
 use iced::widget::{button, column, container, pick_list, progress_bar, row, rule, scrollable, space, table, text};
-use iced::{Center, Color, Element, Fill, Font, Theme, color, font};
+use iced::{Center, Color, Element, Fill, Font, Theme, Widget, color, font};
 
 use sweeten::widget::tile_grid::{self, CellHeight, grid_content, title_bar};
 
@@ -733,7 +733,7 @@ impl Screen {
             rule::horizontal(1),
             self.view_grid(),
         ]
-        .into()
+        .boxed()
     }
 
     fn view_toolbar(&self) -> Element<'_, Message> {
@@ -748,7 +748,7 @@ impl Screen {
 
         container(row![add, info, space::horizontal()].spacing(16).align_y(Center))
             .padding([8, 14])
-            .into()
+            .boxed()
     }
 
     fn view_grid(&self) -> Element<'_, Message> {
@@ -811,7 +811,7 @@ impl Screen {
                 background: Some(PAGE_BG.into()),
                 ..Default::default()
             })
-            .into()
+            .boxed()
     }
 
     // ── Tile content views ───────────────────────────────────────────
@@ -824,19 +824,19 @@ impl Screen {
                 .width(Fill)
                 .height(Fill)
                 .on_action(move |a| Message::ChartAction(id, a))
-                .into(),
+                .boxed(),
             WidgetKind::TurnoverSegment => chart(&self.turnover_segment)
                 .style(hyozu::chart::transparent)
                 .width(Fill)
                 .height(Fill)
                 .on_action(move |a| Message::ChartAction(id, a))
-                .into(),
+                .boxed(),
             WidgetKind::OwnerSegment => chart(&self.owner_segment)
                 .style(hyozu::chart::transparent)
                 .width(Fill)
                 .height(Fill)
                 .on_action(move |a| Message::ChartAction(id, a))
-                .into(),
+                .boxed(),
             WidgetKind::Details => self.view_table(),
             WidgetKind::Revenues => self.view_treemap(id),
         }
@@ -847,7 +847,7 @@ impl Screen {
             .on_select(move |kind| Message::SetWidget(id, kind))
             .placeholder("Choose a widget...");
 
-        container(picker).center(Fill).padding(20).into()
+        container(picker).center(Fill).padding(20).boxed()
     }
 
     fn view_tile_detail<'a>(&'a self, detail: &'a TileDetail) -> Element<'a, Message> {
@@ -861,7 +861,7 @@ impl Screen {
                     .center(),
             )
             .center(Fill)
-            .into()
+            .boxed()
         } else {
             let tbl = table(account_columns(), &detail.accounts)
                 .padding_x(8.0)
@@ -871,11 +871,11 @@ impl Screen {
 
             column![
                 text!("{n} accounts").size(11).color(MUTED_COLOR),
-                scrollable(Element::from(tbl)).height(Fill),
+                scrollable(tbl).height(Fill),
             ]
             .spacing(4)
             .padding(8)
-            .into()
+            .boxed()
         }
     }
 
@@ -894,14 +894,14 @@ impl Screen {
             ]
             .spacing(8)
             .align_y(Center)
-            .into()
+            .boxed()
         });
 
         let done = button(text("Done").size(12)).style(button::secondary).padding([4, 16]);
 
         let content: Vec<Element<'_, Message>> = filters
-            .chain(std::iter::once(space::horizontal().into()))
-            .chain(std::iter::once(done.into()))
+            .chain(std::iter::once(space::horizontal().boxed()))
+            .chain(std::iter::once(done.boxed()))
             .collect();
 
         container(row(content).spacing(24).align_y(Center).padding([0, 16]))
@@ -912,7 +912,7 @@ impl Screen {
                 background: Some(HEADER_BG.into()),
                 ..Default::default()
             })
-            .into()
+            .boxed()
     }
 
     fn view_overview(&self) -> Element<'_, Message> {
@@ -933,7 +933,7 @@ impl Screen {
             .spacing(2)
             .align_x(Center)
             .width(Fill)
-            .into()
+            .boxed()
         };
 
         column![
@@ -948,7 +948,7 @@ impl Screen {
         .spacing(4)
         .width(Fill)
         .padding(8)
-        .into()
+        .boxed()
     }
 
     fn view_table(&self) -> Element<'_, Message> {
@@ -958,7 +958,7 @@ impl Screen {
             .separator_x(0.0)
             .separator_y(1.0);
 
-        scrollable(Element::from(tbl)).height(Fill).into()
+        scrollable(tbl).height(Fill).boxed()
     }
 
     fn view_treemap(&self, id: tile_grid::ItemId) -> Element<'_, Message> {
@@ -980,7 +980,7 @@ impl Screen {
         ]
         .spacing(6)
         .padding(4)
-        .into()
+        .boxed()
     }
 
     // ── Chart data builders ──────────────────────────────────────────
@@ -1050,14 +1050,14 @@ fn tbl_header<'a>(label: &str) -> Element<'a, Message> {
     )
     .padding([2, 5])
     .center_y(Fill)
-    .into()
+    .boxed()
 }
 
 fn tbl_cell<'a>(content: impl ToString) -> Element<'a, Message> {
     container(text(content.to_string()).size(11).color(TEXT_COLOR))
         .center_y(Fill)
         .padding([2, 5])
-        .into()
+        .boxed()
 }
 
 fn account_columns<'a, 'b>() -> [table::Column<'a, 'b, &'a model::Account, Message>; 6] {

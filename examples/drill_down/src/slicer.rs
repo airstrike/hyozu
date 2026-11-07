@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use iced::widget::{Column, Row, button, container, pick_list, row, text};
-use iced::{Alignment, Element, Length, Padding, Task};
+use iced::{Alignment, Element, Length, Padding, Task, Widget};
 
 use tatami::query::{MemberRef, Tuple};
 use tatami::schema::{Dimension, Schema};
@@ -181,7 +181,7 @@ pub fn view<'a>(state: &'a State, schema: &'a Schema) -> Element<'a, Message> {
                 Row::with_children(finished)
                     .spacing(ROW_SPACING)
                     .align_y(Alignment::Center)
-                    .into(),
+                    .boxed(),
             );
         }
     }
@@ -190,30 +190,30 @@ pub fn view<'a>(state: &'a State, schema: &'a Schema) -> Element<'a, Message> {
             Row::with_children(row_children)
                 .spacing(ROW_SPACING)
                 .align_y(Alignment::Center)
-                .into(),
+                .boxed(),
         );
     }
 
     container(Column::with_children(rows).spacing(COLUMN_SPACING))
         .padding(GRID_PADDING)
-        .into()
+        .boxed()
 }
 
 fn dim_block<'a>(dim_index: usize, dim: &'a Dimension, state: &'a State) -> Element<'a, Message> {
-    let label: Element<'a, Message> = text(dim.name.as_str()).size(LABEL_SIZE).into();
+    let label: Element<'a, Message> = text(dim.name.as_str()).size(LABEL_SIZE).boxed();
 
     let Some(members) = state.options.get(&dim_index) else {
         return row![label, hint("(loading\u{2026})")]
             .align_y(Alignment::Center)
             .spacing(BLOCK_SPACING)
-            .into();
+            .boxed();
     };
 
     if members.is_empty() {
         return row![label, hint("(no members)")]
             .align_y(Alignment::Center)
             .spacing(BLOCK_SPACING)
-            .into();
+            .boxed();
     }
 
     let options: Vec<Choice> = members
@@ -239,19 +239,19 @@ fn dim_block<'a>(dim_index: usize, dim: &'a Dimension, state: &'a State) -> Elem
         button(text(CLEAR_GLYPH).size(LABEL_SIZE))
             .padding([2, 6])
             .on_press(Message::Picked(dim_index, None))
-            .into()
+            .boxed()
     } else {
-        text("").into()
+        text("").boxed()
     };
 
     row![label, picker, clear]
         .align_y(Alignment::Center)
         .spacing(BLOCK_SPACING)
-        .into()
+        .boxed()
 }
 
 fn hint<'a>(label: &'a str) -> Element<'a, Message> {
-    text(label).size(LABEL_SIZE).into()
+    text(label).size(LABEL_SIZE).boxed()
 }
 
 #[cfg(test)]

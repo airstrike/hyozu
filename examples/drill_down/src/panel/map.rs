@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use iced::widget::{Renderer, pick_list, row, text};
-use iced::{Alignment, Element, Length, Theme};
+use iced::{Alignment, Element, Length, Theme, Widget};
 
 use hyozu::{GeoData, MapScope, legend};
 use tatami::query::{MemberRef, Options, Tuple};
@@ -195,7 +195,7 @@ pub fn apply(state: &mut State, schema: &Schema, message: Message) -> bool {
 /// Render the map card body from a cached `Data`.
 #[must_use]
 pub fn render<'a>(data: &'a hyozu::Data) -> Element<'a, dashboard::Message, Theme, Renderer> {
-    hyozu::chart(data).height(Length::Fill).into()
+    hyozu::chart(data).height(Length::Fill).boxed()
 }
 
 /// Fallback text for shapes the panel can't render.
@@ -203,7 +203,7 @@ pub fn render<'a>(data: &'a hyozu::Data) -> Element<'a, dashboard::Message, Them
 pub fn fallback(results: &tatami::Results) -> Element<'static, dashboard::Message, Theme, Renderer> {
     text(format!("unexpected map shape: {}", variant_tag(results)))
         .size(14)
-        .into()
+        .boxed()
 }
 
 /// Chrome row — rows dim / rows level / fill metric / size metric pickers.
@@ -233,9 +233,9 @@ pub fn chrome<'a>(
                 .placeholder("(level)")
                 .text_size(12)
                 .width(Length::Fixed(140.0))
-                .into()
+                .boxed()
         }
-        axis::Pick::None => text("").into(),
+        axis::Pick::None => text("").boxed(),
     };
 
     let fill_selected = state
@@ -272,7 +272,7 @@ pub fn chrome<'a>(
         .spacing(12)
         .align_y(Alignment::Center)
         .wrap()
-        .into()
+        .boxed()
 }
 
 fn variant_tag(results: &tatami::Results) -> &'static str {
