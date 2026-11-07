@@ -1,6 +1,6 @@
 use super::{Domain, to_pixel};
 use crate::animation;
-use crate::core::layout::{Limits, Node};
+use crate::core::layout::Limits;
 use crate::core::widget::{Tree, tree};
 use crate::core::{Point, Rectangle, Size};
 use crate::data::Datum;
@@ -89,6 +89,7 @@ where
                 tick: animation::Tick::new(),
             }),
             children: Vec::new(),
+            ..Tree::empty()
         }
     }
 
@@ -98,20 +99,13 @@ where
     }
 
     /// Layout the box plot — calculate positions and sizes
-    pub fn layout(
-        &self,
-        tree: &mut Tree,
-        _renderer: &Renderer,
-        _limits: &Limits,
-        domain: &Domain,
-        rect: Rectangle,
-    ) -> Node {
+    pub fn layout(&self, tree: &mut Tree, _renderer: &Renderer, _limits: &Limits, domain: &Domain, rect: Rectangle) {
         let state = tree.state.downcast_mut::<State>();
 
         if self.data.entries.is_empty() {
             state.box_rects.clear();
             state.entries_layout.clear();
-            return Node::new(Size::ZERO);
+            return;
         }
 
         let num_entries = self.data.entries.len();
@@ -207,8 +201,6 @@ where
                 }
             }
         }
-
-        Node::new(Size::ZERO)
     }
 
     /// Draws the box plot using pre-calculated layout data
@@ -219,7 +211,7 @@ where
         renderer: &mut Renderer,
         theme: &Theme,
         _style: &crate::core::renderer::Style,
-        layout: crate::core::Layout<'_>,
+        layout: crate::core::Layout,
         _cursor: crate::core::mouse::Cursor,
         _viewport: &crate::core::Rectangle,
         color_offset: usize,

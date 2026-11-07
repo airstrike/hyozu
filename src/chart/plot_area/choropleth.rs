@@ -3,8 +3,7 @@ use std::collections::HashMap;
 
 use crate::animation;
 use crate::chart::scale_legend;
-use crate::core::Size;
-use crate::core::layout::{Limits, Node};
+use crate::core::layout::Limits;
 use crate::core::widget::{Tree, tree};
 use crate::widget::canvas::{Frame, Path, Stroke};
 
@@ -352,6 +351,7 @@ where
                 tick: animation::Tick::new(),
             }),
             children: Vec::new(),
+            ..Tree::empty()
         }
     }
 
@@ -365,7 +365,7 @@ where
         _domain: &Domain,
         _rect: crate::core::Rectangle,
         geo_plane: Option<&geo::Plane>,
-    ) -> Node {
+    ) {
         let state = tree.state.downcast_mut::<State>();
 
         // Entry-derived state recomputed every layout. value_range,
@@ -429,8 +429,6 @@ where
         state.legend_plan = scale_legend::Plan {
             ticks: build_legend_ticks(lo, hi, LEGEND_TICK_TARGET, &format),
         };
-
-        Node::new(Size::ZERO)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -440,7 +438,7 @@ where
         renderer: &mut Renderer,
         theme: &Theme,
         _style: &crate::core::renderer::Style,
-        layout: crate::core::Layout<'_>,
+        layout: crate::core::Layout,
         _cursor: crate::core::mouse::Cursor,
         _viewport: &crate::core::Rectangle,
         _color_offset: usize,

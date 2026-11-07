@@ -1,6 +1,6 @@
 use super::{Domain, to_pixel};
 use crate::core::Size;
-use crate::core::layout::{Limits, Node};
+use crate::core::layout::Limits;
 use crate::core::widget::{Tree, tree};
 use crate::data::Datum;
 use crate::mark::rule::RuleOrientation;
@@ -35,7 +35,7 @@ where
 impl<'a, Message, Renderer> Rule<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: text::Renderer<Font = crate::core::Font> + geometry::Renderer,
+    Renderer: text::Renderer + geometry::Renderer,
 {
     /// Create a new Rule borrowing data
     pub fn new(data: &'a crate::mark::rule::Rule) -> Self {
@@ -54,6 +54,7 @@ where
                 label: paragraph::Plain::default(),
             }),
             children: Vec::new(),
+            ..Tree::empty()
         }
     }
 
@@ -71,7 +72,7 @@ where
         domain: &Domain,
         rect: crate::core::Rectangle,
         design: Option<&dyn crate::design::Design>,
-    ) -> Node {
+    ) {
         let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
 
         match self.data.orientation {
@@ -91,8 +92,8 @@ where
         // `fill_paragraph` rather than reshaped every frame.
         if let Some(label_text) = &self.data.label {
             let default_font = design
-                .map(|d| d.data_label_text().resolved_font(renderer.default_font()))
-                .unwrap_or_else(|| renderer.default_font());
+                .map(|d| d.data_label_text().resolved_font(renderer.font()))
+                .unwrap_or_else(|| renderer.font());
             let _ = state.label.update(text::Text {
                 content: label_text,
                 bounds: Size::INFINITE,
@@ -104,15 +105,13 @@ where
                 shaping: text::Shaping::Basic,
                 wrapping: text::Wrapping::None,
                 ellipsis: text::Ellipsis::default(),
-                hint_factor: renderer.scale_factor(),
+                hint_factor: renderer.hint_factor(),
                 font_features: Vec::new(),
                 font_variations: Vec::new(),
                 letter_spacing: Default::default(),
                 weight: None,
             });
         }
-
-        Node::new(Size::ZERO)
     }
 
     /// Draws the rule line
@@ -123,7 +122,7 @@ where
         renderer: &mut Renderer,
         theme: &Theme,
         _style: &crate::core::renderer::Style,
-        layout: crate::core::Layout<'_>,
+        layout: crate::core::Layout,
         _cursor: crate::core::mouse::Cursor,
         _viewport: &crate::core::Rectangle,
     ) where

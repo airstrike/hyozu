@@ -3,7 +3,7 @@ use super::line::{
 };
 use super::{Domain, to_pixel};
 use crate::animation;
-use crate::core::layout::{Limits, Node};
+use crate::core::layout::Limits;
 use crate::core::text::{self, paragraph};
 use crate::core::widget::{Tree, tree};
 use crate::core::{Point, Rectangle, Size};
@@ -55,7 +55,7 @@ where
 pub struct Area<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: crate::core::text::Renderer<Font = crate::core::Font> + geometry::Renderer,
+    Renderer: crate::core::text::Renderer + geometry::Renderer,
 {
     pub(crate) data: &'a crate::mark::area::Area,
     /// Whether the mount/data-change sweep runs. Mirrors
@@ -68,7 +68,7 @@ where
 impl<'a, Message, Renderer> Area<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: crate::core::text::Renderer<Font = crate::core::Font> + geometry::Renderer,
+    Renderer: crate::core::text::Renderer + geometry::Renderer,
 {
     pub fn new(data: &'a crate::mark::area::Area) -> Self {
         Self {
@@ -100,6 +100,7 @@ where
                 tick: animation::Tick::new(),
             }),
             children: Vec::new(),
+            ..Tree::empty()
         }
     }
 
@@ -115,7 +116,7 @@ where
         rect: Rectangle,
         obstacles: &[Rectangle],
         design: Option<&dyn crate::design::Design>,
-    ) -> Node {
+    ) {
         let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
 
         let zero_y = to_pixel(domain, rect, Datum::ORIGIN).y;
@@ -204,13 +205,13 @@ where
         state.series_label_rects.resize_with(self.data.series.len(), Vec::new);
 
         let default_font = design
-            .map(|d| d.data_label_text().resolved_font(renderer.default_font()))
-            .unwrap_or_else(|| renderer.default_font());
+            .map(|d| d.data_label_text().resolved_font(renderer.font()))
+            .unwrap_or_else(|| renderer.font());
         let default_size = design
             .and_then(|d| d.data_label_text().size)
             .map(|p| p.0)
             .unwrap_or(12.0);
-        let hint_factor = renderer.scale_factor();
+        let hint_factor = renderer.hint_factor();
 
         let all_segments: Vec<(Point, Point)> = state
             .series_points
@@ -357,8 +358,6 @@ where
                 state.series_label_rects[series_idx].push(label_rect);
             }
         }
-
-        Node::new(Size::ZERO)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -368,7 +367,7 @@ where
         renderer: &mut Renderer,
         theme: &Theme,
         _style: &crate::core::renderer::Style,
-        layout: crate::core::Layout<'_>,
+        layout: crate::core::Layout,
         _cursor: crate::core::mouse::Cursor,
         _viewport: &crate::core::Rectangle,
         color_offset: usize,

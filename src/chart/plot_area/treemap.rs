@@ -1,7 +1,7 @@
 use super::Domain;
 use crate::animation;
 use crate::core::Size;
-use crate::core::layout::{Limits, Node};
+use crate::core::layout::Limits;
 use crate::core::widget::{Tree, tree};
 use crate::widget::canvas::{Frame, Path};
 
@@ -74,7 +74,7 @@ where
 impl<'a, Message, Renderer> Treemap<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: text::Renderer<Font = crate::core::Font> + geometry::Renderer,
+    Renderer: text::Renderer + geometry::Renderer,
 {
     /// Create a new Treemap borrowing data.
     pub fn new(data: &'a crate::mark::treemap::Treemap) -> Self {
@@ -103,6 +103,7 @@ where
                 tick: animation::Tick::new(),
             }),
             children: Vec::new(),
+            ..Tree::empty()
         }
     }
 
@@ -120,15 +121,15 @@ where
         _domain: &Domain,
         _rect: crate::core::Rectangle,
         design: Option<&dyn crate::design::Design>,
-    ) -> Node {
+    ) {
         let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
-        let size = limits.max();
+        let size = limits.bounds();
 
         if self.data.items.is_empty() {
             state.item_rects.clear();
             state.item_labels.clear();
             state.labels.clear();
-            return Node::new(Size::ZERO);
+            return;
         }
 
         let gap = self.data.gap;
@@ -153,7 +154,7 @@ where
             state.item_rects.clear();
             state.item_labels.clear();
             state.labels.clear();
-            return Node::new(Size::ZERO);
+            return;
         }
 
         // Compute rectangles using squarified treemap algorithm
@@ -237,12 +238,10 @@ where
             .collect();
 
         self.shape_labels(state, renderer, label_baseline, design);
-
-        Node::new(Size::ZERO)
     }
 
     /// Shapes one label paragraph per item index from the already-truncated
-    /// `item_labels` string, theme-free (font is `renderer.default_font`,
+    /// `item_labels` string, theme-free (font is `renderer.font`,
     /// size is the same 12 px baseline the truncation budget uses), so the
     /// text is laid out here and rendered in `draw` via `fill_paragraph`.
     /// Items whose truncated label is empty (rectangle too small) keep a
@@ -255,10 +254,10 @@ where
         font_baseline: f32,
         design: Option<&dyn crate::design::Design>,
     ) {
-        let hint_factor = renderer.scale_factor();
+        let hint_factor = renderer.hint_factor();
         let default_font = design
-            .map(|d| d.data_label_text().resolved_font(renderer.default_font()))
-            .unwrap_or_else(|| renderer.default_font());
+            .map(|d| d.data_label_text().resolved_font(renderer.font()))
+            .unwrap_or_else(|| renderer.font());
         let item_count = state.item_labels.len();
 
         while state.labels.len() < item_count {
@@ -300,7 +299,7 @@ where
         renderer: &mut Renderer,
         theme: &Theme,
         _style: &crate::core::renderer::Style,
-        layout: crate::core::Layout<'_>,
+        layout: crate::core::Layout,
         _cursor: crate::core::mouse::Cursor,
         _viewport: &crate::core::Rectangle,
         color_offset: usize,

@@ -12,7 +12,7 @@ use std::borrow::Cow;
 
 use crate::animation;
 use crate::core::time::Instant;
-use crate::core::widget::{Tree, tree};
+use crate::core::widget::{self, Tree, tree};
 use crate::core::{
     Element, Event, Layout, Length, Padding, Point, Rectangle, Shell, Size, Vector, Widget, layout, mouse, overlay,
     window,
@@ -255,9 +255,12 @@ where
     /// No-op on a generic chart created via [`chart()`]. The overlay
     /// composites above the donut so its content (e.g. a card with a
     /// big number and label) isn't clipped by the hole.
-    pub fn center(mut self, element: impl Into<Element<'a, Message, Theme, Renderer>>) -> Self {
+    pub fn center(mut self, element: impl Widget<Message, Theme, Renderer> + 'a) -> Self {
         if let Kind::Donut(d) = &mut self.kind {
-            d.center = Some(donut::Center::new(element.into(), donut::Placement::Stack));
+            d.center = Some(donut::Center::new(
+                crate::widget::Widget::boxed(element),
+                donut::Placement::Stack,
+            ));
         }
         self
     }
@@ -268,9 +271,12 @@ where
     /// No-op on a generic chart created via [`chart()`]. The element
     /// is sized to the largest axis-aligned square that fits inside
     /// the hole, so circular badges and tight numbers stay readable.
-    pub fn center_inset(mut self, element: impl Into<Element<'a, Message, Theme, Renderer>>) -> Self {
+    pub fn center_inset(mut self, element: impl Widget<Message, Theme, Renderer> + 'a) -> Self {
         if let Kind::Donut(d) = &mut self.kind {
-            d.center = Some(donut::Center::new(element.into(), donut::Placement::Inset));
+            d.center = Some(donut::Center::new(
+                crate::widget::Widget::boxed(element),
+                donut::Placement::Inset,
+            ));
         }
         self
     }
@@ -817,38 +823,43 @@ fn build_hover_entry<'b, Message>(
 /// installed and the cursor is over a hovered mark. The inner
 /// element's [`Tree`] is borrowed from the chart's
 /// [`State::annotation_tree`] so per-widget state (text
-/// paragraphs, button hover state, etc.) survives across the
-/// runtime's separate layout and draw passes — iced creates a
-/// fresh overlay instance for each pass, so anything owned by
-/// the overlay would be discarded between them.
+/// paragraphs, button hover state, etc.) survives across frames,
+/// since iced creates a fresh overlay instance each time it asks
+/// the chart for its overlays.
 struct AnnotationOverlay<'a, 'b, Message, Theme> {
     annotation: hover::Annotation<'a, Message, Theme>,
     tree: &'b mut Tree,
-    cursor: Point,
-    chart_bounds: Rectangle,
+    /// Absolute bounds of the annotation box, padding included.
+    bounds: Rectangle,
+    window: Size,
 }
 
-impl<Message, Theme> overlay::Overlay<Message, Theme, Renderer> for AnnotationOverlay<'_, '_, Message, Theme>
+impl<'a, 'b, Message, Theme> AnnotationOverlay<'a, 'b, Message, Theme>
 where
     Theme: design::Design,
 {
-    fn layout(&mut self, renderer: &Renderer, bounds: Size) -> layout::Node {
-        let viewport = Rectangle::with_size(bounds);
-        let limits = if self.annotation.snap_within_viewport {
+    /// Lays out the annotation content and positions its box relative to
+    /// the cursor / mark anchor within the `window`.
+    fn new(
+        mut annotation: hover::Annotation<'a, Message, Theme>,
+        tree: &'b mut Tree,
+        renderer: &Renderer,
+        cursor: Point,
+        chart_bounds: Rectangle,
+        window: Size,
+    ) -> Self {
+        let viewport = Rectangle::with_size(window);
+        let limits = if annotation.snap_within_viewport {
             layout::Limits::new(Size::ZERO, viewport.size())
         } else {
             layout::Limits::new(Size::ZERO, Size::INFINITE)
         }
-        .shrink(self.annotation.padding);
+        .shrink(annotation.padding);
 
-        let content_layout = self
-            .annotation
-            .content
-            .as_widget_mut()
-            .layout(self.tree, renderer, &limits);
+        annotation.content.layout(tree, renderer, &limits);
 
-        let content_size = content_layout.size();
-        let pad = self.annotation.padding;
+        let content_size = tree.size;
+        let pad = annotation.padding;
         let outer_size = Size::new(
             content_size.width + pad.left + pad.right,
             content_size.height + pad.top + pad.bottom,
@@ -860,38 +871,32 @@ where
         // the chart's mid-x so the box never covers the data: cursor
         // on the left half → box extends right, cursor on the right
         // half → box extends left.
-        let cursor = self.cursor;
-        let chart_mid_x = self.chart_bounds.x + self.chart_bounds.width / 2.0;
-        let outer_origin = match self.annotation.position {
+        let chart_mid_x = chart_bounds.x + chart_bounds.width / 2.0;
+        let outer_origin = match annotation.position {
             hover::Position::Top => Point::new(
                 cursor.x - outer_size.width / 2.0,
-                cursor.y - outer_size.height - self.annotation.gap,
+                cursor.y - outer_size.height - annotation.gap,
             ),
-            hover::Position::Bottom => Point::new(cursor.x - outer_size.width / 2.0, cursor.y + self.annotation.gap),
+            hover::Position::Bottom => Point::new(cursor.x - outer_size.width / 2.0, cursor.y + annotation.gap),
             hover::Position::Left => Point::new(
-                cursor.x - outer_size.width - self.annotation.gap,
+                cursor.x - outer_size.width - annotation.gap,
                 cursor.y - outer_size.height / 2.0,
             ),
-            hover::Position::Right => Point::new(cursor.x + self.annotation.gap, cursor.y - outer_size.height / 2.0),
+            hover::Position::Right => Point::new(cursor.x + annotation.gap, cursor.y - outer_size.height / 2.0),
             hover::Position::FollowCursor => {
                 let on_left_half = cursor.x < chart_mid_x;
                 let x = if on_left_half {
-                    cursor.x + self.annotation.gap
+                    cursor.x + annotation.gap
                 } else {
-                    cursor.x - outer_size.width - self.annotation.gap
+                    cursor.x - outer_size.width - annotation.gap
                 };
                 Point::new(x, cursor.y - outer_size.height / 2.0)
             }
         };
 
-        let mut outer = Rectangle {
-            x: outer_origin.x,
-            y: outer_origin.y,
-            width: outer_size.width,
-            height: outer_size.height,
-        };
+        let mut outer = Rectangle::new(outer_origin, outer_size);
 
-        if self.annotation.snap_within_viewport {
+        if annotation.snap_within_viewport {
             if outer.x < viewport.x {
                 outer.x = viewport.x;
             } else if viewport.x + viewport.width < outer.x + outer.width {
@@ -904,62 +909,75 @@ where
             }
         }
 
-        layout::Node::with_children(outer.size(), vec![
-            content_layout.translate(Vector::new(self.annotation.padding.left, self.annotation.padding.top)),
-        ])
-        .translate(Vector::new(outer.x, outer.y))
+        Self {
+            annotation,
+            tree,
+            bounds: outer,
+            window,
+        }
     }
 
+    /// Layout of the annotation content, inset by the padding.
+    fn content_layout(&self) -> Layout {
+        Layout::new(self.tree.size)
+            .move_to(self.bounds.position() + Vector::new(self.annotation.padding.left, self.annotation.padding.top))
+    }
+}
+
+impl<Message, Theme> overlay::Overlay<Message, Theme, Renderer> for AnnotationOverlay<'_, '_, Message, Theme>
+where
+    Theme: design::Design,
+{
     fn draw(
         &self,
         renderer: &mut Renderer,
         theme: &Theme,
         defaults: &crate::core::renderer::Style,
-        layout: Layout<'_>,
         cursor: mouse::Cursor,
     ) {
         use crate::core::renderer::Renderer as _;
 
-        let bounds = layout.bounds();
+        let bounds = self.bounds;
         let background = theme.background_color();
         let text_pair = theme.text_pair();
         let seed = theme.seed();
         let divider_color = theme.divider_color().resolve(background, text_pair, &seed, None);
 
-        // Solid background so text on top of any underlying chart
-        // content remains readable. The 1px border picks up the
-        // theme's divider color, matching the canvas-drawn default
-        // tooltip box for visual continuity.
-        let box_bg = crate::core::Color { a: 1.0, ..background };
-        renderer.fill_quad(
-            crate::core::renderer::Quad {
-                bounds,
-                border: crate::core::Border {
-                    width: 1.0,
-                    radius: 4.0.into(),
-                    color: divider_color,
+        renderer.with_layer(Rectangle::with_size(self.window), |renderer| {
+            // Solid background so text on top of any underlying chart
+            // content remains readable. The 1px border picks up the
+            // theme's divider color, matching the canvas-drawn default
+            // tooltip box for visual continuity.
+            let box_bg = crate::core::Color { a: 1.0, ..background };
+            renderer.fill_quad(
+                crate::core::renderer::Quad {
+                    bounds,
+                    border: crate::core::Border {
+                        width: 1.0,
+                        radius: 4.0.into(),
+                        color: divider_color,
+                    },
+                    ..Default::default()
                 },
-                ..Default::default()
-            },
-            box_bg,
-        );
+                box_bg,
+            );
 
-        let content_layout = layout.children().next().expect("annotation has one child");
-        self.annotation
-            .content
-            .as_widget()
-            .draw(self.tree, renderer, theme, defaults, content_layout, cursor, &bounds);
+            self.annotation.content.draw(
+                self.tree,
+                renderer,
+                theme,
+                defaults,
+                self.content_layout(),
+                cursor,
+                &bounds,
+            );
+        });
     }
 
-    fn mouse_interaction(&self, layout: Layout<'_>, cursor: mouse::Cursor, renderer: &Renderer) -> mouse::Interaction {
-        let content_layout = layout.children().next().expect("annotation has one child");
-        self.annotation.content.as_widget().mouse_interaction(
-            self.tree,
-            content_layout,
-            cursor,
-            &layout.bounds(),
-            renderer,
-        )
+    fn mouse_interaction(&self, cursor: mouse::Cursor, renderer: &Renderer) -> mouse::Interaction {
+        self.annotation
+            .content
+            .mouse_interaction(self.tree, self.content_layout(), cursor, &self.bounds, renderer)
     }
 }
 
@@ -1487,14 +1505,14 @@ fn advance_mark_animations<Message>(tree: &mut Tree, now: Instant, animate: bool
     }
 }
 
-/// Lays out a donut center overlay child as a sibling of the scene
-/// node, returning a `Node` already positioned in chart-local coords.
+/// Lays out a donut center overlay child as a sibling of the scene,
+/// positioning its tree in chart-local coords.
 ///
 /// Resolves the first `Mark::Pie`'s laid-out state to inscribe an
 /// `Inset` element inside the donut hole, or to fill the plot area
 /// for `Stack`. When pie state isn't ready (no slices yet, or no
-/// `Mark::Pie` in the scene), returns a zero-sized node so `draw`
-/// becomes a no-op.
+/// `Mark::Pie` in the scene), the center is collapsed to a zero size
+/// so `draw` becomes a no-op.
 fn layout_donut_center<Message, Theme>(
     padding: Padding,
     plot_area_offset: Point,
@@ -1503,17 +1521,24 @@ fn layout_donut_center<Message, Theme>(
     placement: donut::Placement,
     center_tree: &mut Tree,
     renderer: &Renderer,
-) -> layout::Node {
+) {
+    let collapse = |center_tree: &mut Tree| {
+        center_tree.size = Size::ZERO;
+        center_tree.translation = Vector::ZERO;
+    };
+
     let plot_area_tree = &scene_tree.children[6];
     let plot_area_state = plot_area_tree.state.downcast_ref::<plot_area::State>();
     if plot_area_state.domain.is_none() {
-        return layout::Node::new(Size::ZERO);
+        collapse(center_tree);
+        return;
     }
     let content_rect = plot_area_state.content_rect;
 
     let pie_tag = tree::Tag::of::<plot_area::pie::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
     let Some(pie_tree) = plot_area_tree.children.iter().find(|t| t.tag == pie_tag) else {
-        return layout::Node::new(Size::ZERO);
+        collapse(center_tree);
+        return;
     };
     let pie_state = pie_tree
         .state
@@ -1543,12 +1568,13 @@ fn layout_donut_center<Message, Theme>(
     };
 
     if area_size.width <= 0.0 || area_size.height <= 0.0 {
-        return layout::Node::new(Size::ZERO);
+        collapse(center_tree);
+        return;
     }
 
     let limits = layout::Limits::new(Size::ZERO, area_size);
-    let node = element.as_widget_mut().layout(center_tree, renderer, &limits);
-    node.move_to(origin)
+    element.layout(center_tree, renderer, &limits);
+    center_tree.translation = Vector::new(origin.x, origin.y);
 }
 
 impl<'a, Message, Design, Theme> Widget<Message, Theme, Renderer> for Chart<'a, Message, Design, Theme>
@@ -1577,10 +1603,12 @@ where
             // stays at its plot-area child index across rebuilds, since
             // the data's mark vector drives both layouts.
             let mut new_children = vec![self.scene.state()];
-            if let Kind::Donut(d) = &self.kind
-                && let Some(c) = &d.center
+            if let Kind::Donut(d) = &mut self.kind
+                && let Some(c) = &mut d.center
             {
-                new_children.push(Tree::new(&c.element));
+                let mut center_tree = Tree::new(&c.element);
+                center_tree.diff(&mut c.element);
+                new_children.push(center_tree);
             }
             let mut old_children = std::mem::replace(&mut tree.children, new_children);
             replant_mark_animations(&old_children, &mut tree.children, self.animate);
@@ -1595,9 +1623,8 @@ where
                 Some(c) => {
                     if tree.children.len() < 2 {
                         tree.children.push(Tree::new(&c.element));
-                    } else {
-                        tree.children[1].diff(c.element.as_widget_mut());
                     }
+                    tree.children[1].diff(&mut c.element);
                 }
                 None => {
                     tree.children.truncate(1);
@@ -1616,7 +1643,7 @@ where
         }
     }
 
-    fn layout(&mut self, tree: &mut Tree, renderer: &Renderer, limits: &layout::Limits) -> layout::Node {
+    fn layout(&mut self, tree: &mut Tree, renderer: &Renderer, limits: &layout::Limits) {
         use crate::core::Point;
 
         // Push donut-only state (e.g. hole radius) onto the renderer-side
@@ -1636,7 +1663,7 @@ where
         // The design the chart holds (if any) drives themed font/size
         // resolution at shape time. iced withholds the theme from
         // `layout`, so `None` (no explicit `.design(...)`) keeps the
-        // historical `renderer.default_font()` / 12px defaults.
+        // historical `renderer.font()` / 12px defaults.
         let design: Option<&dyn design::Design> = self.design.as_deref().map(|d| d as &dyn design::Design);
 
         // Split-borrow so we can lay out the optional center child after
@@ -1645,23 +1672,22 @@ where
         let scene_tree = &mut scene_slot[0];
 
         // Delegate layout to scene with padded limits
-        let scene_node = self.scene.layout(
+        self.scene.layout(
             scene_tree,
             renderer,
             &layout::Limits::new(Size::ZERO, inner_size),
             design,
         );
-
-        let mut layout_children = vec![scene_node.move_to(scene_origin)];
+        scene_tree.translation = Vector::new(scene_origin.x, scene_origin.y);
 
         // Lay out the donut center child (if any) as a sibling of the
-        // scene node, so `update`/`draw` can resolve its bounds via
-        // `layout.children().nth(1)`.
+        // scene, so `update`/`draw` can resolve its bounds as the second
+        // child layout.
         if let Kind::Donut(d) = &mut self.kind
             && let Some(center) = &mut d.center
             && let Some(center_tree) = rest.first_mut()
         {
-            let center_node = layout_donut_center(
+            layout_donut_center(
                 self.padding,
                 self.scene.plot_area_offset(),
                 scene_tree,
@@ -1670,17 +1696,16 @@ where
                 center_tree,
                 renderer,
             );
-            layout_children.push(center_node);
         }
 
-        layout::Node::with_children(size, layout_children)
+        tree.size = size;
     }
 
     fn update(
         &mut self,
         tree: &mut Tree,
         event: &Event,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         renderer: &Renderer,
         shell: &mut crate::core::Shell<'_, Message>,
@@ -1701,13 +1726,11 @@ where
         // double-delivering to the chart's own click/hover routing.
         if let Kind::Donut(d) = &mut self.kind
             && let Some(center) = &mut d.center
-            && let Some(center_layout) = layout.children().nth(1)
-            && let Some(center_tree) = tree.children.get_mut(1)
+            && let Some((center_layout, center_tree)) = layout.iter_mut(&mut tree.children).nth(1)
             && cursor.is_over(center_layout.bounds())
         {
             center
                 .element
-                .as_widget_mut()
                 .update(center_tree, event, center_layout, cursor, renderer, shell, viewport);
             if shell.is_event_captured() {
                 return;
@@ -1976,7 +1999,7 @@ where
         renderer: &mut Renderer,
         theme: &Theme,
         defaults: &crate::core::renderer::Style,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
@@ -1991,7 +2014,10 @@ where
         draw_background(renderer, &style, layout.bounds());
 
         // Draw scene contents (use child layout which accounts for padding)
-        let scene_layout = layout.children().next().unwrap();
+        let mut children_layouts = layout.iter(&tree.children).map(|(layout, _)| layout);
+        let Some(scene_layout) = children_layouts.next() else {
+            return;
+        };
 
         let state = tree.state.downcast_ref::<State>();
 
@@ -2013,20 +2039,14 @@ where
         // Tooltips draw after this so hover annotations stack on top.
         if let Kind::Donut(d) = &self.kind
             && let Some(center) = &d.center
-            && let Some(center_layout) = layout.children().nth(1)
+            && let Some(center_layout) = children_layouts.next()
             && let Some(center_tree) = tree.children.get(1)
         {
             use crate::core::renderer::Renderer as _;
             renderer.with_layer(layout.bounds(), |renderer| {
-                center.element.as_widget().draw(
-                    center_tree,
-                    renderer,
-                    theme,
-                    defaults,
-                    center_layout,
-                    cursor,
-                    viewport,
-                );
+                center
+                    .element
+                    .draw(center_tree, renderer, theme, defaults, center_layout, cursor, viewport);
             });
         }
 
@@ -2067,7 +2087,7 @@ where
     fn mouse_interaction(
         &self,
         tree: &Tree,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         _viewport: &Rectangle,
         _renderer: &Renderer,
@@ -2101,10 +2121,31 @@ where
     fn overlay<'b>(
         &'b mut self,
         tree: &'b mut Tree,
-        layout: Layout<'b>,
-        _renderer: &Renderer,
+        layout: Layout,
+        renderer: &Renderer,
         _viewport: &Rectangle,
         _translation: Vector,
+        window: Size,
+    ) -> Vec<overlay::Element<'b, Message, Theme, Renderer>> {
+        self.annotation_overlay(tree, layout, renderer, window)
+            .into_iter()
+            .collect()
+    }
+}
+
+impl<'a, Message, Design, Theme> Chart<'a, Message, Design, Theme>
+where
+    Design: design::Design + Clone + 'a,
+    Theme: design::Design,
+{
+    /// Builds the widget-based hover annotation overlay, if a hover
+    /// closure is installed and a mark is hovered.
+    fn annotation_overlay<'b>(
+        &'b mut self,
+        tree: &'b mut Tree,
+        layout: Layout,
+        renderer: &Renderer,
+        window: Size,
     ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
         // Only the user-installed hover closure drives the widget-
         // based annotation overlay. The default tooltip box stays on
@@ -2145,12 +2186,14 @@ where
         // tree rebuilds.
         annotation_tree.diff(&mut annotation.content);
 
-        Some(overlay::Element::new(Box::new(AnnotationOverlay {
+        Some(overlay::Element::new(Box::new(AnnotationOverlay::new(
             annotation,
-            tree: annotation_tree,
+            annotation_tree,
+            renderer,
             cursor,
             chart_bounds,
-        })))
+            window,
+        ))))
     }
 }
 
@@ -2165,7 +2208,7 @@ where
     /// over the `idx`-th entry swatch+label, else `None`. Shared between
     /// click handling in `update` and cursor feedback in `mouse_interaction`
     /// so both use the exact same hit region.
-    fn legend_entry_at(&self, tree: &Tree, layout: Layout<'_>, cursor: mouse::Cursor) -> Option<usize> {
+    fn legend_entry_at(&self, tree: &Tree, layout: Layout, cursor: mouse::Cursor) -> Option<usize> {
         let legend = self.scene.legend()?;
         if !legend.interactive() {
             return None;
@@ -2226,16 +2269,7 @@ where
     }
 }
 
-impl<'a, Message, Design, Theme> From<Chart<'a, Message, Design, Theme>> for Element<'a, Message, Theme, Renderer>
-where
-    Message: 'a,
-    Design: design::Design + Clone + 'a,
-    Theme: design::Design + 'a,
-{
-    fn from(chart: Chart<'a, Message, Design, Theme>) -> Self {
-        Element::new(chart)
-    }
-}
+impl<Message, Design, Theme> widget::Meta for Chart<'_, Message, Design, Theme> where Design: design::Design + Clone {}
 
 /// Draws the background of a [`Chart`] given its [`Style`] and its `bounds`.
 pub fn draw_background(renderer: &mut Renderer, style: &Style, bounds: Rectangle) {
@@ -3282,7 +3316,7 @@ fn draw_tooltip_box(
     use crate::core::renderer::Renderer as _;
     use crate::core::text::Renderer as _;
 
-    let font = renderer.default_font();
+    let font = renderer.font();
     // Scale the tooltip with the chart's base font so it grows with the
     // design. The 1.5x line height reproduces the historical 18px at the
     // default 12px size, so existing charts are unchanged.
@@ -3406,7 +3440,7 @@ fn draw_tooltip_box(
                 shaping: crate::core::text::Shaping::Basic,
                 wrapping: crate::core::text::Wrapping::None,
                 ellipsis: crate::core::text::Ellipsis::default(),
-                hint_factor: renderer.scale_factor(),
+                hint_factor: renderer.hint_factor(),
                 font_features: Vec::new(),
                 font_variations: Vec::new(),
                 letter_spacing: Default::default(),

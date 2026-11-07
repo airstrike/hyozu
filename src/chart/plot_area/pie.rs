@@ -1,7 +1,7 @@
 use super::Domain;
 use crate::animation;
 use crate::core::Size;
-use crate::core::layout::{Limits, Node};
+use crate::core::layout::Limits;
 use crate::core::widget::{Tree, tree};
 use crate::mark::pie::label::{FormatKind, Position, Show};
 use crate::widget::canvas::{Frame, Path, Stroke};
@@ -154,7 +154,7 @@ where
 impl<'a, Message, Renderer> Pie<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: text::Renderer<Font = crate::core::Font> + geometry::Renderer,
+    Renderer: text::Renderer + geometry::Renderer,
 {
     /// Create a new Pie borrowing data
     pub fn new(data: &'a crate::mark::pie::Pie) -> Self {
@@ -209,6 +209,7 @@ where
                 tick: animation::Tick::new(),
             }),
             children: Vec::new(),
+            ..Tree::empty()
         }
     }
 
@@ -224,7 +225,7 @@ where
         _domain: &Domain,
         _rect: crate::core::Rectangle,
         design: Option<&dyn crate::design::Design>,
-    ) -> Node {
+    ) {
         let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
 
         // Base label size: the design's `data_label_text()` size (12 px when
@@ -241,7 +242,7 @@ where
             state.slice_angles.clear();
             state.label_rects.clear();
             state.labels.clear();
-            return Node::new(Size::ZERO);
+            return;
         }
 
         let visibility = compute_visibility(self.data, total);
@@ -250,7 +251,7 @@ where
                 visible && matches!(s.label.as_ref().map(|l| l.position), Some(Position::Outside))
             });
 
-        let size = limits.max();
+        let size = limits.bounds();
         let cx = size.width / 2.0;
         let cy = size.height / 2.0;
         let pad = if needs_outside_pad { OUTSIDE_LABEL_PAD } else { 0.0 };
@@ -316,12 +317,10 @@ where
             .collect();
 
         self.shape_labels(state, renderer, total, &visibility, design);
-
-        Node::new(Size::ZERO)
     }
 
     /// Shapes one slice-label paragraph per slice index, theme-free (font
-    /// from `renderer.default_font()` + the label's own family/weight/style,
+    /// from `renderer.font()` + the label's own family/weight/style,
     /// size from the label config defaulting to 12 px), so the text is laid
     /// out here and rendered in `draw` via `fill_paragraph`. Hidden slices,
     /// slices without a label, and slices whose formatted text is empty keep
@@ -336,13 +335,13 @@ where
         design: Option<&dyn crate::design::Design>,
     ) {
         let default_font = design
-            .map(|d| d.data_label_text().resolved_font(renderer.default_font()))
-            .unwrap_or_else(|| renderer.default_font());
+            .map(|d| d.data_label_text().resolved_font(renderer.font()))
+            .unwrap_or_else(|| renderer.font());
         let default_size = design
             .and_then(|d| d.data_label_text().size)
             .map(|p| p.0)
             .unwrap_or(12.0);
-        let hint_factor = renderer.scale_factor();
+        let hint_factor = renderer.hint_factor();
 
         let slice_count = self.data.slices.len();
         while state.labels.len() < slice_count {
@@ -403,7 +402,7 @@ where
         renderer: &mut Renderer,
         theme: &Theme,
         _style: &crate::core::renderer::Style,
-        layout: crate::core::Layout<'_>,
+        layout: crate::core::Layout,
         _cursor: crate::core::mouse::Cursor,
         _viewport: &crate::core::Rectangle,
         color_offset: usize,

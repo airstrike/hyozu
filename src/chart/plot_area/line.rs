@@ -1,7 +1,7 @@
 use super::{Domain, to_pixel};
 use crate::animation;
 use crate::core::Size;
-use crate::core::layout::{Limits, Node};
+use crate::core::layout::Limits;
 use crate::core::widget::{Tree, tree};
 use crate::line::LineStyle;
 use crate::widget::canvas::{Frame, LineCap, LineDash, Path, Stroke};
@@ -61,7 +61,7 @@ where
 impl<'a, Message, Renderer> Line<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: text::Renderer<Font = crate::core::Font> + geometry::Renderer,
+    Renderer: text::Renderer + geometry::Renderer,
 {
     /// Create a new Line borrowing data
     pub fn new(data: &'a crate::line::Line) -> Self {
@@ -92,6 +92,7 @@ where
                 tick: animation::Tick::new(),
             }),
             children: Vec::new(),
+            ..Tree::empty()
         }
     }
 
@@ -112,7 +113,7 @@ where
         rect: Rectangle,
         obstacles: &[Rectangle],
         design: Option<&dyn crate::design::Design>,
-    ) -> Node {
+    ) {
         let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
 
         // Transform all data points to pixel coordinates
@@ -126,15 +127,15 @@ where
 
         if let Some(label_config) = &self.data.label {
             let default_font = design
-                .map(|d| d.data_label_text().resolved_font(renderer.default_font()))
-                .unwrap_or_else(|| renderer.default_font());
+                .map(|d| d.data_label_text().resolved_font(renderer.font()))
+                .unwrap_or_else(|| renderer.font());
             let default_size = design
                 .and_then(|d| d.data_label_text().size)
                 .map(|p| p.0)
                 .unwrap_or(12.0);
             let label_size = label_config.text.resolved_size(default_size);
             let label_font = label_config.text.resolved_font(default_font);
-            let hint_factor = renderer.scale_factor();
+            let hint_factor = renderer.hint_factor();
             let num_points = state.pixel_points.len();
 
             // Find min/max Y indices for MinMax modes
@@ -255,7 +256,6 @@ where
         }
 
         // Line takes no space - it's rendered within the plane
-        Node::new(Size::ZERO)
     }
 
     /// Draws the line using pre-calculated pixel coordinates
@@ -266,7 +266,7 @@ where
         renderer: &mut Renderer,
         theme: &Theme,
         _style: &crate::core::renderer::Style,
-        layout: crate::core::Layout<'_>,
+        layout: crate::core::Layout,
         _cursor: crate::core::mouse::Cursor,
         _viewport: &crate::core::Rectangle,
         color_offset: usize,

@@ -1,6 +1,6 @@
 use super::{Domain, to_pixel};
 use crate::animation;
-use crate::core::layout::{Limits, Node};
+use crate::core::layout::Limits;
 use crate::core::widget::{Tree, tree};
 use crate::core::{Rectangle, Size};
 use crate::data::Datum;
@@ -69,7 +69,7 @@ struct LabelDraw {
 impl<'a, Message, Renderer> Waterfall<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: text::Renderer<Font = crate::core::Font> + geometry::Renderer,
+    Renderer: text::Renderer + geometry::Renderer,
 {
     /// Create a new Waterfall borrowing data
     pub fn new(data: &'a crate::mark::waterfall::Waterfall) -> Self {
@@ -101,6 +101,7 @@ where
                 tick: animation::Tick::new(),
             }),
             children: Vec::new(),
+            ..Tree::empty()
         }
     }
 
@@ -118,7 +119,7 @@ where
         domain: &Domain,
         rect: Rectangle,
         design: Option<&dyn crate::design::Design>,
-    ) -> Node {
+    ) {
         let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
 
         if self.data.entries.is_empty() {
@@ -127,7 +128,7 @@ where
             state.kinds.clear();
             state.tops.clear();
             state.label_rects.clear();
-            return Node::new(Size::ZERO);
+            return;
         }
 
         let num_entries = self.data.entries.len();
@@ -214,8 +215,6 @@ where
 
         state.label_rects = self.compute_label_rects(state, design);
         self.shape_labels(state, renderer, design);
-
-        Node::new(Size::ZERO)
     }
 
     /// Shapes one label paragraph per entry index, theme-free (font from the
@@ -231,9 +230,9 @@ where
         design: Option<&dyn crate::design::Design>,
     ) {
         let default_font = design
-            .map(|d| d.data_label_text().resolved_font(renderer.default_font()))
-            .unwrap_or_else(|| renderer.default_font());
-        let hint_factor = renderer.scale_factor();
+            .map(|d| d.data_label_text().resolved_font(renderer.font()))
+            .unwrap_or_else(|| renderer.font());
+        let hint_factor = renderer.hint_factor();
         let chart_label = self.data.label.as_ref();
         let default_size = design
             .and_then(|d| d.data_label_text().size)
@@ -345,7 +344,7 @@ where
         renderer: &mut Renderer,
         theme: &Theme,
         _style: &crate::core::renderer::Style,
-        layout: crate::core::Layout<'_>,
+        layout: crate::core::Layout,
         _cursor: crate::core::mouse::Cursor,
         _viewport: &crate::core::Rectangle,
     ) where

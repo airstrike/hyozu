@@ -9,7 +9,7 @@
 //! while the bubbles sweep underneath.
 
 use super::{Domain, geo, to_pixel};
-use crate::core::layout::{Limits, Node};
+use crate::core::layout::Limits;
 use crate::core::widget::{Tree, tree};
 use crate::core::{Point, Size};
 use crate::mark::text::TextAlign;
@@ -48,7 +48,7 @@ where
 impl<'a, Message, Renderer> Text<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: text::Renderer<Font = crate::core::Font> + geometry::Renderer,
+    Renderer: text::Renderer + geometry::Renderer,
 {
     /// Create a new Text borrowing data.
     pub fn new(data: &'a crate::mark::text::Text) -> Self {
@@ -67,6 +67,7 @@ where
                 labels: Vec::new(),
             }),
             children: Vec::new(),
+            ..Tree::empty()
         }
     }
 
@@ -89,7 +90,7 @@ where
         rect: crate::core::Rectangle,
         geo_plane: Option<&geo::Plane>,
         design: Option<&dyn crate::design::Design>,
-    ) -> Node {
+    ) {
         let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
         let (mark_dx, mark_dy) = self.data.offset;
         // Per-item offset (radius-aware bubble-map labels, etc.)
@@ -125,8 +126,6 @@ where
         };
 
         self.shape_labels(state, renderer, design);
-
-        Node::new(Size::ZERO)
     }
 
     /// Shapes one label paragraph per item index, theme-free (font is the
@@ -141,7 +140,7 @@ where
         renderer: &Renderer,
         design: Option<&dyn crate::design::Design>,
     ) {
-        let hint_factor = renderer.scale_factor();
+        let hint_factor = renderer.hint_factor();
         // The text mark carries its own explicit `size`; the design only
         // supplies the font base (the mark's `Font::default()` when the chart
         // has no design).
@@ -191,7 +190,7 @@ where
         renderer: &mut Renderer,
         theme: &Theme,
         _style: &crate::core::renderer::Style,
-        layout: crate::core::Layout<'_>,
+        layout: crate::core::Layout,
         _cursor: crate::core::mouse::Cursor,
         _viewport: &crate::core::Rectangle,
     ) where

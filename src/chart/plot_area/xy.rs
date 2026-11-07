@@ -1,8 +1,8 @@
 use super::{Domain, geo, to_pixel};
 use crate::animation;
-use crate::core::layout::{Limits, Node};
+use crate::core::Point;
+use crate::core::layout::Limits;
 use crate::core::widget::{Tree, tree};
-use crate::core::{Point, Size};
 use crate::line::marker::Shape;
 use crate::mark::xy::CoordKind;
 use crate::widget::canvas::{Frame, Path, Stroke};
@@ -82,6 +82,7 @@ where
                 tick: animation::Tick::new(),
             }),
             children: Vec::new(),
+            ..Tree::empty()
         }
     }
 
@@ -105,7 +106,7 @@ where
         domain: &Domain,
         rect: crate::core::Rectangle,
         geo_plane: Option<&geo::Plane>,
-    ) -> Node {
+    ) {
         let state = tree.state.downcast_mut::<State>();
 
         state.pixel_points = match self.data.coord_kind {
@@ -134,8 +135,6 @@ where
                 .collect(),
             None => vec![fallback; self.data.points.len()],
         };
-
-        Node::new(Size::ZERO)
     }
 
     /// Draws the scatter chart
@@ -146,7 +145,7 @@ where
         renderer: &mut Renderer,
         theme: &Theme,
         _style: &crate::core::renderer::Style,
-        layout: crate::core::Layout<'_>,
+        layout: crate::core::Layout,
         _cursor: crate::core::mouse::Cursor,
         _viewport: &crate::core::Rectangle,
         color_offset: usize,

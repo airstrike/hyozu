@@ -14,7 +14,7 @@
 use crate::core::{Element, Font, Length, Pixels, Theme};
 use crate::sparkline::sparkline;
 use crate::tatami::cell::cell_f64;
-use crate::widget::{Renderer, column, text};
+use crate::widget::{Renderer, Widget, column, text};
 use tatami::{Cell, scalar};
 
 /// Layout hints for [`card`] — which cells to render as primary value /
@@ -66,24 +66,29 @@ pub fn card<'a, Message: 'a>(result: &scalar::Result, layout: KpiLayout<'a>) -> 
 
     let mut col = column![title];
     if let Some(sub) = layout.subtitle {
-        col = col.push(text(sub.to_owned()).size(12.0));
+        col = col.push(text(sub.to_owned()).size(12.0).boxed());
     }
-    col = col.push(primary);
+    col = col.push(primary.boxed());
 
     if let Some(i) = layout.delta
         && let Some(cell) = values.get(i)
     {
         let delta_str = format_delta(cell);
-        col = col.push(text(delta_str).size(12.0));
+        col = col.push(text(delta_str).size(12.0).boxed());
     }
 
     if let Some(spark_values) = layout.sparkline
         && spark_values.len() >= 2
     {
-        col = col.push(sparkline(spark_values).width(Length::Fill).height(Length::Fixed(28.0)));
+        col = col.push(
+            sparkline(spark_values)
+                .width(Length::Fill)
+                .height(Length::Fixed(28.0))
+                .boxed(),
+        );
     }
 
-    col.spacing(4).into()
+    col.spacing(4).boxed()
 }
 
 fn format_cell(cell: &Cell) -> String {

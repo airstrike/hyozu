@@ -9,6 +9,7 @@
 //! # Example
 //! ```no_run
 //! # mod iced { pub mod widget { pub use iced_widget::*; } pub use iced_widget::Renderer; pub use iced_widget::core::*; pub use iced_widget::core::Length::Fill; }
+//! # use iced_widget::Widget;
 //! # pub type Element<'a, Message> = iced_widget::core::Element<'a, Message, iced_widget::Theme, iced_widget::Renderer>;
 //! use iced::Fill;
 //! use hyozu::widget::fit_text;
@@ -22,7 +23,7 @@
 //!         .width(Fill)
 //!         .height(96.0)
 //!         .center()
-//!         .into()
+//!         .boxed()
 //! }
 //! ```
 //!
@@ -57,7 +58,7 @@ use crate::core::text::paragraph::{self, Paragraph};
 use crate::core::widget::text as core_text;
 use crate::core::widget::tree::{self, Tree};
 use crate::core::{
-    Color, Element, Em, Length, Pixels, Rectangle, Size, Widget, alignment, font, mouse, renderer, text,
+    Color, Em, Font, Length, Pixels, Rectangle, Size, Widget, alignment, font, mouse, renderer, text, widget,
 };
 
 pub use core_text::{Alignment, Catalog, Ellipsis, LineHeight, Shaping, Style, StyleFn, Wrapping};
@@ -66,13 +67,12 @@ pub use core_text::{Alignment, Catalog, Ellipsis, LineHeight, Shaping, Style, St
 ///
 /// See the [module docs](self) for details.
 #[must_use]
-pub struct FitText<'a, Theme = crate::core::Theme, Renderer = crate::widget::Renderer>
+pub struct FitText<'a, Theme = crate::core::Theme>
 where
     Theme: Catalog,
-    Renderer: text::Renderer,
 {
     fragment: text::Fragment<'a>,
-    format: core_text::Format<Renderer::Font>,
+    format: core_text::Format,
     min_size: Option<Pixels>,
     max_size: Option<Pixels>,
     class: Theme::Class<'a>,
@@ -84,10 +84,9 @@ const DEFAULT_MIN_SIZE: Pixels = Pixels(1.0);
 /// Effective cap used when [`FitText::max_size`] is not set.
 const DEFAULT_MAX_SIZE: Pixels = Pixels(1024.0);
 
-impl<'a, Theme, Renderer> FitText<'a, Theme, Renderer>
+impl<'a, Theme> FitText<'a, Theme>
 where
     Theme: Catalog,
-    Renderer: text::Renderer,
 {
     /// Creates a new [`FitText`] from the given fragment.
     ///
@@ -132,22 +131,18 @@ where
 
     /// Sets the [`LineHeight`] of the [`FitText`].
     pub fn line_height(mut self, line_height: impl Into<LineHeight>) -> Self {
-        self.format.line_height = line_height.into();
+        self.format.line_height = Some(line_height.into());
         self
     }
 
     /// Sets the [`Font`] of the [`FitText`].
-    ///
-    /// [`Font`]: text::Renderer::Font
-    pub fn font(mut self, font: impl Into<Renderer::Font>) -> Self {
+    pub fn font(mut self, font: impl Into<Font>) -> Self {
         self.format.font = Some(font.into());
         self
     }
 
     /// Sets the [`Font`] of the [`FitText`], if `Some`.
-    ///
-    /// [`Font`]: text::Renderer::Font
-    pub fn font_maybe(mut self, font: Option<impl Into<Renderer::Font>>) -> Self {
+    pub fn font_maybe(mut self, font: Option<impl Into<Font>>) -> Self {
         self.format.font = font.map(Into::into);
         self
     }
@@ -265,7 +260,7 @@ where
     {
         let color = color.map(Into::into);
 
-        self.style(move |_theme| Style { color })
+        self.style(move |_theme| Style { color, selection: None })
     }
 
     /// Sets the style class of the [`FitText`].
@@ -282,7 +277,7 @@ where
 /// we only re-run the search when an input actually changes.
 pub struct State<P: Paragraph> {
     paragraph: paragraph::Plain<P>,
-    cache: Option<FitCache<P::Font>>,
+    cache: Option<FitCache>,
 }
 
 impl<P: Paragraph> Default for State<P> {
@@ -297,7 +292,7 @@ impl<P: Paragraph> Default for State<P> {
 /// Everything a fit result is a function of. If all of these match the last
 /// probe, we can reuse the previously chosen size.
 #[derive(Clone)]
-struct FitCache<Font> {
+struct FitCache {
     content: String,
     fit_bounds: Size,
     font: Font,
@@ -315,8 +310,8 @@ struct FitCache<Font> {
     chosen: Pixels,
 }
 
-impl<Font: PartialEq> FitCache<Font> {
-    fn matches(&self, probe: &FitCache<Font>) -> bool {
+impl FitCache {
+    fn matches(&self, probe: &FitCache) -> bool {
         self.content == probe.content
             && size_eq(self.fit_bounds, probe.fit_bounds)
             && self.font == probe.font
@@ -338,7 +333,7 @@ fn size_eq(a: Size, b: Size) -> bool {
     a.width.to_bits() == b.width.to_bits() && a.height.to_bits() == b.height.to_bits()
 }
 
-impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer> for FitText<'_, Theme, Renderer>
+impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer> for FitText<'_, Theme>
 where
     Theme: Catalog,
     Renderer: text::Renderer,
@@ -358,12 +353,12 @@ where
         }
     }
 
-    fn layout(&mut self, tree: &mut Tree, renderer: &Renderer, limits: &layout::Limits) -> layout::Node {
+    fn layout(&mut self, tree: &mut Tree, renderer: &Renderer, limits: &layout::Limits) {
         let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
 
-        layout::sized(limits, self.format.width, self.format.height, |limits| {
-            let bounds = limits.max();
-            let compression = limits.compression();
+        tree.size = layout::sized(limits, self.format.width, self.format.height, |limits| {
+            let bounds = limits.bounds();
+            let compression = limits.compression;
 
             // A Shrink axis has no meaningful fit bound; leave it
             // unconstrained so the text can grow to max_size there.
@@ -376,8 +371,9 @@ where
                 },
             );
 
-            let font = self.format.font.unwrap_or_else(|| renderer.default_font());
-            let hint_factor = renderer.scale_factor();
+            let font = self.format.font.unwrap_or_else(|| renderer.font());
+            let line_height = self.format.line_height.unwrap_or_else(|| renderer.line_height());
+            let hint_factor = renderer.hint_factor();
 
             let min = self.min_size.unwrap_or(DEFAULT_MIN_SIZE);
             let max = self.max_size.unwrap_or(DEFAULT_MAX_SIZE);
@@ -390,7 +386,7 @@ where
                 content: self.fragment.to_string(),
                 fit_bounds,
                 font,
-                line_height: self.format.line_height,
+                line_height,
                 shaping: self.format.shaping,
                 wrapping: self.format.wrapping,
                 ellipsis: self.format.ellipsis,
@@ -411,6 +407,7 @@ where
                         &self.fragment,
                         fit_bounds,
                         font,
+                        line_height,
                         min_size,
                         max_size,
                         &self.format,
@@ -426,7 +423,7 @@ where
                 content: &self.fragment,
                 bounds,
                 size: chosen,
-                line_height: self.format.line_height,
+                line_height,
                 font,
                 align_x: self.format.align_x,
                 align_y: self.format.align_y,
@@ -441,7 +438,7 @@ where
             });
 
             state.paragraph.min_bounds()
-        })
+        });
     }
 
     fn draw(
@@ -450,7 +447,7 @@ where
         renderer: &mut Renderer,
         theme: &Theme,
         defaults: &renderer::Style,
-        layout: Layout<'_>,
+        layout: Layout,
         _cursor_position: mouse::Cursor,
         viewport: &Rectangle,
     ) {
@@ -463,30 +460,39 @@ where
             layout.bounds(),
             state.paragraph.raw(),
             style,
+            theme.selection(),
             viewport,
         );
     }
 
     fn operate(
         &mut self,
-        _tree: &mut Tree,
-        layout: Layout<'_>,
+        tree: &mut Tree,
+        layout: Layout,
+        _viewport: &Rectangle,
         _renderer: &Renderer,
         operation: &mut dyn crate::core::widget::Operation,
     ) {
-        operation.text(None, layout.bounds(), &self.fragment);
+        let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
+        operation.text(None, layout.bounds(), &mut core_text::Operand {
+            paragraph: &mut state.paragraph,
+            layout,
+            selectable: false,
+        });
     }
 }
 
 /// Binary-searches `[min_size, max_size]` for the largest font size whose
 /// shaped paragraph fits inside `fit_bounds`.
+#[allow(clippy::too_many_arguments)]
 fn fit<P: Paragraph>(
     content: &str,
     fit_bounds: Size,
-    font: P::Font,
+    font: Font,
+    line_height: LineHeight,
     min_size: Pixels,
     max_size: Pixels,
-    format: &core_text::Format<P::Font>,
+    format: &core_text::Format,
     hint_factor: Option<f32>,
 ) -> Pixels {
     // Slight tolerance so 0.4px overrun doesn't reject an otherwise-fine
@@ -498,7 +504,7 @@ fn fit<P: Paragraph>(
             content,
             bounds: fit_bounds,
             size,
-            line_height: format.line_height,
+            line_height,
             font,
             align_x: format.align_x,
             align_y: format.align_y,
@@ -541,12 +547,4 @@ fn fit<P: Paragraph>(
     Pixels(lo)
 }
 
-impl<'a, Message, Theme, Renderer> From<FitText<'a, Theme, Renderer>> for Element<'a, Message, Theme, Renderer>
-where
-    Theme: Catalog + 'a,
-    Renderer: text::Renderer + 'a,
-{
-    fn from(text: FitText<'a, Theme, Renderer>) -> Element<'a, Message, Theme, Renderer> {
-        Element::new(text)
-    }
-}
+impl<Theme> widget::Meta for FitText<'_, Theme> where Theme: Catalog {}

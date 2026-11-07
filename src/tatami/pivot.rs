@@ -12,7 +12,7 @@
 //! [`format_cell`] plus their own row builder.
 
 use crate::core::{Element, Font, Length, Theme};
-use crate::widget::{Column, Renderer, column, container, row, rule, text};
+use crate::widget::{Column, Renderer, Widget, column, container, row, rule, text};
 use tatami::{Cell, Tuple, pivot};
 
 // Bold font resolution uses hyozu's standard `text::Style` pattern — the
@@ -36,20 +36,20 @@ pub fn table<'a, Message: 'a>(result: &'a pivot::Result) -> Element<'a, Message,
     // Header row: blank top-left corner cell, then one cell per col header.
     let header_cells =
         std::iter::once(empty_cell::<Message>()).chain(result.col_headers().iter().map(header_cell::<Message>));
-    let header: Element<'a, Message, Theme, Renderer> = row(header_cells).spacing(8).into();
+    let header: Element<'a, Message, Theme, Renderer> = row(header_cells).spacing(8).boxed();
 
     // Body rows: row-header label + one cell per column.
     let body_rows = result.row_headers().iter().zip(result.cells().iter()).map(
         |(row_header, cells)| -> Element<'a, Message, Theme, Renderer> {
             let cells_iter =
                 std::iter::once(header_cell::<Message>(row_header)).chain(cells.iter().map(value_cell::<Message>));
-            row(cells_iter).spacing(8).into()
+            row(cells_iter).spacing(8).boxed()
         },
     );
 
     column![header, rule::horizontal(2), Column::with_children(body_rows).spacing(4),]
         .spacing(4)
-        .into()
+        .boxed()
 }
 
 /// Format a single cell for display in a pivot. Honors the `format` hint on
@@ -86,17 +86,17 @@ fn header_cell<'a, Message: 'a>(tuple: &Tuple) -> Element<'a, Message, Theme, Re
             .width(Length::Fill),
     )
     .width(Length::FillPortion(2))
-    .into()
+    .boxed()
 }
 
 fn value_cell<'a, Message: 'a>(cell: &Cell) -> Element<'a, Message, Theme, Renderer> {
     container(text(format_cell(cell)).size(12.0).width(Length::Fill))
         .width(Length::FillPortion(3))
-        .into()
+        .boxed()
 }
 
 fn empty_cell<'a, Message: 'a>() -> Element<'a, Message, Theme, Renderer> {
-    container(text("")).width(Length::FillPortion(2)).into()
+    container(text("")).width(Length::FillPortion(2)).boxed()
 }
 
 fn format_tuple(tuple: &Tuple) -> String {

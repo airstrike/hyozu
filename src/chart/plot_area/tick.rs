@@ -1,6 +1,5 @@
 use super::{Domain, to_pixel};
-use crate::core::Size;
-use crate::core::layout::{Limits, Node};
+use crate::core::layout::Limits;
 use crate::core::widget::{Tree, tree};
 use crate::data::Datum;
 use crate::mark::tick::Orientation;
@@ -52,6 +51,7 @@ where
             tag: tree::Tag::of::<State>(),
             state: tree::State::new(State { positions: Vec::new() }),
             children: Vec::new(),
+            ..Tree::empty()
         }
     }
 
@@ -64,7 +64,7 @@ where
         _limits: &Limits,
         domain: &Domain,
         rect: crate::core::Rectangle,
-    ) -> Node {
+    ) {
         let state = tree.state.downcast_mut::<State>();
         state.positions.clear();
 
@@ -108,8 +108,6 @@ where
                 half_length,
             });
         }
-
-        Node::new(Size::ZERO)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -119,7 +117,7 @@ where
         renderer: &mut Renderer,
         theme: &Theme,
         _style: &crate::core::renderer::Style,
-        layout: crate::core::Layout<'_>,
+        layout: crate::core::Layout,
         _cursor: crate::core::mouse::Cursor,
         _viewport: &crate::core::Rectangle,
     ) where

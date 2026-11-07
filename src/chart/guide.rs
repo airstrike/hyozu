@@ -1,8 +1,8 @@
 use crate::axis::{Alignment, Axis, Bounds, Kind, Orientation, TextAlign};
-use crate::core::layout::{Limits, Node};
+use crate::core::layout::Limits;
 use crate::core::text::{self, paragraph};
 use crate::core::widget::{Tree, tree};
-use crate::core::{Point, Size};
+use crate::core::{Point, Rectangle, Size, Vector};
 
 /// Wrapper for f64 to make it orderable (NaN compares as less than everything)
 #[derive(Debug, Clone, Copy)]
@@ -441,7 +441,7 @@ where
 pub struct Guide<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: text::Renderer<Font = crate::core::Font>,
+    Renderer: text::Renderer,
 {
     axis: &'a Axis,
     marks: &'a [crate::Mark],
@@ -461,7 +461,7 @@ where
 impl<'a, Message, Renderer> Guide<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: text::Renderer<Font = crate::core::Font>,
+    Renderer: text::Renderer,
 {
     /// Create a new Guide borrowing an Axis and marks. Defaults to
     /// [`crate::scale::Transform::Linear`]; use [`Guide::with_transform`]
@@ -1095,6 +1095,7 @@ where
                 label_offset: 0.0,
             }),
             children,
+            ..Tree::empty()
         }
     }
 
@@ -1123,14 +1124,14 @@ where
         overflow: (f32, f32),
         min_inset: (f32, f32),
         design: Option<&dyn crate::design::Design>,
-    ) -> Node {
+    ) {
         // Compute bounds first, then generate ticks within those bounds.
         // The target tick count scales with the axis's pixel extent along
         // its major direction (height for left/right, width for top/bottom).
         let bounds = self.compute_axis_bounds();
         let axis_length = match self.axis.orientation() {
-            Orientation::Left | Orientation::Right => limits.max().height,
-            Orientation::Bottom | Orientation::Top => limits.max().width,
+            Orientation::Left | Orientation::Right => limits.bounds().height,
+            Orientation::Bottom | Orientation::Top => limits.bounds().width,
         };
         let (label_info, tick_positions) = self.ticks_and_labels(bounds, Some(axis_length));
 
@@ -1151,7 +1152,9 @@ where
             // scene reads `(0, 0)` from `state.label_insets` and lays the
             // plot area flush against the chart edge, clipping the labels.
             state.label_insets = min_inset;
-            return Node::new(Size::ZERO);
+            tree.size = Size::ZERO;
+            tree.children.clear();
+            return;
         }
 
         let tick_length = 5.0;
@@ -1166,9 +1169,9 @@ where
         };
         state.tick_space = tick_space;
         state.label_offset = label_offset;
-        let max_size = limits.max();
+        let max_size = limits.bounds();
 
-        match self.axis.orientation() {
+        let (size, labels) = match self.axis.orientation() {
             Orientation::Left | Orientation::Right => self.layout_vertical(
                 state,
                 renderer,
@@ -1193,6 +1196,13 @@ where
                 min_inset,
                 design,
             ),
+        };
+
+        tree.size = size;
+        tree.children.resize_with(labels.len(), Tree::empty);
+        for (child, label) in tree.children.iter_mut().zip(labels) {
+            child.size = label.size();
+            child.translation = Vector::new(label.x, label.y);
         }
     }
 
@@ -1210,7 +1220,7 @@ where
         overflow: (f32, f32),
         min_inset: (f32, f32),
         design: Option<&dyn crate::design::Design>,
-    ) -> Node {
+    ) -> (Size, Vec<Rectangle>) {
         // Use cached label info from state
         let label_data = &state.label_info;
         let value_range = max_value - min_value;
@@ -1226,8 +1236,8 @@ where
 
         // First pass: measure all labels
         let base_font = design
-            .map(|d| d.axis_text().resolved_font(renderer.default_font()))
-            .unwrap_or_else(|| renderer.default_font());
+            .map(|d| d.axis_text().resolved_font(renderer.font()))
+            .unwrap_or_else(|| renderer.font());
         let base_size = design.and_then(|d| d.axis_text().size).map(|p| p.0).unwrap_or(12.0);
         let axis_text = self.axis.labels.text.or(self.axis.text());
         let label_font = axis_text.resolved_font(base_font);
@@ -1247,7 +1257,7 @@ where
                 shaping: text::Shaping::Basic,
                 wrapping: text::Wrapping::None,
                 ellipsis: text::Ellipsis::default(),
-                hint_factor: renderer.scale_factor(),
+                hint_factor: renderer.hint_factor(),
                 font_features: Vec::new(),
                 font_variations: Vec::new(),
                 letter_spacing: Default::default(),
@@ -1316,10 +1326,7 @@ where
                 max_size.height / 2.0
             };
 
-            children.push(
-                Node::new(Size::new(label_width, label_height))
-                    .move_to(Point::ORIGIN + crate::core::Vector::new(0.0, y)),
-            );
+            children.push(Rectangle::new(Point::new(0.0, y), Size::new(label_width, label_height)));
         }
 
         let tick_space = if self.axis.shows_ticks() { tick_length } else { 0.0 };
@@ -1331,7 +1338,7 @@ where
             0.0
         };
 
-        Node::with_children(Size::new(width, max_size.height), children)
+        (Size::new(width, max_size.height), children)
     }
 
     /// Layout a horizontal axis (top/bottom)
@@ -1348,7 +1355,7 @@ where
         overflow: (f32, f32),
         min_inset: (f32, f32),
         design: Option<&dyn crate::design::Design>,
-    ) -> Node {
+    ) -> (Size, Vec<Rectangle>) {
         // Use cached label info from state
         let label_data = &state.label_info;
         let value_range = max_value - min_value;
@@ -1405,8 +1412,8 @@ where
         // column_width, the paragraph either wraps or ellipsizes at
         // column_width.
         let base_font = design
-            .map(|d| d.axis_text().resolved_font(renderer.default_font()))
-            .unwrap_or_else(|| renderer.default_font());
+            .map(|d| d.axis_text().resolved_font(renderer.font()))
+            .unwrap_or_else(|| renderer.font());
         let base_size = design.and_then(|d| d.axis_text().size).map(|p| p.0).unwrap_or(12.0);
         let axis_text = self.axis.labels.text.or(self.axis.text());
         let label_font = axis_text.resolved_font(base_font);
@@ -1426,7 +1433,7 @@ where
                 shaping: text::Shaping::Basic,
                 wrapping,
                 ellipsis,
-                hint_factor: renderer.scale_factor(),
+                hint_factor: renderer.hint_factor(),
                 font_features: Vec::new(),
                 font_variations: Vec::new(),
                 letter_spacing: Default::default(),
@@ -1488,15 +1495,12 @@ where
                 max_size.width / 2.0
             };
 
-            children.push(
-                Node::new(Size::new(label_width, label_height))
-                    .move_to(Point::ORIGIN + crate::core::Vector::new(x, 0.0)),
-            );
+            children.push(Rectangle::new(Point::new(x, 0.0), Size::new(label_width, label_height)));
         }
 
         let tick_space = if self.axis.shows_ticks() { tick_length } else { 0.0 };
         let height = max_label_height + tick_space + label_offset;
-        Node::with_children(Size::new(max_size.width, height), children)
+        (Size::new(max_size.width, height), children)
     }
 
     /// Draws tick marks and labels at their laid-out positions.
@@ -1508,7 +1512,7 @@ where
         renderer: &mut Renderer,
         design: &D,
         _style: &crate::core::renderer::Style,
-        layout: crate::core::Layout<'_>,
+        layout: crate::core::Layout,
         _cursor: crate::core::mouse::Cursor,
         viewport: &crate::core::Rectangle,
     ) where
@@ -1627,7 +1631,7 @@ where
         }
 
         // Then, draw labels at their positions from layout
-        for ((i, (_pos, _label)), child_layout) in label_data.iter().enumerate().zip(layout.children()) {
+        for ((i, (_pos, _label)), (child_layout, _)) in label_data.iter().enumerate().zip(layout.iter(&tree.children)) {
             let child_bounds = child_layout.bounds();
 
             // Draw label if we have it

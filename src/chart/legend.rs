@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::core::layout::{Limits, Node};
+use crate::core::layout::Limits;
 use crate::core::text::paragraph;
 use crate::core::widget::{Tree, tree};
 use crate::core::{Point, Rectangle, Size, text};
@@ -67,7 +67,7 @@ where
 /// A Legend displays a key for the chart's data series.
 pub struct Legend<'a, Message, Renderer>
 where
-    Renderer: text::Renderer<Font = crate::core::Font> + geometry::Renderer,
+    Renderer: text::Renderer + geometry::Renderer,
 {
     entries: Vec<LegendEntry>,
     anchor: Anchor,
@@ -87,7 +87,7 @@ where
 
 impl<'a, Message, Renderer> Legend<'a, Message, Renderer>
 where
-    Renderer: text::Renderer<Font = crate::core::Font> + geometry::Renderer,
+    Renderer: text::Renderer + geometry::Renderer,
 {
     /// Create a new Legend from entries and configuration.
     ///
@@ -179,6 +179,7 @@ where
                 formatted_values: Vec::new(),
             }),
             children: Vec::new(),
+            ..Tree::empty()
         }
     }
 
@@ -192,7 +193,7 @@ where
         renderer: &Renderer,
         limits: &Limits,
         design: Option<&dyn crate::design::Design>,
-    ) -> Node {
+    ) {
         if self.entries.is_empty() {
             {
                 let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
@@ -203,18 +204,19 @@ where
                 state.value_column_width = 0.0;
                 state.table_mode = false;
             }
-            return Node::new(Size::ZERO);
+            tree.size = Size::ZERO;
+            return;
         }
 
         let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
 
         // Per-chart legend style wins, then the design's `legend_text()`
         // default, then the renderer/library fallback (10px). On `None` this
-        // collapses to `renderer.default_font()` / `DEFAULT_FONT_SIZE`,
+        // collapses to `renderer.font()` / `DEFAULT_FONT_SIZE`,
         // matching the historical default and the draw() path.
         let base_font = design
-            .map(|d| d.legend_text().resolved_font(renderer.default_font()))
-            .unwrap_or_else(|| renderer.default_font());
+            .map(|d| d.legend_text().resolved_font(renderer.font()))
+            .unwrap_or_else(|| renderer.font());
         let base_size = design
             .and_then(|d| d.legend_text().size)
             .map(|p| p.0)
@@ -257,7 +259,7 @@ where
                 shaping: text::Shaping::Basic,
                 wrapping: text::Wrapping::None,
                 ellipsis: text::Ellipsis::default(),
-                hint_factor: renderer.scale_factor(),
+                hint_factor: renderer.hint_factor(),
                 font_features: Vec::new(),
                 font_variations: Vec::new(),
                 letter_spacing: Default::default(),
@@ -287,7 +289,7 @@ where
                         shaping: text::Shaping::Basic,
                         wrapping: text::Wrapping::None,
                         ellipsis: text::Ellipsis::default(),
-                        hint_factor: renderer.scale_factor(),
+                        hint_factor: renderer.hint_factor(),
                         font_features: Vec::new(),
                         font_variations: Vec::new(),
                         letter_spacing: Default::default(),
@@ -328,9 +330,9 @@ where
 
         let row_height = font_size + PADDING_V * 2.0;
 
-        let (node, box_width) = if self.is_horizontal() {
+        let (size, box_width) = if self.is_horizontal() {
             // Horizontal wrapping layout
-            let available_width = limits.max().width;
+            let available_width = limits.bounds().width;
             state.rows.clear();
             state.row_widths.clear();
 
@@ -360,7 +362,7 @@ where
             let num_rows = state.rows.len().max(1);
             let total_height = num_rows as f32 * row_height;
 
-            (Node::new(Size::new(available_width, total_height)), available_width)
+            (Size::new(available_width, total_height), available_width)
         } else {
             // Vertical stacked layout
             state.rows.clear();
@@ -374,10 +376,7 @@ where
             let max_width = entry_widths.iter().copied().fold(0.0_f32, f32::max);
             let total_height = self.entries.len() as f32 * row_height;
 
-            (
-                Node::new(Size::new(max_width + ENTRY_GAP, total_height)),
-                max_width + ENTRY_GAP,
-            )
+            (Size::new(max_width + ENTRY_GAP, total_height), max_width + ENTRY_GAP)
         };
 
         // Compute entry bounds relative to the legend's own origin (0, 0).
@@ -414,7 +413,7 @@ where
         }
         state.entry_rects = entry_rects;
 
-        node
+        tree.size = size;
     }
 
     /// Draws the legend.
@@ -425,7 +424,7 @@ where
         renderer: &mut Renderer,
         design: &Theme,
         _style: &crate::core::renderer::Style,
-        layout: crate::core::Layout<'_>,
+        layout: crate::core::Layout,
         _cursor: crate::core::mouse::Cursor,
         viewport: &crate::core::Rectangle,
         palette: &crate::palette::Resolved,
@@ -534,7 +533,7 @@ where
                         shaping: crate::core::text::Shaping::Basic,
                         wrapping: crate::core::text::Wrapping::None,
                         ellipsis: crate::core::text::Ellipsis::default(),
-                        hint_factor: renderer.scale_factor(),
+                        hint_factor: renderer.hint_factor(),
                         font_features: Vec::new(),
                         font_variations: Vec::new(),
                         letter_spacing: Default::default(),
@@ -567,7 +566,7 @@ where
                             shaping: crate::core::text::Shaping::Basic,
                             wrapping: crate::core::text::Wrapping::None,
                             ellipsis: crate::core::text::Ellipsis::default(),
-                            hint_factor: renderer.scale_factor(),
+                            hint_factor: renderer.hint_factor(),
                             font_features: Vec::new(),
                             font_variations: Vec::new(),
                             letter_spacing: Default::default(),

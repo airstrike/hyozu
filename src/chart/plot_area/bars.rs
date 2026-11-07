@@ -1,6 +1,6 @@
 use super::{Domain, Insets, to_pixel};
 use crate::animation;
-use crate::core::layout::{Limits, Node};
+use crate::core::layout::Limits;
 use crate::core::text::{self, paragraph};
 use crate::core::widget::{Tree, tree};
 use crate::core::{Point, Rectangle, Size};
@@ -159,7 +159,7 @@ where
 impl<'a, Message, Renderer> Bars<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: crate::core::text::Renderer<Font = crate::core::Font> + geometry::Renderer,
+    Renderer: crate::core::text::Renderer + geometry::Renderer,
 {
     /// Create a new Bars borrowing data
     pub fn new(data: &'a crate::bar::Bars) -> Self {
@@ -195,6 +195,7 @@ where
                 },
             }),
             children: Vec::new(),
+            ..Tree::empty()
         }
     }
 
@@ -320,14 +321,14 @@ where
         domain: &Domain,
         rect: Rectangle,
         design: Option<&dyn crate::design::Design>,
-    ) -> Node {
+    ) {
         use crate::mark::bar::Direction;
 
         let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
 
         if self.data.series.is_empty() {
             state.series_rects.clear();
-            return Node::new(Size::ZERO);
+            return;
         }
 
         // Determine number of bins (positions) - use max points across all series
@@ -335,7 +336,7 @@ where
 
         if num_bins == 0 {
             state.series_rects.clear();
-            return Node::new(Size::ZERO);
+            return;
         }
 
         let bar_length = self.data.size.get();
@@ -374,7 +375,6 @@ where
             .collect();
 
         // Bars take no space - they're rendered within the plane
-        Node::new(Size::ZERO)
     }
 
     /// Layout bars vertically (default) - bars grow upward from baseline.
@@ -752,7 +752,7 @@ where
     /// to mirror `series_rects` so `draw` can index a bar's label directly.
     ///
     /// The font is resolved theme-free — the label's own family/weight/style
-    /// layered on [`crate::core::text::Renderer::default_font`] — so that
+    /// layered on [`crate::core::text::Renderer::font`] — so that
     /// `layout` stays independent of the active theme (a theme that overrides
     /// the data-label *font family* will not affect these metrics; color stays
     /// a draw-time concern). Bars with a non-finite value or empty formatted
@@ -767,13 +767,13 @@ where
         use crate::core::alignment;
 
         let default_font = design
-            .map(|d| d.data_label_text().resolved_font(renderer.default_font()))
-            .unwrap_or_else(|| renderer.default_font());
+            .map(|d| d.data_label_text().resolved_font(renderer.font()))
+            .unwrap_or_else(|| renderer.font());
         let default_size = design
             .and_then(|d| d.data_label_text().size)
             .map(|p| p.0)
             .unwrap_or(12.0);
-        let hint_factor = renderer.scale_factor();
+        let hint_factor = renderer.hint_factor();
 
         while state.labels.len() < self.data.series.len() {
             state.labels.push(Vec::new());
@@ -855,7 +855,7 @@ where
         renderer: &mut Renderer,
         theme: &Theme,
         _style: &crate::core::renderer::Style,
-        _layout: crate::core::Layout<'_>,
+        _layout: crate::core::Layout,
         _cursor: crate::core::mouse::Cursor,
         _viewport: &crate::core::Rectangle,
         color_offset: usize,

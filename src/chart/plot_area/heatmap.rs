@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use super::choropleth::palette_to_continuous_stops;
 use super::{Domain, to_pixel};
 use crate::animation;
-use crate::core::layout::{Limits, Node};
+use crate::core::layout::Limits;
 use crate::core::widget::{Tree, tree};
 use crate::core::{Color, Point, Rectangle, Size};
 use crate::data::Datum;
@@ -124,7 +124,7 @@ where
 impl<'a, Message, Renderer> Heatmap<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: crate::core::text::Renderer<Font = crate::core::Font> + geometry::Renderer,
+    Renderer: crate::core::text::Renderer + geometry::Renderer,
 {
     /// Create a new Heatmap borrowing data.
     pub fn new(data: &'a crate::mark::heatmap::Heatmap) -> Self {
@@ -154,6 +154,7 @@ where
                 tick: animation::Tick::new(),
             }),
             children: Vec::new(),
+            ..Tree::empty()
         }
     }
 
@@ -174,7 +175,7 @@ where
         domain: &Domain,
         rect: Rectangle,
         design: Option<&dyn crate::design::Design>,
-    ) -> Node {
+    ) {
         let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
         state.cell_rects.clear();
 
@@ -188,7 +189,7 @@ where
 
         if rows == 0 || cols == 0 {
             state.labels.clear();
-            return Node::new(Size::ZERO);
+            return;
         }
 
         let cell_width = rect.width / cols as f32;
@@ -208,8 +209,6 @@ where
         }
 
         self.shape_labels(state, renderer, rows, cols, design);
-
-        Node::new(Size::ZERO)
     }
 
     /// Shapes one cell-value label paragraph per cell index (row-major),
@@ -226,10 +225,10 @@ where
         cols: usize,
         design: Option<&dyn crate::design::Design>,
     ) {
-        let hint_factor = renderer.scale_factor();
+        let hint_factor = renderer.hint_factor();
         let default_font = design
-            .map(|d| d.data_label_text().resolved_font(renderer.default_font()))
-            .unwrap_or_else(|| renderer.default_font());
+            .map(|d| d.data_label_text().resolved_font(renderer.font()))
+            .unwrap_or_else(|| renderer.font());
         let default_size = design
             .and_then(|d| d.data_label_text().size)
             .map(|p| p.0)
@@ -285,7 +284,7 @@ where
         renderer: &mut Renderer,
         theme: &Theme,
         _style: &crate::core::renderer::Style,
-        layout: crate::core::Layout<'_>,
+        layout: crate::core::Layout,
         _cursor: crate::core::mouse::Cursor,
         _viewport: &crate::core::Rectangle,
         _color_offset: usize,

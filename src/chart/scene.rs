@@ -59,7 +59,7 @@ fn legend_entries_for(
 /// Follows the pane_grid::Content pattern from iced.
 pub struct Scene<'a, Message, Renderer>
 where
-    Renderer: text::Renderer<Font = crate::core::Font> + geometry::Renderer,
+    Renderer: text::Renderer + geometry::Renderer,
 {
     // The 7 pieces (6 optional, plot area required)
     title: Option<Title<'a, Message, Renderer>>,
@@ -129,7 +129,7 @@ where
 
 impl<'a, Message, Renderer> Scene<'a, Message, Renderer>
 where
-    Renderer: text::Renderer<Font = crate::core::Font> + geometry::Renderer,
+    Renderer: text::Renderer + geometry::Renderer,
 {
     /// Returns tree state for Scene's 7 children (like Content::state)
     pub(super) fn state(&self) -> Tree {
@@ -488,12 +488,11 @@ where
         renderer: &Renderer,
         limits: &crate::core::layout::Limits,
         design: Option<&dyn crate::design::Design>,
-    ) -> crate::core::layout::Node {
-        use crate::core::layout::Node;
-        use crate::core::{Point, Size};
+    ) {
+        use crate::core::{Point, Size, Vector};
         use crate::data::legend::Edge;
 
-        let available = limits.max();
+        let available = limits.bounds();
         let lim = |w, h| crate::core::layout::Limits::new(Size::ZERO, Size::new(w, h));
 
         // Tree indices: [0: title, 1: legend, 2: top, 3: right, 4: bottom, 5: left, 6: plot]
@@ -512,25 +511,23 @@ where
         let scale_right = self.scale_legend_budgets.get(&Edge::Right).copied().unwrap_or(0.0);
 
         // --- Phase 1: Title (always at top, full width) ---
-        let (title_height, title_node) = if let Some(title) = &self.title {
+        let (title_height, title_laid_out) = if let Some(title) = &self.title {
             if let Some(title_tree) = tree.children.get_mut(0) {
-                let node = title.layout(title_tree, renderer, &lim(available.width, available.height), design);
-                let h = node.size().height;
-                (h, Some(node))
+                title.layout(title_tree, renderer, &lim(available.width, available.height), design);
+                (title_tree.size.height, true)
             } else {
-                (0.0, None)
+                (0.0, false)
             }
         } else {
-            (0.0, None)
+            (0.0, false)
         };
 
         // --- Phase 2: Side legend measurement (Left/Right) ---
-        let (legend_side_width, legend_side_node) = if legend_is_side {
+        let (legend_side_width, legend_side_size) = if legend_is_side {
             if let (Some(legend), Some(legend_tree)) = (&self.legend, tree.children.get_mut(1)) {
                 let remaining_h = available.height - title_height;
-                let node = legend.layout(legend_tree, renderer, &lim(available.width, remaining_h), design);
-                let w = node.size().width;
-                (w, Some(node))
+                legend.layout(legend_tree, renderer, &lim(available.width, remaining_h), design);
+                (legend_tree.size.width, Some(legend_tree.size))
             } else {
                 (0.0, None)
             }
@@ -543,7 +540,7 @@ where
             let remaining_h = available.height - title_height;
             let top_tree = &mut tree.children[2];
             let top_height = if let Some(guide) = &self.top_axis {
-                let node = guide.layout(
+                guide.layout(
                     top_tree,
                     renderer,
                     &lim(available.width, remaining_h),
@@ -551,14 +548,14 @@ where
                     (0.0, 0.0),
                     design,
                 );
-                node.size().height
+                top_tree.size.height
             } else {
                 0.0
             };
             let right_tree = &mut tree.children[3];
             let vertical = remaining_h - top_height;
             let right_width = if let Some(guide) = &self.right_axis {
-                let node = guide.layout(
+                guide.layout(
                     right_tree,
                     renderer,
                     &lim(available.width, vertical),
@@ -566,7 +563,7 @@ where
                     (0.0, 0.0),
                     design,
                 );
-                node.size().width
+                right_tree.size.width
             } else {
                 0.0
             };
@@ -585,7 +582,7 @@ where
             // don't affect the returned width/height, so the measurement
             // remains correct. Data bounds are written to state.
             let bottom_height = if let Some(guide) = &self.bottom_axis {
-                let node = guide.layout(
+                guide.layout(
                     bottom_tree,
                     renderer,
                     &lim(available.width, remaining_h),
@@ -593,14 +590,14 @@ where
                     (0.0, 0.0),
                     design,
                 );
-                node.size().height
+                bottom_tree.size.height
             } else {
                 0.0
             };
 
             let vertical = remaining_h - bottom_height;
             let left_width = if let Some(guide) = &self.left_axis {
-                let node = guide.layout(
+                guide.layout(
                     left_tree,
                     renderer,
                     &lim(available.width, vertical),
@@ -608,7 +605,7 @@ where
                     (0.0, 0.0),
                     design,
                 );
-                node.size().width
+                left_tree.size.width
             } else {
                 0.0
             };
@@ -620,11 +617,10 @@ where
         let plot_width = available.width - left_width - right_width - legend_side_width - scale_left - scale_right;
 
         // --- Phase 5: Above/Below legend measurement (needs plot_width for wrapping) ---
-        let (legend_tb_height, legend_tb_node) = if !legend_is_side {
+        let (legend_tb_height, legend_tb_size) = if !legend_is_side {
             if let (Some(legend), Some(legend_tree)) = (&self.legend, tree.children.get_mut(1)) {
-                let node = legend.layout(legend_tree, renderer, &lim(plot_width, available.height), design);
-                let h = node.size().height;
-                (h, Some(node))
+                legend.layout(legend_tree, renderer, &lim(plot_width, available.height), design);
+                (legend_tree.size.height, Some(legend_tree.size))
             } else {
                 (0.0, None)
             }
@@ -687,7 +683,7 @@ where
         let left_min_inset = (series_insets.top, series_insets.bottom);
         let bottom_min_inset = (series_insets.left, series_insets.right);
 
-        let left_axis_node = self.left_axis.as_ref().map(|guide| {
+        if let Some(guide) = &self.left_axis {
             guide.layout(
                 &mut second_children[0],
                 renderer,
@@ -695,10 +691,10 @@ where
                 left_overflow,
                 left_min_inset,
                 design,
-            )
-        });
+            );
+        }
 
-        let bottom_axis_node = self.bottom_axis.as_ref().map(|guide| {
+        if let Some(guide) = &self.bottom_axis {
             guide.layout(
                 &mut first_children[4],
                 renderer,
@@ -706,11 +702,11 @@ where
                 bottom_overflow,
                 bottom_min_inset,
                 design,
-            )
-        });
+            );
+        }
 
         // Secondary axes — share X/Y overflow with their siblings.
-        let top_axis_node = self.top_axis.as_ref().map(|guide| {
+        if let Some(guide) = &self.top_axis {
             guide.layout(
                 &mut first_children[2],
                 renderer,
@@ -718,10 +714,10 @@ where
                 bottom_overflow,
                 bottom_min_inset,
                 design,
-            )
-        });
+            );
+        }
 
-        let right_axis_node = self.right_axis.as_ref().map(|guide| {
+        if let Some(guide) = &self.right_axis {
             guide.layout(
                 &mut first_children[3],
                 renderer,
@@ -729,8 +725,8 @@ where
                 left_overflow,
                 left_min_inset,
                 design,
-            )
-        });
+            );
+        }
 
         // Axis bounds for plot area coordinate sync
         let (axis_bounds, secondary_bounds, plot_insets) = {
@@ -782,7 +778,7 @@ where
 
             // The data-rect inset is the axis guides' final `label_insets`,
             // which already fold the series `min_inset` floor in via the
-            // guide's own max — so ticks and the content node consume one
+            // guide's own max — so ticks and the content rect consume one
             // shared per-edge value. Horizontal edges come from the bottom
             // axis, vertical from the left.
             let insets = Insets {
@@ -796,7 +792,7 @@ where
 
         // Label-avoidance obstacle bands: the sibling axis gutters expressed
         // as plot-local rectangles (left axis at negative x, bottom axis below
-        // the plot, etc.), sourced from the laid-out axis node sizes. Marks
+        // the plot, etc.), sourced from the laid-out axis sizes. Marks
         // that place data labels via pathfinding (area, line) keep their labels
         // out of these regions.
         let mut axis_obstacles = Vec::new();
@@ -833,7 +829,7 @@ where
             });
         }
 
-        let plot_area_node = self.plot_area.layout(
+        self.plot_area.layout(
             &mut second_children[1],
             renderer,
             &lim(plot_width, plot_height),
@@ -847,8 +843,7 @@ where
             design,
         );
 
-        // --- Phase 8: Position all nodes ---
-        let mut layout_children = Vec::new();
+        // --- Phase 8: Position all children ---
 
         // Compute vertical offsets. Layer order from the chart edge inward:
         //   series-key legend → scale-legend strip → axis → plot area.
@@ -863,17 +858,15 @@ where
         let plot_top = title_height + above_legend_h + top_height + scale_top;
 
         // Title at (0, 0)
-        if let Some(node) = title_node {
-            layout_children.push(node.move_to(Point::new(0.0, 0.0)));
+        if title_laid_out {
+            tree.children[0].translation = Vector::ZERO;
         }
 
         // Legend — position depends on config. Layer order from edge
         // inward is [series-key legend, scale-legend strip, axis, plot],
         // so the series-key legend clears the full outer margin (axis +
         // scale strip) on its edge.
-        let legend_node = legend_tb_node.or(legend_side_node);
-        if let Some(node) = legend_node {
-            let size = node.size();
+        if let Some(size) = legend_tb_size.or(legend_side_size) {
             // Side legends center vertically against the plot area so a
             // short legend doesn't pin to the top of a tall chart.
             let side_y = plot_top + ((plot_height - size.height) / 2.0).max(0.0);
@@ -889,37 +882,37 @@ where
                 width: size.width,
                 height: size.height,
             });
-            layout_children.push(node.move_to(pos));
+            tree.children[1].translation = Vector::new(pos.x, pos.y);
         } else {
             self.legend_bounds = None;
         }
 
         // Top axis — above plot area
-        if let Some(node) = top_axis_node {
-            layout_children.push(node.move_to(Point::new(content_left, plot_top - top_height)));
+        if self.top_axis.is_some() {
+            tree.children[2].translation = Vector::new(content_left, plot_top - top_height);
         }
 
         // Left axis. The axis border line itself is drawn inside the plot
         // area frame by `plot_area::draw_axis_borders`, so the left axis
         // frame contains only the labels and tick marks — no +1 width
         // hack needed to bridge the gap to the plot area.
-        if let Some(node) = left_axis_node {
-            layout_children.push(node.move_to(Point::new(axis_left_x, plot_top)));
+        if self.left_axis.is_some() {
+            tree.children[5].translation = Vector::new(axis_left_x, plot_top);
         }
 
         // Plot area
         self.plot_area_offset = Point::new(content_left, plot_top);
         self.plot_area_size = Size::new(plot_width, plot_height);
-        layout_children.push(plot_area_node.move_to(self.plot_area_offset));
+        tree.children[6].translation = Vector::new(content_left, plot_top);
 
         // Bottom axis
-        if let Some(node) = bottom_axis_node {
-            layout_children.push(node.move_to(Point::new(content_left, plot_top + plot_height)));
+        if self.bottom_axis.is_some() {
+            tree.children[4].translation = Vector::new(content_left, plot_top + plot_height);
         }
 
         // Right axis — to the right of plot area
-        if let Some(node) = right_axis_node {
-            layout_children.push(node.move_to(Point::new(content_left + plot_width, plot_top)));
+        if self.right_axis.is_some() {
+            tree.children[3].translation = Vector::new(content_left + plot_width, plot_top);
         }
 
         // Scale-legend strip rects. Stack marks on the same edge along
@@ -980,7 +973,7 @@ where
             self.scale_legend_strips.insert(series_idx, rect);
         }
 
-        Node::with_children(available, layout_children)
+        tree.size = available;
     }
 
     /// Draws the scene by delegating to its 7 pieces.
@@ -992,7 +985,7 @@ where
         renderer: &mut Renderer,
         design: &D,
         style: &crate::core::renderer::Style,
-        layout: crate::core::Layout<'_>,
+        layout: crate::core::Layout,
         cursor: crate::core::mouse::Cursor,
         viewport: &crate::core::Rectangle,
         hidden_series: &std::collections::HashSet<String>,
@@ -1005,17 +998,15 @@ where
         let seed = design.seed();
         let resolved = palette::Resolved::resolve(&self.palette, &seed, self.color_slots);
 
-        // Navigate layout children in the same order as layout()
-        // Layout tree structure: [title?, left_axis?, plot_area, bottom_axis?]
-        let mut children_layouts = layout.children();
-
-        // Tree indices:
+        // Child layouts follow the tree indices:
         // 0: title, 1: legend, 2: top_axis, 3: right_axis
         // 4: bottom_axis, 5: left_axis, 6: plot_area
+        let children_layouts: Vec<crate::core::Layout> =
+            layout.iter(&tree.children).map(|(layout, _)| layout).collect();
 
         // Title
         if let Some(title) = &self.title {
-            let title_layout = children_layouts.next().expect("title layout must exist");
+            let title_layout = children_layouts[0];
             title.draw(
                 &tree.children[0],
                 renderer,
@@ -1029,7 +1020,7 @@ where
 
         // Legend
         if let Some(legend) = &self.legend {
-            let legend_layout = children_layouts.next().expect("legend layout must exist");
+            let legend_layout = children_layouts[1];
             legend.draw(
                 &tree.children[1],
                 renderer,
@@ -1045,13 +1036,13 @@ where
 
         // Top axis (secondary X)
         if let Some(guide) = &self.top_axis {
-            let top_layout = children_layouts.next().expect("top axis layout must exist");
+            let top_layout = children_layouts[2];
             guide.draw(&tree.children[2], renderer, design, style, top_layout, cursor, viewport);
         }
 
         // Left axis
         if let Some(guide) = &self.left_axis {
-            let left_layout = children_layouts.next().expect("left axis layout must exist");
+            let left_layout = children_layouts[5];
             guide.draw(
                 &tree.children[5],
                 renderer,
@@ -1064,7 +1055,7 @@ where
         }
 
         // Plot area
-        let plot_layout = children_layouts.next().expect("plot layout must exist");
+        let plot_layout = children_layouts[6];
 
         // Draw gridlines before marks so marks render on top.
         // Tick positions come from guide state (data coordinates); the plot
@@ -1162,7 +1153,7 @@ where
 
         // Bottom axis (labels and ticks)
         if let Some(guide) = &self.bottom_axis {
-            let bottom_layout = children_layouts.next().expect("bottom axis layout must exist");
+            let bottom_layout = children_layouts[4];
             guide.draw(
                 &tree.children[4],
                 renderer,
@@ -1176,7 +1167,7 @@ where
 
         // Right axis (secondary Y)
         if let Some(guide) = &self.right_axis {
-            let right_layout = children_layouts.next().expect("right axis layout must exist");
+            let right_layout = children_layouts[3];
             guide.draw(
                 &tree.children[3],
                 renderer,

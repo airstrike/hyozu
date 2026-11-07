@@ -1,5 +1,5 @@
 use crate::core::widget::tree;
-use crate::core::{Element, Layout, Length, Rectangle, Size, Widget, layout, mouse};
+use crate::core::{Layout, Length, Rectangle, Size, Widget, layout, mouse};
 use crate::design;
 use crate::widget::canvas::{Frame, Path, Stroke};
 use crate::widget::renderer::geometry;
@@ -174,20 +174,15 @@ where
         }
     }
 
-    fn layout(
-        &mut self,
-        _tree: &mut crate::core::widget::Tree,
-        _renderer: &Renderer,
-        limits: &layout::Limits,
-    ) -> layout::Node {
-        layout::Node::new(limits.resolve(self.width, self.height, Size::new(60.0, 20.0)))
+    fn layout(&mut self, tree: &mut crate::core::widget::Tree, _renderer: &Renderer, limits: &layout::Limits) {
+        tree.size = limits.resolve(self.width, self.height, Size::new(60.0, 20.0));
     }
 
     fn update(
         &mut self,
         _tree: &mut crate::core::widget::Tree,
         _event: &crate::core::Event,
-        _layout: Layout<'_>,
+        _layout: Layout,
         _cursor: mouse::Cursor,
         _renderer: &Renderer,
         _shell: &mut crate::core::Shell<'_, Message>,
@@ -201,7 +196,7 @@ where
         renderer: &mut Renderer,
         theme: &Theme,
         _defaults: &crate::core::renderer::Style,
-        layout: Layout<'_>,
+        layout: Layout,
         _cursor: mouse::Cursor,
         _viewport: &Rectangle,
     ) {
@@ -310,14 +305,4 @@ where
     }
 }
 
-impl<'a, Message, Theme, Renderer> From<Sparkline<'a, Message, Theme, Renderer>>
-    for Element<'a, Message, Theme, Renderer>
-where
-    Message: 'a,
-    Theme: design::Design + 'a,
-    Renderer: geometry::Renderer + 'a,
-{
-    fn from(sparkline: Sparkline<'a, Message, Theme, Renderer>) -> Self {
-        Element::new(sparkline)
-    }
-}
+impl<Message, Theme, Renderer> crate::core::widget::Meta for Sparkline<'_, Message, Theme, Renderer> {}

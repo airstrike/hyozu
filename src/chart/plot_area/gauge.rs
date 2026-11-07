@@ -1,7 +1,7 @@
 use super::Domain;
 use crate::animation;
 use crate::core::Size;
-use crate::core::layout::{Limits, Node};
+use crate::core::layout::Limits;
 use crate::core::widget::{Tree, tree};
 use crate::data::axis::tick;
 use crate::widget::canvas::{Frame, Path};
@@ -29,7 +29,7 @@ where
     /// rendered in [`Gauge::draw`] via
     /// [`crate::core::text::Renderer::fill_paragraph`]. The arc radius (and
     /// hence every font size and tick label set) is derived from the same
-    /// `limits.max()` the draw pass derives from `layout.bounds()`, which
+    /// `limits.bounds()` the draw pass derives from `layout.bounds()`, which
     /// are equal for the polar gauge node, so the shaped paragraphs match
     /// the draw geometry. Hidden / absent elements keep a default (empty)
     /// paragraph; `draw` skips them with the same guards.
@@ -88,7 +88,7 @@ where
 impl<'a, Message, Renderer> Gauge<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: text::Renderer<Font = crate::core::Font> + geometry::Renderer,
+    Renderer: text::Renderer + geometry::Renderer,
 {
     /// Create a new Gauge borrowing data
     pub fn new(data: &'a crate::mark::gauge::Gauge) -> Self {
@@ -117,6 +117,7 @@ where
                 tick: animation::Tick::new(),
             }),
             children: Vec::new(),
+            ..Tree::empty()
         }
     }
 
@@ -134,7 +135,7 @@ where
         _domain: &Domain,
         _rect: crate::core::Rectangle,
         design: Option<&dyn crate::design::Design>,
-    ) -> Node {
+    ) {
         let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
 
         let range = self.data.max - self.data.min;
@@ -150,14 +151,12 @@ where
         state.sweep_rad = if sweep_rad.is_finite() { sweep_rad } else { 0.0 };
         state.value_angle = proportion * state.sweep_rad;
 
-        self.shape_labels(state, renderer, limits.max(), range, design);
-
-        Node::new(Size::ZERO)
+        self.shape_labels(state, renderer, limits.bounds(), range, design);
     }
 
     /// Shapes the gauge's center value/unit/subtitle and tick labels,
-    /// theme-free (font from `renderer.default_font()`, sizes scaled from the
-    /// arc radius). The radius is derived from `limits.max()` via
+    /// theme-free (font from `renderer.font()`, sizes scaled from the
+    /// arc radius). The radius is derived from `limits.bounds()` via
     /// [`arc_radius`], the same value `draw` derives from `layout.bounds()`
     /// (equal for the polar gauge node), so the shaped glyph sizes match the
     /// rendered geometry. Hidden / absent elements keep a default (empty)
@@ -175,9 +174,9 @@ where
         // supplies the font family/weight base (12 px / default font when the
         // chart has no design).
         let default_font = design
-            .map(|d| d.data_label_text().resolved_font(renderer.default_font()))
-            .unwrap_or_else(|| renderer.default_font());
-        let hint_factor = renderer.scale_factor();
+            .map(|d| d.data_label_text().resolved_font(renderer.font()))
+            .unwrap_or_else(|| renderer.font());
+        let hint_factor = renderer.hint_factor();
 
         let shape = |paragraph: &mut paragraph::Plain<Renderer::Paragraph>, content: &str, px: f32| {
             let _ = paragraph.update(text::Text {
@@ -249,7 +248,7 @@ where
         renderer: &mut Renderer,
         theme: &Theme,
         _style: &crate::core::renderer::Style,
-        layout: crate::core::Layout<'_>,
+        layout: crate::core::Layout,
         _cursor: crate::core::mouse::Cursor,
         _viewport: &crate::core::Rectangle,
         color_offset: usize,
@@ -895,7 +894,7 @@ fn compute_tick_values(data: &crate::mark::gauge::Gauge, ticks: &tick::Ticks, ra
 /// tick reservation can't collapse the arc. Shared by [`Gauge::layout`] (to
 /// derive font sizes for label shaping) and [`Gauge::draw`] (to place the
 /// geometry), so the shaped paragraphs match the rendered arc — the gauge's
-/// `limits.max()` at layout equals `layout.bounds().size()` at draw.
+/// `limits.bounds()` at layout equals `layout.bounds().size()` at draw.
 fn arc_radius(data: &crate::mark::gauge::Gauge, size: Size) -> f32 {
     let half = size.width.min(size.height) / 2.0;
     let tick_margin = if data.ticks.is_some() && data.show_tick_labels {

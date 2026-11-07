@@ -14,10 +14,9 @@ pub use iced_widget::*;
 /// [`FitText`] scales its font size to fit the bounds it is laid out into,
 /// up to a configurable ceiling. See the [`fit_text`](mod@crate::widget::fit_text)
 /// module docs for the semantics.
-pub fn fit_text<'a, Theme, Renderer>(content: impl crate::core::text::IntoFragment<'a>) -> FitText<'a, Theme, Renderer>
+pub fn fit_text<'a, Theme>(content: impl crate::core::text::IntoFragment<'a>) -> FitText<'a, Theme>
 where
     Theme: fit_text::Catalog,
-    Renderer: crate::core::text::Renderer,
 {
     FitText::new(content)
 }

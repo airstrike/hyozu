@@ -1,5 +1,5 @@
 use crate::core::Rectangle;
-use crate::core::layout::{Limits, Node};
+use crate::core::layout::Limits;
 use crate::core::widget::{Tree, tree};
 use crate::data::Datum;
 
@@ -94,21 +94,24 @@ pub fn to_data_x(domain: &Domain, rect: Rectangle, pixel_x: f32) -> f64 {
     }
 }
 
-/// Build the `content` child node from the inset data-mapping rect.
+/// Builds the shared data-mapping region: the plot rect of `size` inset
+/// by the per-edge margins.
 ///
-/// The node is the shared data-mapping region — the plot rect inset by
-/// the per-edge margins. Its bounds are plot-local (origin at
-/// `content_rect.{x, y}` = `insets.{left, top}`). Primary and secondary
-/// planes map data into this same rectangle. The node is structural:
-/// marks still translate by the plot node at draw, never this child.
-fn content_node(content_rect: Rectangle) -> Node {
-    Node::new(crate::core::Size::new(content_rect.width, content_rect.height))
-        .move_to(crate::core::Point::new(content_rect.x, content_rect.y))
+/// Its bounds are plot-local (origin at `insets.{left, top}`). Primary and
+/// secondary planes map data into this same rectangle; marks still
+/// translate by the plot area's layout at draw.
+fn content_rect(size: crate::core::Size, insets: Insets) -> Rectangle {
+    Rectangle {
+        x: insets.left,
+        y: insets.top,
+        width: (size.width - insets.left - insets.right).max(0.0),
+        height: (size.height - insets.top - insets.bottom).max(0.0),
+    }
 }
 
 /// Pixel margins reserved on each edge of the plot area to seat the
 /// data-mapping region. The same per-edge value seats the axis ticks and the
-/// content node, so marks and ticks stay aligned by construction.
+/// content rect, so marks and ticks stay aligned by construction.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Insets {
     pub left: f32,
@@ -145,7 +148,7 @@ impl Default for GeoConfig {
 pub enum Series<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: crate::core::text::Renderer<Font = crate::core::Font> + geometry::Renderer,
+    Renderer: crate::core::text::Renderer + geometry::Renderer,
 {
     Area(area::Area<'a, Message, Renderer>),
     Line(Line<'a, Message, Renderer>),
@@ -208,7 +211,7 @@ pub struct State {
 pub struct PlotArea<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: crate::core::text::Renderer<Font = crate::core::Font> + geometry::Renderer,
+    Renderer: crate::core::text::Renderer + geometry::Renderer,
 {
     pub(crate) series: Vec<Series<'a, Message, Renderer>>,
     /// Which axis pair each series in `series` is plotted against.
@@ -218,7 +221,7 @@ where
 impl<'a, Message, Renderer> PlotArea<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: crate::core::text::Renderer<Font = crate::core::Font> + geometry::Renderer,
+    Renderer: crate::core::text::Renderer + geometry::Renderer,
 {
     /// Create a new PlotArea from mark data (primary axis).
     pub fn new(marks: &'a [crate::Mark]) -> Self {
@@ -387,6 +390,7 @@ where
                 geo_plane: None,
             }),
             children,
+            ..Tree::empty()
         }
     }
 
@@ -808,9 +812,9 @@ where
         secondary_y_transform: crate::scale::Transform,
         geo_config: &GeoConfig,
         design: Option<&dyn crate::design::Design>,
-    ) -> Node {
+    ) {
         let state = tree.state.downcast_mut::<State>();
-        let size = limits.max();
+        let size = limits.bounds();
 
         // Use axis bounds if provided, otherwise compute from data
         let (x_min, x_max, mut y_min, y_max) = axis_bounds.unwrap_or_else(|| self.compute_data_bounds());
@@ -825,12 +829,7 @@ where
             y_min = y_max / 1e4;
         }
 
-        let plot_rect = Rectangle {
-            x: insets.left,
-            y: insets.top,
-            width: (size.width - insets.left - insets.right).max(0.0),
-            height: (size.height - insets.top - insets.bottom).max(0.0),
-        };
+        let plot_rect = content_rect(size, insets);
 
         let domain = Domain {
             x: Range { min: x_min, max: x_max },
@@ -984,7 +983,7 @@ where
         state.secondary_domain = secondary_domain;
         state.content_rect = plot_rect;
 
-        Node::with_children(size, vec![content_node(plot_rect)])
+        tree.size = size;
     }
 
     /// Draws major and minor gridlines into the plot area.
@@ -999,7 +998,7 @@ where
         tree: &crate::core::widget::Tree,
         renderer: &mut Renderer,
         design: &D,
-        layout: crate::core::Layout<'_>,
+        layout: crate::core::Layout,
         x_axis: Option<&crate::data::Axis>,
         y_axis: Option<&crate::data::Axis>,
         x_ticks: &[f64],
@@ -1013,10 +1012,9 @@ where
         let Some(domain) = state.domain.as_ref() else {
             return;
         };
-        // The cached `content_rect` mirrors the content node and equals the
-        // data-mapping region these tick conversions target; reading it here
-        // (rather than descending `layout.children()`) keeps gridlines on the
-        // same rect the marks baked their pixels into.
+        // The cached `content_rect` is the data-mapping region these tick
+        // conversions target; reading it here keeps gridlines on the same
+        // rect the marks baked their pixels into.
         let rect = state.content_rect;
 
         let layout_bounds = layout.bounds();
@@ -1182,7 +1180,7 @@ where
         tree: &crate::core::widget::Tree,
         renderer: &mut Renderer,
         design: &D,
-        layout: crate::core::Layout<'_>,
+        layout: crate::core::Layout,
         bottom_axis: Option<&crate::data::Axis>,
         left_axis: Option<&crate::data::Axis>,
         top_axis: Option<&crate::data::Axis>,
@@ -1196,10 +1194,9 @@ where
         let Some(_domain) = state.domain.as_ref() else {
             return;
         };
-        // The cached `content_rect` mirrors the content node and equals the
-        // data extent the border lines bracket; reading it here keeps the
-        // borders coincident with the extreme gridlines (which read the
-        // same rect in `draw_gridlines`).
+        // The cached `content_rect` is the data extent the border lines
+        // bracket; reading it here keeps the borders coincident with the
+        // extreme gridlines (which read the same rect in `draw_gridlines`).
         let rect = state.content_rect;
 
         let layout_bounds = layout.bounds();
@@ -1307,7 +1304,7 @@ where
         tree: &crate::core::widget::Tree,
         renderer: &mut Renderer,
         design: &D,
-        plot_layout: crate::core::Layout<'_>,
+        plot_layout: crate::core::Layout,
         strip_rects: &std::collections::HashMap<usize, crate::core::Rectangle>,
     ) where
         D: crate::design::Design + ?Sized,
@@ -1331,7 +1328,7 @@ where
         renderer: &mut Renderer,
         design: &D,
         style: &crate::core::renderer::Style,
-        layout: crate::core::Layout<'_>,
+        layout: crate::core::Layout,
         cursor: crate::core::mouse::Cursor,
         viewport: &crate::core::Rectangle,
         palette: &crate::palette::Resolved,
@@ -1567,42 +1564,33 @@ mod tests {
     use super::*;
     use crate::core::Size;
 
-    /// The inset data-mapping rect in plot-local coordinates, as built in
-    /// [`PlotArea::layout`]. Mirrors the `plot_rect` formula so the test
-    /// asserts the content node against the value layout actually uses.
-    fn plot_rect(size: Size, left: f32, right: f32, top: f32, bottom: f32) -> Rectangle {
-        Rectangle {
-            x: left,
-            y: top,
-            width: (size.width - left - right).max(0.0),
-            height: (size.height - top - bottom).max(0.0),
+    fn insets(left: f32, right: f32, top: f32, bottom: f32) -> Insets {
+        Insets {
+            left,
+            right,
+            top,
+            bottom,
         }
     }
 
     #[test]
-    fn content_node_bounds_equal_inset_rect() {
+    fn content_rect_sits_at_inset_corner() {
         let size = Size::new(800.0, 600.0);
-        let rect = plot_rect(size, 48.0, 12.0, 8.0, 40.0);
-
-        let bounds = content_node(rect).bounds();
+        let rect = content_rect(size, insets(48.0, 12.0, 8.0, 40.0));
 
         // Plot-local origin sits at the inset corner, not the plot origin.
-        assert_eq!(bounds.x, rect.x);
-        assert_eq!(bounds.y, rect.y);
-        assert_eq!(bounds.width, rect.width);
-        assert_eq!(bounds.height, rect.height);
+        assert_eq!(rect.x, 48.0);
+        assert_eq!(rect.y, 8.0);
+        assert_eq!(rect.width, 800.0 - 48.0 - 12.0);
+        assert_eq!(rect.height, 600.0 - 8.0 - 40.0);
     }
 
     #[test]
-    fn content_node_clamps_oversized_insets() {
+    fn content_rect_clamps_oversized_insets() {
         let size = Size::new(100.0, 100.0);
         // Insets exceeding the plot collapse the rect to zero, never negative.
-        let rect = plot_rect(size, 80.0, 80.0, 70.0, 70.0);
+        let rect = content_rect(size, insets(80.0, 80.0, 70.0, 70.0));
         assert_eq!(rect.width, 0.0);
         assert_eq!(rect.height, 0.0);
-
-        let bounds = content_node(rect).bounds();
-        assert_eq!(bounds.width, 0.0);
-        assert_eq!(bounds.height, 0.0);
     }
 }

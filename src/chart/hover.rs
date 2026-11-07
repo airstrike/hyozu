@@ -193,9 +193,13 @@ pub struct Annotation<'a, Message, Theme = crate::core::Theme> {
 impl<'a, Message, Theme> Annotation<'a, Message, Theme> {
     /// Wraps `content` in an annotation with default chrome
     /// (cursor-following, 8px padding, 8px gap, viewport-snapped).
-    pub fn new(content: impl Into<crate::core::Element<'a, Message, Theme, crate::widget::Renderer>>) -> Self {
+    pub fn new(content: impl crate::core::Widget<Message, Theme, crate::widget::Renderer> + 'a) -> Self {
+        Self::with_element(crate::widget::Widget::boxed(content))
+    }
+
+    fn with_element(content: crate::core::Element<'a, Message, Theme, crate::widget::Renderer>) -> Self {
         Self {
-            content: content.into(),
+            content,
             position: Position::default(),
             padding: crate::core::Padding::new(8.0),
             gap: 8.0,
@@ -236,7 +240,7 @@ impl<'a, Message, Theme> From<crate::core::Element<'a, Message, Theme, crate::wi
     for Annotation<'a, Message, Theme>
 {
     fn from(element: crate::core::Element<'a, Message, Theme, crate::widget::Renderer>) -> Self {
-        Annotation::new(element)
+        Annotation::with_element(element)
     }
 }
 
@@ -280,7 +284,8 @@ mod tests {
 
     #[test]
     fn annotation_from_element() {
-        let element: crate::core::Element<'_, (), Theme, crate::widget::Renderer> = text("x").into();
+        let element: crate::core::Element<'_, (), Theme, crate::widget::Renderer> =
+            crate::widget::Widget::boxed(text("x"));
         let a: Annotation<'_, (), Theme> = element.into();
         assert_eq!(a.position, Position::FollowCursor);
     }

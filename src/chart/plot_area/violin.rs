@@ -1,6 +1,6 @@
 use super::{Domain, to_pixel};
 use crate::animation;
-use crate::core::layout::{Limits, Node};
+use crate::core::layout::Limits;
 use crate::core::widget::{Tree, tree};
 use crate::core::{Point, Size};
 use crate::data::Datum;
@@ -91,6 +91,7 @@ where
                 tick: animation::Tick::new(),
             }),
             children: Vec::new(),
+            ..Tree::empty()
         }
     }
 
@@ -107,13 +108,13 @@ where
         _limits: &Limits,
         domain: &Domain,
         rect: crate::core::Rectangle,
-    ) -> Node {
+    ) {
         let state = tree.state.downcast_mut::<State>();
 
         let num_entries = self.data.entries.len();
         if num_entries == 0 {
             state.entries.clear();
-            return Node::new(Size::ZERO);
+            return;
         }
 
         let total_width = rect.width;
@@ -180,8 +181,6 @@ where
                 box_layout,
             });
         }
-
-        Node::new(Size::ZERO)
     }
 
     /// Draws the violin chart
@@ -192,7 +191,7 @@ where
         renderer: &mut Renderer,
         theme: &Theme,
         _style: &crate::core::renderer::Style,
-        layout: crate::core::Layout<'_>,
+        layout: crate::core::Layout,
         _cursor: crate::core::mouse::Cursor,
         _viewport: &crate::core::Rectangle,
         color_offset: usize,

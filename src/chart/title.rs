@@ -1,4 +1,4 @@
-use crate::core::layout::{Limits, Node};
+use crate::core::layout::Limits;
 use crate::core::text::paragraph;
 use crate::core::widget::{Tree, tree};
 use crate::core::{Point, Size, text};
@@ -19,7 +19,7 @@ where
 pub struct Title<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: text::Renderer<Font = crate::core::Font>,
+    Renderer: text::Renderer,
 {
     text: &'a str,
     style: crate::text::Style,
@@ -29,7 +29,7 @@ where
 impl<'a, Message, Renderer> Title<'a, Message, Renderer>
 where
     Message: 'a,
-    Renderer: text::Renderer<Font = crate::core::Font>,
+    Renderer: text::Renderer,
 {
     /// Create a new Title borrowing text, with an optional style override.
     pub fn new(text: &'a str, style: crate::text::Style) -> Self {
@@ -48,6 +48,7 @@ where
                 paragraph: paragraph::Plain::default(),
             }),
             children: Vec::new(),
+            ..Tree::empty()
         }
     }
 
@@ -63,16 +64,16 @@ where
         renderer: &Renderer,
         limits: &Limits,
         design: Option<&dyn crate::design::Design>,
-    ) -> Node {
+    ) {
         let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
 
         // Resolve font/size before measurement: per-chart style wins, then the
         // design's `title_text()` default, then the renderer/library fallback
-        // (16px). On `None` this collapses to `renderer.default_font()` / 16.0,
+        // (16px). On `None` this collapses to `renderer.font()` / 16.0,
         // matching the historical default and the draw() path.
         let base_font = design
-            .map(|d| d.title_text().resolved_font(renderer.default_font()))
-            .unwrap_or_else(|| renderer.default_font());
+            .map(|d| d.title_text().resolved_font(renderer.font()))
+            .unwrap_or_else(|| renderer.font());
         let base_size = design.and_then(|d| d.title_text().size).map(|p| p.0).unwrap_or(16.0);
         let font = self.style.resolved_font(base_font);
         let size: crate::core::Pixels = self.style.resolved_size(base_size).into();
@@ -88,7 +89,7 @@ where
             shaping: text::Shaping::Basic,
             wrapping: text::Wrapping::None,
             ellipsis: text::Ellipsis::default(),
-            hint_factor: renderer.scale_factor(),
+            hint_factor: renderer.hint_factor(),
             font_features: Vec::new(),
             font_variations: Vec::new(),
             letter_spacing: Default::default(),
@@ -99,9 +100,7 @@ where
         let padding = 10.0; // Padding above and below title
 
         // Title takes full width, height is text height plus padding
-        let size = Size::new(limits.max().width, text_size.height + padding * 2.0);
-
-        Node::new(size)
+        tree.size = Size::new(limits.bounds().width, text_size.height + padding * 2.0);
     }
 
     /// Draws the title
@@ -112,7 +111,7 @@ where
         renderer: &mut Renderer,
         design: &D,
         _style: &crate::core::renderer::Style,
-        layout: crate::core::Layout<'_>,
+        layout: crate::core::Layout,
         _cursor: crate::core::mouse::Cursor,
         viewport: &crate::core::Rectangle,
     ) where
@@ -130,9 +129,7 @@ where
         // Resolve typography: per-chart style wins, then theme title default,
         // then the renderer/library fallback (16px).
         let title_default = design.title_text();
-        let font = self
-            .style
-            .resolved_font(title_default.resolved_font(renderer.default_font()));
+        let font = self.style.resolved_font(title_default.resolved_font(renderer.font()));
         let size: crate::core::Pixels = self.style.resolved_size(title_default.resolved_size(16.0)).into();
 
         // Draw title text centered at top with padding
@@ -150,7 +147,7 @@ where
                 shaping: crate::core::text::Shaping::Basic,
                 wrapping: crate::core::text::Wrapping::None,
                 ellipsis: crate::core::text::Ellipsis::default(),
-                hint_factor: renderer.scale_factor(),
+                hint_factor: renderer.hint_factor(),
                 font_features: Vec::new(),
                 font_variations: Vec::new(),
                 letter_spacing: Default::default(),
