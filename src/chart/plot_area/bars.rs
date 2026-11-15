@@ -866,11 +866,17 @@ where
         corners: crate::core::border::Radius,
         track: Option<crate::core::Color>,
         baseline_exposed: bool,
+        hidden_series: &std::collections::HashSet<String>,
     ) where
         Theme: crate::design::Design + ?Sized,
     {
         let state = tree.state.downcast_ref::<State<Renderer::Paragraph>>();
 
+        let hidden = |index: usize| {
+            self.data.series[index]
+                .name()
+                .is_some_and(|name| hidden_series.contains(name))
+        };
         let background = theme.background_color();
         let text_pair = theme.text_pair();
 
@@ -978,7 +984,10 @@ where
         if let Some(track_color) = track {
             let plot = state.plot_bounds;
             let track_path = Path::new(|builder| {
-                for rects in state.series_rects.iter() {
+                for (index, rects) in state.series_rects.iter().enumerate() {
+                    if hidden(index) {
+                        continue;
+                    }
                     for r in rects {
                         if !(r.x.is_finite() && r.y.is_finite() && r.width.is_finite() && r.height.is_finite()) {
                             continue;
@@ -1010,6 +1019,10 @@ where
 
         // Draw each series
         for (series_idx, (series, rects)) in self.data.series.iter().zip(animated_series_rects.iter()).enumerate() {
+            if hidden(series_idx) {
+                all_bar_colors.push(Vec::new());
+                continue;
+            }
             let round_this_series = max_end_radius > 0.0 && (!is_stacked || series_idx + 1 == total_series);
             // Determine base color for this series
             let base_color = if let Some(series_color) = series.color {
@@ -1229,6 +1242,9 @@ where
             };
 
             for (series_idx, rects) in state.series_rects.iter().enumerate() {
+                if hidden(series_idx) {
+                    continue;
+                }
                 for (bar_idx, rect) in rects.iter().enumerate() {
                     let rect_finite =
                         rect.x.is_finite() && rect.y.is_finite() && rect.width.is_finite() && rect.height.is_finite();

@@ -1412,6 +1412,7 @@ where
                         corners,
                         track,
                         baseline_exposed,
+                        hidden_series,
                     );
                     color_offset += bars.data.series.len();
                 }

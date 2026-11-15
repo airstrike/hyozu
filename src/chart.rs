@@ -1890,7 +1890,14 @@ where
             return;
         };
         let content_rect = plot_area_state.content_rect;
-        let plot_bounds = compute_plot_bounds(chart_bounds, self.padding, plot_area_offset, content_rect);
+        // Cached marks use coordinates relative to the full plot node.
+        // The data rectangle may be inset to leave room for axis labels.
+        let plot_bounds = compute_plot_bounds(
+            chart_bounds,
+            self.padding,
+            plot_area_offset,
+            Rectangle::with_size(self.scene.plot_area_size()),
+        );
 
         if state.focus_pending {
             state.focus_pending = false;
@@ -2279,7 +2286,7 @@ where
                     chart_bounds,
                     self.padding,
                     plot_area_offset,
-                    plot_area_state.content_rect,
+                    Rectangle::with_size(self.scene.plot_area_size()),
                 );
                 if cursor.is_over(plot_bounds) {
                     return mouse::Interaction::Crosshair;
@@ -3764,6 +3771,202 @@ mod tests {
             panic!("second series must resolve to Cartesian hover");
         };
         assert_eq!(entries, vec![(0, 0, 0), (0, 1, 0)]);
+    }
+
+    #[test]
+    fn inset_grouped_bars_hover_over_both_series_and_resolve_custom_entries() {
+        use crate::chart::plot_area::bars;
+        use crate::core::renderer::{Headless, Settings};
+        use crate::core::{Theme, shell, text};
+        use iced::futures::executor;
+        type Paragraph = <Renderer as text::Renderer>::Paragraph;
+
+        for numeric in [false, true] {
+            let renderer = executor::block_on(Renderer::new(Settings::default(), Some("tiny-skia")))
+                .expect("software renderer is available for headless tests");
+            let data = crate::data(
+                crate::bars([
+                    crate::bar([186, 305, 237, 73, 209, 214]).with_name("Desktop"),
+                    crate::bar([80, 200, 120, 190, 130, 140]).with_name("Mobile"),
+                ])
+                .data_labels(None),
+            )
+            .x_axis_labels(["Jan", "Feb", "Mar", "Apr", "May", "Jun"])
+            .y_axis(|axis| axis.none())
+            .x_axis(|axis| {
+                if numeric {
+                    axis.with_kind(crate::axis::Kind::Scalar).with_label_size(80)
+                } else {
+                    axis
+                }
+            });
+            let mut chart = chart::<(), Theme>(&data).padding([12, 18]).width(600).height(220);
+            let mut tree = Tree::new(&chart);
+            chart.diff(&mut tree);
+            chart.layout(
+                &mut tree,
+                &renderer,
+                &layout::Limits::new(Size::ZERO, Size::new(600.0, 220.0)),
+            );
+            let layout = Layout::new(tree.size).move_to((420.0, 200.0));
+            let plot_tree = &tree.children[0].children[6];
+            if numeric {
+                assert!(plot_tree.state.downcast_ref::<plot_area::State>().content_rect.x > 30.0);
+            }
+            let rects = plot_tree.children[0]
+                .state
+                .downcast_ref::<bars::State<Paragraph>>()
+                .series_rects
+                .clone();
+            let origin = Point::new(
+                layout.bounds().x + chart.padding.left + chart.scene.plot_area_offset().x,
+                layout.bounds().y + chart.padding.top + chart.scene.plot_area_offset().y,
+            );
+            let viewport = Rectangle::with_size(Size::new(1600.0, 1200.0));
+            for series in &rects {
+                for (category, rect) in series.iter().enumerate() {
+                    for fraction in [0.1, 0.5, 0.9] {
+                        let position =
+                            Point::new(origin.x + rect.x + rect.width * fraction, origin.y + rect.center_y());
+                        let plot_bounds = Rectangle::new(origin, chart.scene.plot_area_size());
+                        if !plot_bounds.contains(position) {
+                            continue;
+                        }
+                        let cursor = mouse::Cursor::Available(position);
+                        let mut bus = shell::Bus::new();
+                        let mut shell = Shell::new(&window::Headless, shell::Waker::noop(), &mut bus);
+                        chart.update(
+                            &mut tree,
+                            &Event::Mouse(mouse::Event::CursorMoved { position }),
+                            layout,
+                            cursor,
+                            &renderer,
+                            &mut shell,
+                            &viewport,
+                        );
+                        let geometry = tree
+                            .state
+                            .downcast_ref::<State>()
+                            .hover
+                            .as_ref()
+                            .expect("every visible bar responds to hover");
+                        let hover::Geometry::Cartesian { data_x, entries } = geometry else {
+                            panic!("Cartesian bars")
+                        };
+                        assert_eq!(*data_x, category as f64);
+                        assert_eq!(*entries, vec![(0, 0, category), (0, 1, category)]);
+                        let entry =
+                            build_hover_entry(geometry, chart.scene.plot_area(), &tree.children[0].children[6], None)
+                                .expect("custom tooltip entry");
+                        let hover::Entry::Cartesian { point_idx, x, y, .. } = entry else {
+                            panic!("Cartesian custom entry")
+                        };
+                        assert_eq!(point_idx, category);
+                        assert_eq!(x, category as f64);
+                        assert_eq!(y, [186.0, 305.0, 237.0, 73.0, 209.0, 214.0][category]);
+                        assert_eq!(
+                            chart.mouse_interaction(&tree, layout, cursor, &viewport, &renderer),
+                            mouse::Interaction::Crosshair
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn grouped_legend_toggle_hides_and_restores_only_its_bars() {
+        use crate::chart::plot_area::bars;
+        use crate::core::renderer::{Headless, Settings, Style};
+        use crate::core::{Color, Renderer as _, Theme, shell, text};
+        use iced::futures::executor;
+        type Paragraph = <Renderer as text::Renderer>::Paragraph;
+
+        let mut renderer = executor::block_on(Renderer::new(Settings::default(), Some("tiny-skia")))
+            .expect("software renderer is available for headless tests");
+        let data = crate::data(
+            crate::bars([
+                crate::bar([186, 305]).with_name("Desktop"),
+                crate::bar([80, 200]).with_name("Mobile"),
+            ])
+            .data_labels(None),
+        )
+        .animate(false)
+        .legend(crate::legend::Config::below().interactive(true));
+        let mut chart = chart::<(), Theme>(&data).width(600).height(220);
+        let mut tree = Tree::new(&chart);
+        chart.diff(&mut tree);
+        chart.layout(
+            &mut tree,
+            &renderer,
+            &layout::Limits::new(Size::ZERO, Size::new(600.0, 220.0)),
+        );
+        let layout = Layout::new(tree.size);
+        let viewport = Rectangle::with_size(Size::new(600.0, 220.0));
+        let plot = chart.scene.plot_area_offset();
+        let centers: Vec<_> = tree.children[0].children[6].children[0]
+            .state
+            .downcast_ref::<bars::State<Paragraph>>()
+            .series_rects
+            .iter()
+            .map(|rects| {
+                let center = rects[0].center();
+                Point::new(
+                    chart.padding.left + plot.x + center.x,
+                    chart.padding.top + plot.y + center.y,
+                )
+            })
+            .collect();
+        let legend = chart.scene.legend_bounds().expect("legend bounds");
+        let entry = tree.children[0].children[1]
+            .state
+            .downcast_ref::<legend::State<Paragraph>>()
+            .entry_rects[0]
+            .expect("Desktop legend");
+        let cursor = mouse::Cursor::Available(Point::new(
+            chart.padding.left + legend.x + entry.center_x(),
+            chart.padding.top + legend.y + entry.center_y(),
+        ));
+        assert_eq!(chart.legend_entry_at(&tree, layout, cursor), Some(0));
+        let mut frames = Vec::new();
+        for step in 0..3 {
+            if step > 0 {
+                let mut bus = shell::Bus::new();
+                let mut shell = Shell::new(&window::Headless, shell::Waker::noop(), &mut bus);
+                chart.update(
+                    &mut tree,
+                    &Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+                    layout,
+                    cursor,
+                    &renderer,
+                    &mut shell,
+                    &viewport,
+                );
+            }
+            renderer.reset(viewport);
+            chart.draw(
+                &tree,
+                &mut renderer,
+                &Theme::Light,
+                &Style::default(),
+                layout,
+                mouse::Cursor::Unavailable,
+                &viewport,
+            );
+            let pixels = renderer.screenshot(Size::new(600, 220), 1.0, Color::WHITE);
+            frames.push(
+                centers
+                    .iter()
+                    .map(|point| {
+                        let offset = (point.y as usize * 600 + point.x as usize) * 4;
+                        pixels[offset..offset + 4].to_vec()
+                    })
+                    .collect::<Vec<_>>(),
+            );
+        }
+        assert_ne!(frames[0][0], frames[1][0], "Desktop disappears");
+        assert_eq!(frames[0][1], frames[1][1], "Mobile keeps its palette and position");
+        assert_eq!(frames[0], frames[2], "second click restores both series");
     }
 
     #[test]
