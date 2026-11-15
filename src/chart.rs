@@ -90,7 +90,9 @@ struct State {
     selected: Option<usize>,
     hover: Option<hover::Geometry>,
     /// Last cursor position observed inside the chart's bounds, in
-    /// absolute screen coordinates. Updated alongside [`Self::hover`]
+    /// layout coordinates. Scrollable parents translate pointer events into
+    /// content space; overlay construction applies the inverse translation.
+    /// Updated alongside [`Self::hover`]
     /// during cursor-move handling and consumed by the annotation
     /// overlay for cursor-anchored positioning.
     last_cursor: Option<Point>,
@@ -2362,10 +2364,10 @@ where
         layout: Layout,
         renderer: &Renderer,
         _viewport: &Rectangle,
-        _translation: Vector,
+        translation: Vector,
         window: Size,
     ) -> Vec<overlay::Element<'b, Message, Theme, Renderer>> {
-        self.annotation_overlay(tree, layout, renderer, window)
+        self.annotation_overlay(tree, layout, renderer, translation, window)
             .into_iter()
             .collect()
     }
@@ -2383,12 +2385,13 @@ where
         tree: &'b mut Tree,
         layout: Layout,
         renderer: &Renderer,
+        translation: Vector,
         window: Size,
     ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
         if self.hover_fn.is_none() && self.hover_group_fn.is_none() {
             return None;
         }
-        let chart_bounds = layout.bounds();
+        let chart_bounds = layout.bounds() + translation;
         let scene_tree = &tree.children[0];
         let plot_state = scene_tree.children[6].state.downcast_ref::<plot_area::State>();
         let state = tree.state.downcast_mut::<State>();
@@ -2425,6 +2428,7 @@ where
         };
         let cursor = state
             .last_cursor
+            .map(|cursor| cursor + translation)
             .unwrap_or_else(|| Point::new(chart_bounds.center_x(), chart_bounds.center_y()));
         let annotation_tree = &mut state.annotation_tree;
         // Reconcile the persisted tree with this frame's element.
@@ -4191,7 +4195,7 @@ mod tests {
             );
             assert!(
                 chart
-                    .annotation_overlay(&mut tree, layout, &renderer, viewport.size())
+                    .annotation_overlay(&mut tree, layout, &renderer, Vector::ZERO, viewport.size())
                     .is_some()
             );
             let group = observed.borrow().last().expect("first hover before any draw").clone();
@@ -4236,7 +4240,7 @@ mod tests {
                 .insert("Desktop".into());
             assert!(
                 chart
-                    .annotation_overlay(&mut tree, layout, &renderer, viewport.size())
+                    .annotation_overlay(&mut tree, layout, &renderer, Vector::ZERO, viewport.size())
                     .is_some()
             );
             let group = observed.borrow().last().expect("visible group").clone();
@@ -4245,7 +4249,7 @@ mod tests {
             tree.state.downcast_mut::<State>().hidden_series.insert("Mobile".into());
             assert!(
                 chart
-                    .annotation_overlay(&mut tree, layout, &renderer, viewport.size())
+                    .annotation_overlay(&mut tree, layout, &renderer, Vector::ZERO, viewport.size())
                     .is_none()
             );
             assert!(
@@ -4281,13 +4285,80 @@ mod tests {
         let layout = Layout::new(tree.size);
         assert!(
             borrowed
-                .annotation_overlay(&mut tree, layout, &renderer, Size::new(600.0, 220.0))
+                .annotation_overlay(&mut tree, layout, &renderer, Vector::ZERO, Size::new(600.0, 220.0))
                 .is_some()
         );
         assert_eq!(
             observed.borrow().last().expect("borrowed design group").entries[0].color,
             desktop_colors[0]
         );
+    }
+
+    #[test]
+    fn annotation_overlay_applies_scroll_translation_once() {
+        use crate::core::renderer::{Headless, Settings};
+        use crate::core::{Color, Renderer as _, Theme};
+        use crate::widget::{Space, container};
+        use iced::futures::executor;
+        let mut renderer =
+            executor::block_on(Renderer::new(Settings::default(), Some("tiny-skia"))).expect("software renderer");
+        let data = crate::data(crate::bars([crate::bar([10, 20])]).data_labels(None));
+        let window = Size::new(800.0, 900.0);
+        let viewport = Rectangle::with_size(window);
+        for grouped in [false, true] {
+            let content = || {
+                hover::Annotation::new(
+                    container(Space::new().width(30).height(20))
+                        .style(|_| container::Style::default().background(Color::from_rgb(1.0, 0.0, 0.0))),
+                )
+                .transparent()
+                .padding(0)
+            };
+            let chart = chart::<(), Theme>(&data).width(400).height(220);
+            let mut chart = if grouped {
+                chart.hover_group(Theme::Light, |_| content())
+            } else {
+                chart.hover(|_| content())
+            };
+            let mut tree = Tree::new(&chart);
+            chart.diff(&mut tree);
+            chart.layout(&mut tree, &renderer, &layout::Limits::new(Size::ZERO, viewport.size()));
+            let layout = Layout::new(tree.size).move_to((100.0, 500.0));
+            let state = tree.state.downcast_mut::<State>();
+            state.hover = Some(hover::Geometry::Cartesian {
+                data_x: 0.0,
+                entries: vec![(0, 0, 0)],
+            });
+            // Scrollable delivers content-space cursor coordinates to update,
+            // and the inverse scroll offset separately when creating overlays.
+            state.last_cursor = Some(Point::new(180.0, 560.0));
+            let mut origins = Vec::new();
+            for translation in [Vector::ZERO, Vector::new(20.0, -300.0)] {
+                let overlays = chart.overlay(&mut tree, layout, &renderer, &viewport, translation, window);
+                renderer.reset(viewport);
+                overlays.first().expect("annotation").as_overlay().draw(
+                    &mut renderer,
+                    &Theme::Light,
+                    &Default::default(),
+                    mouse::Cursor::Unavailable,
+                );
+                let pixels = renderer.screenshot(Size::new(800, 900), 1.0, Color::WHITE);
+                let mut origin = Point::new(f32::INFINITY, f32::INFINITY);
+                for (index, pixel) in pixels.as_chunks::<4>().0.iter().enumerate() {
+                    if *pixel == [255, 0, 0, 255] {
+                        origin.x = origin.x.min((index % 800) as f32);
+                        origin.y = origin.y.min((index / 800) as f32);
+                    }
+                }
+                assert!(origin.x.is_finite(), "annotation content was drawn");
+                origins.push(origin);
+            }
+            assert_eq!(origins[1] - origins[0], Vector::new(20.0, -300.0));
+            assert!(
+                (origins[1].y - 260.0).abs() < 30.0,
+                "scrolled tooltip stays near the window-space cursor"
+            );
+        }
     }
 
     #[test]

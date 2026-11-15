@@ -68,6 +68,14 @@ impl Pair {
         Self { on_light, on_dark }
     }
 
+    fn for_background(self, background: crate::core::Color) -> crate::core::Color {
+        if crate::palette::is_dark_background(background) {
+            self.on_dark
+        } else {
+            self.on_light
+        }
+    }
+
     /// Resolve to the appropriate color based on contrast with the background.
     ///
     /// This is the core of the adaptive color system. It selects a color that provides
@@ -127,7 +135,7 @@ impl Pair {
     }
 }
 
-/// A color that can be a literal RGB value, an adaptive contrast value, or a
+/// A color that can be a literal RGB value, an explicit themed value, an adaptive contrast value, or a
 /// reference to a slot in the design system's [`PaletteSeed`].
 ///
 /// The semantic variants ([`Color::Primary`], [`Color::Secondary`],
@@ -139,9 +147,11 @@ impl Pair {
 pub enum Color {
     /// A fixed color that doesn't change.
     Fixed(crate::core::Color),
-    /// An adaptive color that picks between light/dark variants based on
-    /// background.  If None, uses the design system's default text pair.
+    /// An adaptive color that picks the better contrast against the background.
+    /// If None, uses the design system's default text pair.
     Contrast(Option<Pair>),
+    /// Select a light/dark value by background brightness, without maximizing contrast.
+    Themed(Pair),
     /// The design system's primary brand color. Resolved from
     /// [`PaletteSeed::primary`] at draw time.
     Primary,
@@ -185,9 +195,18 @@ impl Color {
         Self::Fixed(crate::core::Color::from_linear_rgba(r, g, b, a))
     }
 
-    /// Creates an adaptive color from a custom light/dark pair.
+    /// Creates a color that selects the better contrast from a custom pair.
     pub const fn contrast(on_light: crate::core::Color, on_dark: crate::core::Color) -> Self {
         Color::Contrast(Some(Pair::new(on_light, on_dark)))
+    }
+
+    /// Selects `on_light` for a light background and `on_dark` for a dark one.
+    ///
+    /// Use for surfaces such as muted category bands. Unlike [`Color::contrast`],
+    /// this preserves theme polarity instead of selecting the more contrasting color.
+    /// Palette generation classifies the seed background the same way.
+    pub const fn themed(on_light: crate::core::Color, on_dark: crate::core::Color) -> Self {
+        Color::Themed(Pair::new(on_light, on_dark))
     }
 
     /// Adaptive contrast using the design system's default text colors.
@@ -222,6 +241,7 @@ impl Color {
     ) -> crate::core::Color {
         match self {
             Color::Fixed(c) => c,
+            Color::Themed(pair) => pair.for_background(background),
             Color::Contrast(Some(pair)) => pair.resolve(background, fallback),
             Color::Contrast(None) => design_pair.resolve(background, fallback),
             Color::Primary => seed.primary,
@@ -242,10 +262,12 @@ impl Color {
     ///
     /// Adaptive [`Color::Contrast`] variants don't carry a single-hue
     /// interpretation in this context, so they fall back to
-    /// [`PaletteSeed::primary`].
+    /// [`PaletteSeed::primary`]. [`Color::Themed`] selects its value using
+    /// the seed background's brightness.
     pub fn resolve_seed(self, seed: &crate::palette::Seed) -> crate::core::Color {
         match self {
             Color::Fixed(c) => c,
+            Color::Themed(pair) => pair.for_background(seed.background),
             Color::Primary => seed.primary,
             Color::Secondary => seed.secondary,
             Color::Success => seed.success,
@@ -269,6 +291,10 @@ impl Color {
                 adjust_lightness_hcl(pair.on_light, true, 3.0),
                 adjust_lightness_hcl(pair.on_dark, true, 3.0),
             ))),
+            Color::Themed(pair) => Color::Themed(Pair::new(
+                adjust_lightness_hcl(pair.on_light, true, 3.0),
+                adjust_lightness_hcl(pair.on_dark, true, 3.0),
+            )),
             Color::Contrast(None) => Color::Contrast(None),
             Color::Primary | Color::Secondary | Color::Success | Color::Warning | Color::Danger => self,
         }
@@ -286,6 +312,10 @@ impl Color {
                 adjust_lightness_hcl(pair.on_light, false, 3.0),
                 adjust_lightness_hcl(pair.on_dark, false, 3.0),
             ))),
+            Color::Themed(pair) => Color::Themed(Pair::new(
+                adjust_lightness_hcl(pair.on_light, false, 3.0),
+                adjust_lightness_hcl(pair.on_dark, false, 3.0),
+            )),
             Color::Contrast(None) => Color::Contrast(None),
             Color::Primary | Color::Secondary | Color::Success | Color::Warning | Color::Danger => self,
         }
@@ -491,4 +521,39 @@ const fn hsl_to_rgb(h: f32, s: f32, l: f32, a: f32) -> crate::core::Color {
     };
 
     crate::core::Color::from_rgba(r + m, g + m, b + m, a)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Color, Pair};
+    use crate::Design;
+    use crate::core::{Theme, color};
+
+    #[test]
+    fn themed_surfaces_preserve_polarity_without_changing_contrast() {
+        let light = color!(0xf5f5f5);
+        let dark = color!(0x252525);
+        let pair = Pair::new(light, dark);
+        let themed = Color::themed(light, dark);
+        let contrast = Color::contrast(light, dark);
+        for (theme, expected, contrasting) in [(Theme::Light, light, dark), (Theme::Dark, dark, light)] {
+            let seed = Design::seed(&theme);
+            let background = theme.background_color();
+            assert_eq!(
+                themed.resolve(background, pair, &seed, Some(color!(0xff0000))),
+                expected
+            );
+            assert_eq!(themed.resolve_seed(&seed), expected);
+            assert_eq!(contrast.resolve(background, pair, &seed, None), contrasting);
+            assert_eq!(contrast.resolve_seed(&seed), seed.primary);
+            assert_eq!(
+                themed.crisp().resolve(background, pair, &seed, None),
+                Color::Fixed(expected).crisp().resolve(background, pair, &seed, None)
+            );
+            assert_eq!(
+                themed.faded().resolve(background, pair, &seed, None),
+                Color::Fixed(expected).faded().resolve(background, pair, &seed, None)
+            );
+        }
+    }
 }
