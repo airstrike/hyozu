@@ -466,6 +466,16 @@ impl Data {
         self
     }
 
+    /// Shows or hides hover tooltips. Enabling restores the default tooltip when absent.
+    pub fn show_tooltip(mut self, show: bool) -> Self {
+        if show {
+            self.tooltip.get_or_insert_with(tooltip::Tooltip::default);
+        } else {
+            self.tooltip = None;
+        }
+        self
+    }
+
     /// Sets the format closure for the value channel.
     ///
     /// Picks up at every site that reads a numeric value: legend value
@@ -903,6 +913,18 @@ impl Data {
 mod tests {
     use super::*;
     use crate::bars;
+
+    #[test]
+    fn tooltip_visibility_preserves_an_enabled_custom_formatter() {
+        let data = data(bars([1, 2]))
+            .tooltip(|_: &tooltip::TooltipEntry| "custom".into())
+            .show_tooltip(true);
+        assert!(!data.tooltip.as_ref().unwrap().format_is_default);
+        let data = data.show_tooltip(false);
+        assert!(data.tooltip.is_none());
+        let data = data.show_tooltip(true);
+        assert!(data.tooltip.as_ref().unwrap().format_is_default);
+    }
 
     #[test]
     fn test_data_from_mark() {

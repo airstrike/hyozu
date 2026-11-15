@@ -65,6 +65,11 @@ pub trait Design {
     /// Returns the color for axis lines and ticks.
     fn axis_color(&self) -> Color;
 
+    /// Returns the default text color for axis tick labels.
+    fn axis_label_color(&self) -> Color {
+        self.text_color()
+    }
+
     /// Returns the fill color for "in-scope feature with no entry"
     /// regions on data-driven maps (the choropleth's `Missing` state).
     ///
@@ -254,6 +259,10 @@ impl<T: Design> Design for &T {
 
     fn axis_color(&self) -> Color {
         (*self).axis_color()
+    }
+
+    fn axis_label_color(&self) -> Color {
+        (*self).axis_label_color()
     }
 
     fn missing_fill(&self) -> crate::core::Color {

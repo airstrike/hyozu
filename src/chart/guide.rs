@@ -1539,7 +1539,7 @@ where
         let label_color = self
             .axis
             .label_color()
-            .unwrap_or(design.text_color())
+            .unwrap_or_else(|| design.axis_label_color())
             .resolve(background, text_pair, &seed, None);
 
         // Get bounds for coordinate mapping

@@ -2,6 +2,7 @@ pub mod donut;
 pub mod guide;
 pub mod hover;
 pub mod legend;
+mod navigation;
 pub mod plot_area;
 pub mod scale_legend;
 mod scene;
@@ -11,11 +12,14 @@ pub mod value;
 use std::borrow::Cow;
 
 use crate::animation;
+use crate::core::keyboard::key::Named;
+use crate::core::keyboard::{self, Key};
 use crate::core::time::Instant;
+use crate::core::widget::operation::Focusable;
 use crate::core::widget::{self, Tree, tree};
 use crate::core::{
-    Element, Event, Layout, Length, Padding, Point, Rectangle, Shell, Size, Vector, Widget, layout, mouse, overlay,
-    window,
+    Element, Event, Layout, Length, Padding, Point, Rectangle, Shell, Size, Vector, Widget, border, layout, mouse,
+    overlay, touch, window,
 };
 use crate::data::tooltip::TooltipEntry;
 use crate::widget::Renderer;
@@ -30,6 +34,11 @@ const DEFAULT_PADDING: Padding = Padding::new(10.0);
 const LEGEND_HIT_PADDING: f32 = 2.0;
 
 /// Chart widget for displaying data visualizations.
+///
+/// Hover tooltips respond to mouse and touch input. Cartesian charts also
+/// participate in keyboard focus traversal: arrows move between categories,
+/// Home and End jump to the first and last category, and Escape dismisses
+/// the tooltip. Disable tooltips with [`Data::show_tooltip`].
 pub struct Chart<'a, Message, Design = crate::core::Theme, Theme = crate::core::Theme>
 where
     Design: design::Design + Clone,
@@ -73,6 +82,10 @@ pub enum Kind<'a, Message, Theme> {
 struct State {
     generation: u64,
     is_pressed: bool,
+    focused: bool,
+    focus_pending: bool,
+    navigation: Vec<Point>,
+    selected: Option<usize>,
     hover: Option<hover::Geometry>,
     /// Last cursor position observed inside the chart's bounds, in
     /// absolute screen coordinates. Updated alongside [`Self::hover`]
@@ -98,11 +111,32 @@ impl Default for State {
         Self {
             generation: 0,
             is_pressed: false,
+            focused: false,
+            focus_pending: false,
+            navigation: Vec::new(),
+            selected: None,
             hover: None,
             last_cursor: None,
             annotation_tree: Tree::empty(),
             hidden_series: std::collections::HashSet::new(),
         }
+    }
+}
+
+impl Focusable for State {
+    fn is_focused(&self) -> bool {
+        self.focused
+    }
+    fn focus(&mut self) {
+        self.focused = true;
+        self.focus_pending = true;
+    }
+    fn unfocus(&mut self) {
+        self.focused = false;
+        self.focus_pending = false;
+        self.selected = None;
+        self.hover = None;
+        self.last_cursor = None;
     }
 }
 
@@ -236,6 +270,17 @@ where
         self
     }
 
+    /// Sets the corner radii of bars, pie slices, and gauge arcs.
+    pub fn corners(mut self, corners: impl Into<border::Radius>) -> Self {
+        let corners = corners.into();
+        let style = self.style;
+        self.style = Box::new(move |design| Style {
+            corners,
+            ..style(design)
+        });
+        self
+    }
+
     /// Sets the inner hole radius for a donut chart, as a proportion
     /// of the outer radius.
     ///
@@ -294,6 +339,17 @@ fn compute_plot_bounds(
         y: chart_bounds.y + padding.top + plot_area_offset.y + content_rect.y,
         width: content_rect.width,
         height: content_rect.height,
+    }
+}
+
+fn pointer_cursor(event: &Event, cursor: mouse::Cursor) -> mouse::Cursor {
+    match event {
+        Event::Touch(
+            touch::Event::FingerPressed { position, .. }
+            | touch::Event::FingerMoved { position, .. }
+            | touch::Event::FingerLifted { position, .. },
+        ) => mouse::Cursor::Available(*position),
+        _ => cursor,
     }
 }
 
@@ -377,6 +433,7 @@ fn find_nearest_cartesian_hover<Message>(
 
     let mut best_dist = f32::INFINITY;
     let mut best_primary = 0.0f32;
+    let mut best_category = None;
 
     // Pass 1: find the globally nearest primary-axis coordinate. Treat
     // non-finite pixel points as gaps (NaN-as-gap policy) so a
@@ -395,6 +452,7 @@ fn find_nearest_cartesian_hover<Message>(
                 if d < best_dist {
                     best_dist = d;
                     best_primary = pt.x;
+                    best_category = None;
                 }
             }
         } else if !horizontal && child.tag == area_tag {
@@ -410,6 +468,7 @@ fn find_nearest_cartesian_hover<Message>(
                     if d < best_dist {
                         best_dist = d;
                         best_primary = pt.x;
+                        best_category = None;
                     }
                 }
             }
@@ -426,14 +485,15 @@ fn find_nearest_cartesian_hover<Message>(
                 if d < best_dist {
                     best_dist = d;
                     best_primary = pt.x;
+                    best_category = None;
                 }
             }
         } else if child.tag == bars_tag {
             let s = child
                 .state
                 .downcast_ref::<plot_area::bars::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
-            for rects in &s.series_rects {
-                for rect in rects {
+            for (series_index, rects) in s.series_rects.iter().enumerate() {
+                for (point_index, rect) in rects.iter().enumerate() {
                     if !rect_finite(rect) {
                         continue;
                     }
@@ -442,6 +502,12 @@ fn find_nearest_cartesian_hover<Message>(
                     if d < best_dist {
                         best_dist = d;
                         best_primary = primary;
+                        best_category = match &plot_area.series[mark_idx] {
+                            plot_area::Series::Bars(bars) => {
+                                bars.data.series[series_index].points.get(point_index).map(|p| p.x)
+                            }
+                            _ => None,
+                        };
                     }
                 }
             }
@@ -452,15 +518,17 @@ fn find_nearest_cartesian_hover<Message>(
         return None;
     }
 
-    // Snap threshold: 30px max distance
-    if best_dist > 30.0 {
+    // Continuous points use a 30px snap threshold; bars fill category bands.
+    if best_category.is_none() && best_dist > 30.0 {
         return None;
     }
 
     // `data_x` drives the tracking line (continuous marks only) and hover-
     // change detection. For horizontal bars the snap is along Y, so there is
     // no meaningful data-x; entries discriminate the hovered row.
-    let data_x = if horizontal {
+    let data_x = if let Some(category) = best_category {
+        category
+    } else if horizontal {
         0.0
     } else {
         plot_area::to_data_x(domain, content_rect, best_primary)
@@ -525,7 +593,14 @@ fn find_nearest_cartesian_hover<Message>(
                     if !rect_finite(rect) {
                         continue;
                     }
-                    if (bar_primary(rect) - best_primary).abs() <= bar_tolerance {
+                    let same_category = match (&plot_area.series[mark_idx], best_category) {
+                        (plot_area::Series::Bars(bars), Some(category)) => bars.data.series[ser_idx]
+                            .points
+                            .get(bar_idx)
+                            .is_some_and(|point| point.x == category),
+                        _ => (bar_primary(rect) - best_primary).abs() <= bar_tolerance,
+                    };
+                    if same_category {
                         entries.push((mark_idx, ser_idx, bar_idx));
                         break;
                     }
@@ -1596,6 +1671,8 @@ where
         // (the unplanted initial state).
         if state.generation != self.generation || tree.children.is_empty() {
             state.generation = self.generation;
+            state.hover = None;
+            state.selected = None;
             // Wholesale rebuild loses pie tree state, so snapshot the
             // previous slice angles per pie and replant them on the new
             // tree. The next sweep then interpolates from those instead
@@ -1698,7 +1775,32 @@ where
             );
         }
 
+        let state = tree.state.downcast_mut::<State>();
+        state.navigation = if self.scene.has_tooltip() {
+            navigation::targets(self.scene.plot_area(), &scene_tree.children[6])
+        } else {
+            Vec::new()
+        };
         tree.size = size;
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout,
+        viewport: &Rectangle,
+        renderer: &Renderer,
+        operation: &mut dyn widget::Operation,
+    ) {
+        if self.scene.has_tooltip() {
+            operation.focusable(None, layout.bounds(), tree.state.downcast_mut::<State>());
+        }
+        if let Kind::Donut(donut) = &mut self.kind
+            && let Some(center) = &mut donut.center
+            && let Some((layout, tree)) = layout.iter_mut(&mut tree.children).nth(1)
+        {
+            center.element.operate(tree, layout, viewport, renderer, operation);
+        }
     }
 
     fn update(
@@ -1711,6 +1813,8 @@ where
         shell: &mut crate::core::Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
+        let cursor = pointer_cursor(event, cursor);
+
         // Animation tick — independent of capture / tooltip / action so
         // mark sweeps run regardless of which widgets are listening.
         if let Event::Window(window::Event::RedrawRequested(now)) = event {
@@ -1746,12 +1850,16 @@ where
         // Handled before plot-area actions so legend clicks take priority
         // even if an action handler is attached.
         // Hit-test before borrowing widget State mutably below.
-        let legend_click =
-            if legend_interactive && matches!(event, Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))) {
-                self.legend_entry_at(tree, layout, cursor)
-            } else {
-                None
-            };
+        let legend_click = if legend_interactive
+            && matches!(
+                event,
+                Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+                    | Event::Touch(touch::Event::FingerLifted { .. })
+            ) {
+            self.legend_entry_at(tree, layout, cursor)
+        } else {
+            None
+        };
 
         let state = tree.state.downcast_mut::<State>();
 
@@ -1784,41 +1892,99 @@ where
         let content_rect = plot_area_state.content_rect;
         let plot_bounds = compute_plot_bounds(chart_bounds, self.padding, plot_area_offset, content_rect);
 
+        if state.focus_pending {
+            state.focus_pending = false;
+            if let Some(&local) = state.navigation.first() {
+                state.selected = Some(0);
+                state.hover = find_nearest_cartesian_hover(
+                    local,
+                    &scene_tree.children[6],
+                    self.scene.plot_area(),
+                    domain,
+                    content_rect,
+                );
+                state.last_cursor = Some(Point::new(plot_bounds.x + local.x, plot_bounds.y + local.y));
+                shell.request_redraw();
+            }
+        }
+
+        if matches!(
+            event,
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+                | Event::Touch(touch::Event::FingerPressed { .. })
+        ) {
+            state.focused = has_tooltip && cursor.is_over(plot_bounds) && cursor.is_over(*viewport);
+            state.selected = None;
+        }
+
         match event {
-            // === HOVER HANDLING ===
-            Event::Mouse(mouse::Event::CursorMoved { .. }) => match cursor.position_in(plot_bounds) {
-                Some(local) => {
-                    let plot_area_tree = &scene_tree.children[6];
-                    let new_hover = find_nearest_hover(
-                        Point::new(local.x, local.y),
-                        plot_area_tree,
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: Key::Named(key), ..
+            }) if state.focused => {
+                if *key == Named::Escape {
+                    state.hover = None;
+                    state.selected = None;
+                    state.last_cursor = None;
+                } else if let Some(index) = navigation::step(*key, state.selected, state.navigation.len()) {
+                    let local = state.navigation[index];
+                    state.selected = Some(index);
+                    state.hover = find_nearest_cartesian_hover(
+                        local,
+                        &scene_tree.children[6],
                         self.scene.plot_area(),
                         domain,
                         content_rect,
-                        plot_area_state.geo_plane.as_ref(),
                     );
+                    state.last_cursor = Some(Point::new(plot_bounds.x + local.x, plot_bounds.y + local.y));
+                } else {
+                    return;
+                }
+                shell.capture_event();
+                shell.request_redraw();
+            }
+            // === HOVER HANDLING ===
+            Event::Mouse(mouse::Event::CursorMoved { .. })
+            | Event::Touch(touch::Event::FingerPressed { .. } | touch::Event::FingerMoved { .. }) => {
+                match cursor.position_in(plot_bounds).filter(|_| cursor.is_over(*viewport)) {
+                    Some(local) => {
+                        let plot_area_tree = &scene_tree.children[6];
+                        let new_hover = find_nearest_hover(
+                            Point::new(local.x, local.y),
+                            plot_area_tree,
+                            self.scene.plot_area(),
+                            domain,
+                            content_rect,
+                            plot_area_state.geo_plane.as_ref(),
+                        );
 
-                    // `data_x` is snapped to a discrete pixel-x of an actual data
-                    // point and projected through a deterministic plane, so
-                    // identical hovered points produce identical f64 bits — exact
-                    // equality is sufficient (no need for an epsilon shim).
-                    let changed = state.hover != new_hover;
+                        // `data_x` is snapped to a discrete pixel-x of an actual data
+                        // point and projected through a deterministic plane, so
+                        // identical hovered points produce identical f64 bits — exact
+                        // equality is sufficient (no need for an epsilon shim).
+                        let changed = state.hover != new_hover;
 
-                    state.hover = new_hover;
-                    state.last_cursor = cursor.position();
-                    if changed {
-                        shell.request_redraw();
+                        state.hover = new_hover;
+                        state.selected = None;
+                        if matches!(event, Event::Touch(_)) {
+                            state.is_pressed = has_action;
+                            shell.capture_event();
+                        }
+                        state.last_cursor = cursor.position();
+                        if changed {
+                            shell.request_redraw();
+                        }
+                    }
+                    None => {
+                        if state.hover.is_some() {
+                            state.hover = None;
+                            state.last_cursor = None;
+                            shell.request_redraw();
+                        }
                     }
                 }
-                None => {
-                    if state.hover.is_some() {
-                        state.hover = None;
-                        state.last_cursor = None;
-                        shell.request_redraw();
-                    }
-                }
-            },
-            Event::Mouse(mouse::Event::CursorLeft) if state.hover.is_some() => {
+            }
+            Event::Mouse(mouse::Event::CursorLeft) | Event::Touch(touch::Event::FingerLost { .. }) => {
+                state.is_pressed = false;
                 state.hover = None;
                 state.last_cursor = None;
                 shell.request_redraw();
@@ -1831,8 +1997,13 @@ where
                 state.is_pressed = true;
                 shell.capture_event();
             }
-            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) if has_action => {
-                let on_action = self.on_action.as_ref().unwrap();
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+            | Event::Touch(touch::Event::FingerLifted { .. })
+                if has_action =>
+            {
+                let Some(on_action) = self.on_action.as_ref() else {
+                    return;
+                };
 
                 if state.is_pressed {
                     state.is_pressed = false;
@@ -3549,6 +3720,91 @@ pub fn filled(design: &dyn design::Design) -> Style {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn grouped_bars_hover_and_keyboard_targets_share_categories() {
+        use crate::chart::plot_area::{Domain, PlotArea, Range, bars};
+        use crate::core::text;
+        type Paragraph = <Renderer as text::Renderer>::Paragraph;
+
+        let marks = [crate::bars([crate::bar([(0, 10), (1, 20)]), crate::bar([(0, 30), (1, 40)])]).into()];
+        let plot: PlotArea<'_, (), Renderer> = PlotArea::new(&marks);
+        let mut tree = plot.state();
+        let state = tree.children[0].state.downcast_mut::<bars::State<Paragraph>>();
+        state.series_rects = vec![
+            vec![
+                Rectangle::new(Point::new(10.0, 10.0), Size::new(20.0, 90.0)),
+                Rectangle::new(Point::new(110.0, 20.0), Size::new(20.0, 80.0)),
+            ],
+            vec![
+                Rectangle::new(Point::new(40.0, 30.0), Size::new(20.0, 70.0)),
+                Rectangle::new(Point::new(140.0, 40.0), Size::new(20.0, 60.0)),
+            ],
+        ];
+        let domain = Domain {
+            x: Range { min: 0.0, max: 1.0 },
+            y: Range { min: 0.0, max: 40.0 },
+            y_transform: crate::Transform::default(),
+        };
+        let rect = Rectangle::with_size(Size::new(200.0, 100.0));
+        let targets = navigation::targets(&plot, &tree);
+        assert_eq!(targets.len(), 2, "one keyboard stop per category, not per series");
+        for (index, target) in targets.into_iter().enumerate() {
+            let Some(hover::Geometry::Cartesian { data_x, entries }) =
+                find_nearest_cartesian_hover(target, &tree, &plot, &domain, rect)
+            else {
+                panic!("keyboard target must resolve to Cartesian hover");
+            };
+            assert_eq!(data_x, index as f64);
+            assert_eq!(entries, vec![(0, 0, index), (0, 1, index)]);
+        }
+        let Some(hover::Geometry::Cartesian { entries, .. }) =
+            find_nearest_cartesian_hover(Point::new(50.0, 35.0), &tree, &plot, &domain, rect)
+        else {
+            panic!("second series must resolve to Cartesian hover");
+        };
+        assert_eq!(entries, vec![(0, 0, 0), (0, 1, 0)]);
+    }
+
+    #[test]
+    fn touch_positions_drive_hover_without_a_mouse_cursor() {
+        let point = Point::new(45.0, 70.0);
+        for event in [
+            touch::Event::FingerPressed {
+                id: touch::Finger(1),
+                position: point,
+            },
+            touch::Event::FingerMoved {
+                id: touch::Finger(1),
+                position: point,
+            },
+            touch::Event::FingerLifted {
+                id: touch::Finger(1),
+                position: point,
+            },
+        ] {
+            assert_eq!(
+                pointer_cursor(&Event::Touch(event), mouse::Cursor::Unavailable).position(),
+                Some(point)
+            );
+        }
+    }
+
+    #[test]
+    fn unfocusing_clears_keyboard_and_hover_state() {
+        let mut state = State::default();
+        state.focus();
+        state.selected = Some(0);
+        state.hover = Some(hover::Geometry::Cartesian {
+            data_x: 0.0,
+            entries: vec![(0, 0, 0)],
+        });
+        assert!(state.is_focused());
+        state.unfocus();
+        assert!(!state.is_focused());
+        assert!(state.selected.is_none());
+        assert!(state.hover.is_none());
+    }
 
     #[test]
     fn geo_point_feature_target_requires_geo_xy_with_id() {
