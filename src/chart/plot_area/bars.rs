@@ -423,14 +423,13 @@ where
                         series
                             .points
                             .iter()
-                            .enumerate()
-                            .map(|(bin_idx, point)| {
+                            .map(|point| {
                                 let pixel_point = to_pixel(domain, rect, *point);
                                 let bar_height = (zero_y - pixel_point.y).abs();
 
                                 // Use plane to transform data coordinate to pixel
                                 // For grouped layout, position bars within the group with spacing
-                                let bar_center_x = to_pixel(domain, rect, Datum::x(bin_idx as f64)).x;
+                                let bar_center_x = to_pixel(domain, rect, Datum::x(point.x)).x;
                                 let total_group_width = bin_width * bar_length;
                                 let group_start = bar_center_x - total_group_width / 2.0;
                                 let x = group_start + visual_series_idx as f32 * (bar_width + spacing_px);
@@ -468,7 +467,7 @@ where
                                 cumulative_tops[bin_idx] = y;
 
                                 // Use plane to transform data coordinate to pixel
-                                let bar_center_x = to_pixel(domain, rect, Datum::x(bin_idx as f64)).x;
+                                let bar_center_x = to_pixel(domain, rect, Datum::x(point.x)).x;
                                 let x = bar_center_x - bar_width / 2.0;
 
                                 Rectangle {
@@ -501,13 +500,12 @@ where
                         series
                             .points
                             .iter()
-                            .enumerate()
-                            .map(|(bin_idx, point)| {
+                            .map(|point| {
                                 let pixel_point = to_pixel(domain, rect, *point);
                                 let bar_height = (zero_y - pixel_point.y).abs();
 
                                 // Use plane to transform data coordinate to pixel
-                                let bar_center_x = to_pixel(domain, rect, Datum::x(bin_idx as f64)).x;
+                                let bar_center_x = to_pixel(domain, rect, Datum::x(point.x)).x;
                                 let x = bar_center_x - bar_width / 2.0;
 
                                 Rectangle {
@@ -564,15 +562,14 @@ where
                         series
                             .points
                             .iter()
-                            .enumerate()
-                            .map(|(bin_idx, point)| {
+                            .map(|point| {
                                 // point.x = category index, point.y = value
                                 let value_x = to_pixel(domain, rect, Datum::new(point.y, 0.0)).x;
                                 let bar_width = (value_x - zero_x).abs();
                                 let x = value_x.min(zero_x);
 
                                 // Position category along y-axis
-                                let bar_center_y = to_pixel(domain, rect, Datum::new(0.0, bin_idx as f64)).y;
+                                let bar_center_y = to_pixel(domain, rect, Datum::new(0.0, point.x)).y;
                                 let total_group_height = bin_height * bar_length;
                                 let group_start = bar_center_y - total_group_height / 2.0;
                                 let y = group_start + visual_series_idx as f32 * (bar_height + spacing_px);
@@ -608,7 +605,7 @@ where
                                 let x = cumulative_rights[bin_idx];
                                 cumulative_rights[bin_idx] = x + bar_width;
 
-                                let bar_center_y = to_pixel(domain, rect, Datum::new(0.0, bin_idx as f64)).y;
+                                let bar_center_y = to_pixel(domain, rect, Datum::new(0.0, point.x)).y;
                                 let y = bar_center_y - bar_height / 2.0;
 
                                 Rectangle {
@@ -640,13 +637,12 @@ where
                         series
                             .points
                             .iter()
-                            .enumerate()
-                            .map(|(bin_idx, point)| {
+                            .map(|point| {
                                 let value_x = to_pixel(domain, rect, Datum::new(point.y, 0.0)).x;
                                 let bar_width = (value_x - zero_x).abs();
                                 let x = value_x.min(zero_x);
 
-                                let bar_center_y = to_pixel(domain, rect, Datum::new(0.0, bin_idx as f64)).y;
+                                let bar_center_y = to_pixel(domain, rect, Datum::new(0.0, point.x)).y;
                                 let y = bar_center_y - bar_height / 2.0;
 
                                 Rectangle {

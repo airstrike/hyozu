@@ -58,6 +58,8 @@ pub struct Tooltip {
     pub(crate) colored_text: bool,
     /// Whether to show a vertical tracking line at the cursor x position.
     pub(crate) tracking_line: bool,
+    /// Optional category-wide background behind hovered bars.
+    pub(crate) category_band: Option<crate::color::Color>,
     /// Whether to show hover annotations at matched data points
     /// (e.g. circle markers on lines).
     pub(crate) markers: bool,
@@ -70,6 +72,7 @@ impl std::fmt::Debug for Tooltip {
             .field("swatch", &self.swatch)
             .field("colored_text", &self.colored_text)
             .field("tracking_line", &self.tracking_line)
+            .field("category_band", &self.category_band)
             .field("markers", &self.markers)
             .finish()
     }
@@ -97,6 +100,7 @@ impl Default for Tooltip {
             swatch: true,
             colored_text: false,
             tracking_line: true,
+            category_band: None,
             markers: true,
         }
     }
@@ -132,6 +136,15 @@ impl Tooltip {
     /// Set whether to show a vertical tracking line.
     pub fn tracking_line(mut self, show: bool) -> Self {
         self.tracking_line = show;
+        self
+    }
+
+    /// Paint a category-wide background behind hovered bars.
+    ///
+    /// Applies to grouped, stacked, and overlaid bars in either direction.
+    /// The color resolves against the current design. Disabled by default.
+    pub fn category_band(mut self, color: impl Into<crate::color::Color>) -> Self {
+        self.category_band = Some(color.into());
         self
     }
 

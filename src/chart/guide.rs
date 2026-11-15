@@ -683,15 +683,15 @@ where
         // When no custom format is provided, use step-derived precision
         // so that floating-point noise is hidden (e.g. 0.6 not 0.600000001).
         let format_label = |pos: f64| -> String {
-            if let Some(ref labels) = self.axis.labels.values {
+            if let Some(ref format_fn) = self.axis.labels.format {
+                format_fn(pos)
+            } else if let Some(ref labels) = self.axis.labels.values {
                 let index = pos.round() as usize;
                 if index < labels.len() {
                     labels[index].clone()
                 } else {
                     format_with_precision(pos, step_precision)
                 }
-            } else if let Some(ref format_fn) = self.axis.labels.format {
-                format_fn(pos)
             } else if let Some(interval) = time_interval {
                 interval.format(pos as i64)
             } else {

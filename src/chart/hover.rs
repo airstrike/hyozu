@@ -155,6 +155,20 @@ pub enum Entry<'a> {
     },
 }
 
+/// Resolved visible Cartesian entries at one hovered x coordinate.
+///
+/// Produced by [`crate::Chart::hover_group`] using the chart's design and
+/// native palette/point-color precedence. Hidden legend series are omitted.
+#[derive(Debug, Clone)]
+pub struct Group {
+    pub x: f64,
+    /// Category label or axis-formatted coordinate, without display truncation.
+    pub label: String,
+    pub entries: Vec<crate::data::tooltip::TooltipEntry>,
+}
+
+pub(crate) type GroupFn<'a, Message, Theme> = Box<dyn Fn(&Group) -> Annotation<'a, Message, Theme> + 'a>;
+
 /// Where the annotation positions itself relative to its anchor.
 ///
 /// `FollowCursor` matches the existing tooltip-box behavior — the
@@ -185,6 +199,7 @@ pub enum Position {
 pub struct Annotation<'a, Message, Theme = crate::core::Theme> {
     pub(crate) content: crate::core::Element<'a, Message, Theme, crate::widget::Renderer>,
     pub(crate) position: Position,
+    pub(crate) transparent: bool,
     pub(crate) padding: crate::core::Padding,
     pub(crate) gap: f32,
     pub(crate) snap_within_viewport: bool,
@@ -201,10 +216,18 @@ impl<'a, Message, Theme> Annotation<'a, Message, Theme> {
         Self {
             content,
             position: Position::default(),
+            transparent: false,
             padding: crate::core::Padding::new(8.0),
             gap: 8.0,
             snap_within_viewport: true,
         }
+    }
+
+    /// Let the content own its surface, omitting the native background and border.
+    /// Positioning, padding and viewport snapping are unchanged.
+    pub fn transparent(mut self) -> Self {
+        self.transparent = true;
+        self
     }
 
     /// Where the annotation sits relative to its anchor. Default

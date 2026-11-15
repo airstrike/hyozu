@@ -131,6 +131,25 @@ impl<'a, Message, Renderer> Scene<'a, Message, Renderer>
 where
     Renderer: text::Renderer + geometry::Renderer,
 {
+    /// Format the category independently of the axis label's visual truncation.
+    pub(super) fn category_label(&self, x: f64) -> String {
+        let horizontal = self.plot_area.series.iter().any(|series| {
+            matches!(series, super::plot_area::Series::Bars(bars)
+                if bars.data.direction == crate::mark::bar::Direction::Horizontal)
+        });
+        let guide = if horizontal { &self.left_axis } else { &self.bottom_axis };
+        if let Some(guide) = guide {
+            let labels = &guide.axis().labels;
+            if let Some(label) = labels.values.as_ref().and_then(|values| values.get(x.round() as usize)) {
+                return label.clone();
+            }
+            if let Some(format) = &labels.format {
+                return format(x);
+            }
+        }
+        crate::scale::default_f64_format(x)
+    }
+
     /// Returns tree state for Scene's 7 children (like Content::state)
     pub(super) fn state(&self) -> Tree {
         let children = vec![

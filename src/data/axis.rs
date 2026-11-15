@@ -294,6 +294,9 @@ impl Axis {
 
     /// Set custom labels for this axis.
     ///
+    /// An explicit formatter overrides displayed tick text even when category
+    /// values are set. Grouped hover retains the full category value as its label.
+    ///
     /// # Examples
     ///
     /// ```ignore

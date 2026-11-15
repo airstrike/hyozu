@@ -10,6 +10,7 @@ pub mod title;
 pub mod value;
 
 use std::borrow::Cow;
+use std::collections::HashSet;
 
 use crate::animation;
 use crate::core::keyboard::key::Named;
@@ -62,6 +63,7 @@ where
     /// as an overlay above the chart. When unset, the chart falls
     /// back to its built-in canvas-drawn tooltip box.
     hover_fn: Option<hover::HoverFn<'a, Message, Theme>>,
+    hover_group_fn: Option<hover::GroupFn<'a, Message, Theme>>,
     _theme: std::marker::PhantomData<Theme>,
 }
 
@@ -188,6 +190,7 @@ where
             kind: Kind::Generic,
             animate: data.animate,
             hover_fn: None,
+            hover_group_fn: None,
             _theme: std::marker::PhantomData,
         }
     }
@@ -212,7 +215,7 @@ where
 
     /// Sets a custom design for this chart, changing the Design type.
     ///
-    /// Accepts either a reference or an owned value.
+    /// Accepts a reference or a `Cow` containing an owned or borrowed design.
     /// If not set, the chart will use the application's theme.
     pub fn design<D: design::Design + Clone + 'a>(
         self,
@@ -230,6 +233,7 @@ where
             kind: self.kind,
             animate: self.animate,
             hover_fn: self.hover_fn,
+            hover_group_fn: self.hover_group_fn,
             _theme: std::marker::PhantomData,
         }
     }
@@ -261,7 +265,24 @@ where
         F: for<'b> Fn(&hover::Entry<'b>) -> hover::Annotation<'a, Message, Theme> + 'a,
     {
         self.hover_fn = Some(Box::new(f));
+        self.hover_group_fn = None;
         self
+    }
+
+    /// Composes a tooltip from all visible Cartesian entries at the hovered x.
+    ///
+    /// The owned or borrowed design also styles this chart. Supplying it here
+    /// lets the overlay resolve colors before the first draw, including after
+    /// a theme change. The last call to `hover` or `hover_group` takes precedence.
+    pub fn hover_group<D, F>(self, design: D, f: F) -> Chart<'a, Message, D, Theme>
+    where
+        D: design::Design + Clone + 'a,
+        F: Fn(&hover::Group) -> hover::Annotation<'a, Message, Theme> + 'a,
+    {
+        let mut chart = self.design(Cow::Owned(design));
+        chart.hover_fn = None;
+        chart.hover_group_fn = Some(Box::new(f));
+        chart
     }
 
     /// Sets the style of the [`Chart`].
@@ -1023,19 +1044,21 @@ where
             // content remains readable. The 1px border picks up the
             // theme's divider color, matching the canvas-drawn default
             // tooltip box for visual continuity.
-            let box_bg = crate::core::Color { a: 1.0, ..background };
-            renderer.fill_quad(
-                crate::core::renderer::Quad {
-                    bounds,
-                    border: crate::core::Border {
-                        width: 1.0,
-                        radius: 4.0.into(),
-                        color: divider_color,
+            if !self.annotation.transparent {
+                let box_bg = crate::core::Color { a: 1.0, ..background };
+                renderer.fill_quad(
+                    crate::core::renderer::Quad {
+                        bounds,
+                        border: crate::core::Border {
+                            width: 1.0,
+                            radius: 4.0.into(),
+                            color: divider_color,
+                        },
+                        ..Default::default()
                     },
-                    ..Default::default()
-                },
-                box_bg,
-            );
+                    box_bg,
+                );
+            }
 
             self.annotation.content.draw(
                 self.tree,
@@ -2181,6 +2204,8 @@ where
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
+        use crate::core::Renderer as _;
+
         // Get the design to use (explicit or from theme)
         let design: &dyn design::Design = match &self.design {
             Some(d) => d.as_ref(),
@@ -2199,18 +2224,52 @@ where
 
         let state = tree.state.downcast_ref::<State>();
 
-        self.scene.draw(
-            &tree.children[0],
-            renderer,
-            design,
-            defaults,
-            scene_layout,
-            cursor,
-            viewport,
-            &state.hidden_series,
-            style.corners,
-            style.track,
-        );
+        let band = self
+            .scene
+            .tooltip()
+            .and_then(|tooltip| tooltip.category_band)
+            .zip(state.hover.as_ref())
+            .and_then(|(color, geometry)| {
+                category_band(geometry, &self.scene, &tree.children[0], &state.hidden_series).map(|band| (color, band))
+            });
+        if let Some((color, band)) = band {
+            let origin = self.scene.plot_area_offset();
+            let band = band
+                + Vector::new(
+                    layout.bounds().x + self.padding.left + origin.x,
+                    layout.bounds().y + self.padding.top + origin.y,
+                );
+            let color = color.resolve(design.background_color(), design.text_pair(), &design.seed(), None);
+            renderer.with_layer(*viewport, |renderer| {
+                renderer.fill_quad(
+                    crate::core::renderer::Quad {
+                        bounds: band,
+                        ..Default::default()
+                    },
+                    color,
+                );
+            });
+        }
+
+        let draw_scene = |renderer: &mut Renderer| {
+            self.scene.draw(
+                &tree.children[0],
+                renderer,
+                design,
+                defaults,
+                scene_layout,
+                cursor,
+                viewport,
+                &state.hidden_series,
+                style.corners,
+                style.track,
+            );
+        };
+        if band.is_some() {
+            renderer.with_layer(*viewport, draw_scene);
+        } else {
+            draw_scene(renderer);
+        }
 
         // Draw the donut center overlay above the scene so the badge
         // text sits over the donut hole, clipped to the chart's bounds.
@@ -2255,8 +2314,9 @@ where
                     scene_tree,
                     viewport,
                     cursor,
-                    self.hover_fn.is_none(),
+                    self.hover_fn.is_none() && self.hover_group_fn.is_none(),
                     style.corners,
+                    &state.hidden_series,
                 );
             }
         }
@@ -2325,39 +2385,48 @@ where
         renderer: &Renderer,
         window: Size,
     ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
-        // Only the user-installed hover closure drives the widget-
-        // based annotation overlay. The default tooltip box stays on
-        // the canvas-drawn path in `Chart::draw`.
-        let hover_fn = self.hover_fn.as_ref()?;
-
-        // Two split borrows from `tree`: the State (for hover /
-        // cursor / persisted annotation_tree) lives in `tree.state`;
-        // the per-mark plot-area state lives in `tree.children[0]`.
-        // Rust's split-borrow rules let us hold both as long as
-        // they're disjoint Tree fields.
-        let plot_area = self.scene.plot_area();
-        let entry;
-        let cursor;
-        let chart_bounds = layout.bounds();
-        let annotation_tree;
-        {
-            let scene_tree = &tree.children[0];
-            let plot_area_state = scene_tree.children[6].state.downcast_ref::<plot_area::State>();
-            let state = tree.state.downcast_mut::<State>();
-            let geometry = state.hover.as_ref()?;
-            entry = build_hover_entry(
-                geometry,
-                plot_area,
-                &scene_tree.children[6],
-                plot_area_state.geo_plane.as_ref(),
-            )?;
-            cursor = state
-                .last_cursor
-                .unwrap_or_else(|| Point::new(chart_bounds.center_x(), chart_bounds.center_y()));
-            annotation_tree = &mut state.annotation_tree;
+        if self.hover_fn.is_none() && self.hover_group_fn.is_none() {
+            return None;
         }
-
-        let mut annotation = hover_fn(&entry);
+        let chart_bounds = layout.bounds();
+        let scene_tree = &tree.children[0];
+        let plot_state = scene_tree.children[6].state.downcast_ref::<plot_area::State>();
+        let state = tree.state.downcast_mut::<State>();
+        let geometry = state.hover.as_ref()?;
+        let mut annotation = if let Some(group_fn) = &self.hover_group_fn {
+            let hover::Geometry::Cartesian { data_x, entries } = geometry else {
+                return None;
+            };
+            let rows = cartesian_rows(
+                self.design.as_deref()?,
+                &self.scene,
+                scene_tree,
+                plot_state.domain.as_ref()?,
+                plot_state.content_rect,
+                entries,
+                &state.hidden_series,
+            );
+            if rows.is_empty() {
+                return None;
+            }
+            group_fn(&hover::Group {
+                x: *data_x,
+                label: self.scene.category_label(*data_x),
+                entries: rows.into_iter().map(|row| row.tooltip).collect(),
+            })
+        } else {
+            let entry = build_hover_entry(
+                geometry,
+                self.scene.plot_area(),
+                &scene_tree.children[6],
+                plot_state.geo_plane.as_ref(),
+            )?;
+            (self.hover_fn.as_ref()?)(&entry)
+        };
+        let cursor = state
+            .last_cursor
+            .unwrap_or_else(|| Point::new(chart_bounds.center_x(), chart_bounds.center_y()));
+        let annotation_tree = &mut state.annotation_tree;
         // Reconcile the persisted tree with this frame's element.
         // When the closure returns the same widget shape (same hover
         // target), per-widget state survives; on shape changes the
@@ -2492,6 +2561,7 @@ fn draw_tooltip_overlay<Message>(
     cursor: mouse::Cursor,
     draw_box: bool,
     corners: crate::core::border::Radius,
+    hidden_series: &HashSet<String>,
 ) {
     if !hover_mark_indices_are_current(hover, scene.plot_area().series.len()) {
         return;
@@ -2513,6 +2583,7 @@ fn draw_tooltip_overlay<Message>(
             scene_tree,
             viewport,
             draw_box,
+            hidden_series,
         ),
         hover::Geometry::Pie { mark_idx, slice_idx } => draw_pie_tooltip_overlay(
             renderer,
@@ -2579,60 +2650,79 @@ fn hover_mark_indices_are_current(hover: &hover::Geometry, mark_count: usize) ->
     }
 }
 
-/// Draws the Cartesian tooltip overlay (tracking line, markers, box).
-///
-/// Builds one [`hover::Row`] per matched (mark, series, point) at the
-/// snapped data-x, draws the dashed tracking line and any per-mark
-/// annotations on a canvas frame, then composites the tooltip box via
-/// [`draw_tooltip_box`].
-#[allow(clippy::too_many_arguments, clippy::unit_arg)]
-fn draw_cartesian_tooltip_overlay<Message>(
-    renderer: &mut Renderer,
-    design: &dyn design::Design,
-    chart_bounds: Rectangle,
-    padding: Padding,
-    plot_area_offset: Point,
-    domain: &plot_area::Domain,
-    content_rect: Rectangle,
-    data_x: f64,
-    cartesian_entries: &[(usize, usize, usize)],
-    tooltip_config: &crate::data::tooltip::Tooltip,
+/// Category-wide plot-local rectangle, using the same spacing as bar layout.
+fn category_band<Message>(
+    geometry: &hover::Geometry,
     scene: &scene::Scene<'_, Message, Renderer>,
     scene_tree: &Tree,
-    viewport: &Rectangle,
-    draw_box: bool,
-) {
-    use crate::core::renderer::Renderer as _;
-    use crate::widget::canvas::{Frame, Path, Stroke};
-    use crate::widget::renderer::geometry;
+    hidden_series: &HashSet<String>,
+) -> Option<Rectangle> {
+    let hover::Geometry::Cartesian { entries, .. } = geometry else {
+        return None;
+    };
+    let plot_tree = &scene_tree.children[6];
+    let plot_state = plot_tree.state.downcast_ref::<plot_area::State>();
+    let domain = plot_state.domain.as_ref()?;
+    for &(mark, series, index) in entries {
+        let Some(plot_area::Series::Bars(bars)) = scene.plot_area().series.get(mark) else {
+            continue;
+        };
+        let Some(series) = bars.data.series.get(series) else {
+            continue;
+        };
+        if series.name().is_some_and(|name| hidden_series.contains(name)) {
+            continue;
+        }
+        let Some(point) = series.points.get(index) else {
+            continue;
+        };
+        let count = bars.data.series.iter().map(|series| series.points.len()).max()?;
+        if count == 0 || !point.x.is_finite() || !point.y.is_finite() {
+            continue;
+        }
+        let rect = plot_state.content_rect;
+        let band = if bars.data.direction == crate::mark::bar::Direction::Horizontal {
+            let center = plot_area::to_pixel(domain, rect, crate::data::Datum::new(0.0, point.x));
+            let height = rect.height / count as f32;
+            Rectangle {
+                y: center.y - height / 2.0,
+                height,
+                ..rect
+            }
+        } else {
+            let center = plot_area::to_pixel(domain, rect, crate::data::Datum::x(point.x));
+            let width = rect.width / count as f32;
+            Rectangle {
+                x: center.x - width / 2.0,
+                width,
+                ..rect
+            }
+        };
+        return band.intersection(&rect);
+    }
+    None
+}
 
-    let plot_bounds = compute_plot_bounds(chart_bounds, padding, plot_area_offset, content_rect);
+/// Resolve the same visible rows and colors for built-in and custom tooltips.
+#[allow(clippy::too_many_arguments)]
+fn cartesian_rows<Message>(
+    design: &dyn design::Design,
+    scene: &scene::Scene<'_, Message, Renderer>,
+    scene_tree: &Tree,
+    domain: &plot_area::Domain,
+    content_rect: Rectangle,
+    cartesian_entries: &[(usize, usize, usize)],
+    hidden_series: &HashSet<String>,
+) -> Vec<hover::Row> {
     let plot_area = scene.plot_area();
     let plot_area_tree = &scene_tree.children[6];
-
-    // Horizontal bars invert the axes (see `find_nearest_cartesian_hover`):
-    // the tooltip anchors at the bar's value-end / row center rather than
-    // the column top, and the box tracks the bar geometry rather than `data_x`.
     let horizontal = plot_area.series.iter().any(
         |s| matches!(s, plot_area::Series::Bars(b) if b.data.direction == crate::mark::bar::Direction::Horizontal),
     );
-
     let background = design.background_color();
     let text_pair = design.text_pair();
     let seed = design.seed();
-    let text_color = design.text_color().resolve(background, text_pair, &seed, None);
     let palette = scene.resolve_palette(design);
-
-    // Compute the tracking pixel x from data_x
-    let tracking_pixel_x = {
-        let t = if domain.x.max > domain.x.min {
-            ((data_x - domain.x.min) / (domain.x.max - domain.x.min)) as f32
-        } else {
-            0.5
-        };
-        content_rect.x + t * content_rect.width
-    };
-
     // Build tooltip entries and collect pixel positions
     let line_tag = tree::Tag::of::<plot_area::line::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
     let area_tag = tree::Tag::of::<plot_area::area::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
@@ -2757,7 +2847,17 @@ fn draw_cartesian_tooltip_overlay<Message>(
                 // so the tooltip swatch matches the actual bar color.
                 let color_idx = plot_area.color_offset_for(mark_idx, series_idx);
                 let fallback = palette.get(color_idx);
-                let resolved = bar_series.resolved_color_at(pt_idx, &seed, scene.user_palette(), fallback);
+                let encoded = bars_state
+                    .series_fill_plans
+                    .get(series_idx)
+                    .and_then(|plan| plan.as_ref())
+                    .and_then(|plan| plan.color_at(pt_idx, &seed, scene.user_palette()));
+                let resolved = bar_series
+                    .point_color(pt_idx)
+                    .copied()
+                    .or(encoded)
+                    .or(bar_series.color)
+                    .unwrap_or(fallback);
                 bars_resolved_color = Some(resolved.resolve(background, text_pair, &seed, None));
 
                 (
@@ -2773,6 +2873,10 @@ fn draw_cartesian_tooltip_overlay<Message>(
         } else {
             continue;
         };
+
+        if name.as_ref().is_some_and(|name| hidden_series.contains(name)) {
+            continue;
+        }
 
         // Defense in depth: even if a non-finite datum slipped through
         // hover detection, refuse to build a circle / box anchor at NaN —
@@ -2806,6 +2910,63 @@ fn draw_cartesian_tooltip_overlay<Message>(
             highlight,
         });
     }
+
+    entries
+}
+
+/// Draws the Cartesian tooltip overlay (tracking line, markers, box).
+///
+/// Builds one [`hover::Row`] per matched (mark, series, point) at the
+/// snapped data-x, draws the dashed tracking line and any per-mark
+/// annotations on a canvas frame, then composites the tooltip box via
+/// [`draw_tooltip_box`].
+#[allow(clippy::too_many_arguments, clippy::unit_arg)]
+fn draw_cartesian_tooltip_overlay<Message>(
+    renderer: &mut Renderer,
+    design: &dyn design::Design,
+    chart_bounds: Rectangle,
+    padding: Padding,
+    plot_area_offset: Point,
+    domain: &plot_area::Domain,
+    content_rect: Rectangle,
+    data_x: f64,
+    cartesian_entries: &[(usize, usize, usize)],
+    tooltip_config: &crate::data::tooltip::Tooltip,
+    scene: &scene::Scene<'_, Message, Renderer>,
+    scene_tree: &Tree,
+    viewport: &Rectangle,
+    draw_box: bool,
+    hidden_series: &HashSet<String>,
+) {
+    use crate::core::renderer::Renderer as _;
+    use crate::widget::canvas::{Frame, Path, Stroke};
+    use crate::widget::renderer::geometry;
+
+    let plot_bounds = compute_plot_bounds(chart_bounds, padding, plot_area_offset, content_rect);
+    let background = design.background_color();
+    let text_pair = design.text_pair();
+    let seed = design.seed();
+    let text_color = design.text_color().resolve(background, text_pair, &seed, None);
+
+    // Compute the tracking pixel x from data_x
+    let tracking_pixel_x = {
+        let t = if domain.x.max > domain.x.min {
+            ((data_x - domain.x.min) / (domain.x.max - domain.x.min)) as f32
+        } else {
+            0.5
+        };
+        content_rect.x + t * content_rect.width
+    };
+
+    let entries = cartesian_rows(
+        design,
+        scene,
+        scene_tree,
+        domain,
+        content_rect,
+        cartesian_entries,
+        hidden_series,
+    );
 
     if entries.is_empty() {
         return;
@@ -3967,6 +4128,325 @@ mod tests {
         assert_ne!(frames[0][0], frames[1][0], "Desktop disappears");
         assert_eq!(frames[0][1], frames[1][1], "Mobile keeps its palette and position");
         assert_eq!(frames[0], frames[2], "second click restores both series");
+    }
+
+    #[test]
+    fn grouped_hover_resolves_before_draw_and_tracks_theme_and_visibility() {
+        use crate::chart::plot_area::bars;
+        use crate::core::renderer::{Headless, Settings};
+        use crate::core::{Color, Renderer as _, Theme, shell, text};
+        use iced::futures::executor;
+        use std::cell::RefCell;
+        type Paragraph = <Renderer as text::Renderer>::Paragraph;
+
+        let mut renderer =
+            executor::block_on(Renderer::new(Settings::default(), Some("tiny-skia"))).expect("software renderer");
+        let adaptive = crate::Color::contrast(Color::from_rgb(1.0, 0.0, 0.0), Color::from_rgb(0.0, 1.0, 0.0));
+        let mut mobile = crate::bar([80, 200]).with_name("Mobile").with_color(0x0000ff);
+        mobile.set_point_color(0, 0xff00ff);
+        let data = crate::data(
+            crate::bars([crate::bar([186, 305]).with_name("Desktop").with_color(adaptive), mobile]).data_labels(None),
+        )
+        .animate(false)
+        .x_axis_labels(["January", "February"])
+        .x_axis(|axis| axis.labels(|x| if x < 0.5 { "Jan".into() } else { "Feb".into() }))
+        .tooltip(crate::Tooltip::default().category_band(0x777777));
+        let observed = RefCell::new(Vec::new());
+        let mut tree = Tree::empty();
+        let mut desktop_colors = Vec::new();
+        for theme in [Theme::Light, Theme::Dark] {
+            let mut chart = chart::<(), Theme>(&data)
+                .hover_group(theme.clone(), |group| {
+                    observed.borrow_mut().push(group.clone());
+                    hover::Annotation::new(crate::widget::text(group.label.clone()))
+                })
+                .width(600)
+                .height(220);
+            tree.diff(&mut chart);
+            chart.layout(
+                &mut tree,
+                &renderer,
+                &layout::Limits::new(Size::ZERO, Size::new(600.0, 220.0)),
+            );
+            let rects = tree.children[0].children[6].children[0]
+                .state
+                .downcast_ref::<bars::State<Paragraph>>()
+                .series_rects
+                .clone();
+            let offset = chart.scene.plot_area_offset();
+            let origin = Vector::new(chart.padding.left + offset.x, chart.padding.top + offset.y);
+            let position = rects[0][0].center() + origin;
+            let layout = Layout::new(tree.size);
+            let viewport = Rectangle::with_size(tree.size);
+            let mut bus = shell::Bus::new();
+            let mut shell = Shell::new(&window::Headless, shell::Waker::noop(), &mut bus);
+            chart.update(
+                &mut tree,
+                &Event::Mouse(mouse::Event::CursorMoved { position }),
+                layout,
+                mouse::Cursor::Available(position),
+                &renderer,
+                &mut shell,
+                &viewport,
+            );
+            assert!(
+                chart
+                    .annotation_overlay(&mut tree, layout, &renderer, viewport.size())
+                    .is_some()
+            );
+            let group = observed.borrow().last().expect("first hover before any draw").clone();
+            assert_eq!(group.x, 0.0);
+            assert_eq!(group.label, "January");
+            assert_eq!(group.entries.len(), 2);
+            assert_eq!(group.entries[0].series_name.as_deref(), Some("Desktop"));
+            assert_eq!(group.entries[0].y, 186.0);
+            desktop_colors.push(group.entries[0].color);
+            let guide = tree.children[0].children[4]
+                .state
+                .downcast_ref::<guide::State<Paragraph>>();
+            assert_eq!(guide.label_info[0].1, "Jan");
+
+            renderer.reset(viewport);
+            chart.draw(
+                &tree,
+                &mut renderer,
+                &theme,
+                &Default::default(),
+                layout,
+                mouse::Cursor::Unavailable,
+                &viewport,
+            );
+            let pixels = renderer.screenshot(Size::new(600, 220), 1.0, Color::WHITE);
+            for (series, entry) in group.entries.iter().enumerate() {
+                let center = rects[series][0].center() + origin;
+                let index = (center.y as usize * 600 + center.x as usize) * 4;
+                for (actual, expected) in pixels[index..index + 4].iter().zip(entry.color.into_rgba8()) {
+                    assert!(
+                        (i16::from(*actual) - i16::from(expected)).abs() <= 1,
+                        "swatch matches drawn bar: actual {:?}, expected {:?}, center {:?}",
+                        &pixels[index..index + 4],
+                        entry.color.into_rgba8(),
+                        center
+                    );
+                }
+            }
+            tree.state
+                .downcast_mut::<State>()
+                .hidden_series
+                .insert("Desktop".into());
+            assert!(
+                chart
+                    .annotation_overlay(&mut tree, layout, &renderer, viewport.size())
+                    .is_some()
+            );
+            let group = observed.borrow().last().expect("visible group").clone();
+            assert_eq!(group.entries.len(), 1);
+            assert_eq!(group.entries[0].series_name.as_deref(), Some("Mobile"));
+            tree.state.downcast_mut::<State>().hidden_series.insert("Mobile".into());
+            assert!(
+                chart
+                    .annotation_overlay(&mut tree, layout, &renderer, viewport.size())
+                    .is_none()
+            );
+            assert!(
+                category_band(
+                    tree.state.downcast_ref::<State>().hover.as_ref().expect("hover"),
+                    &chart.scene,
+                    &tree.children[0],
+                    &tree.state.downcast_ref::<State>().hidden_series
+                )
+                .is_none()
+            );
+            tree.state.downcast_mut::<State>().hidden_series.clear();
+        }
+        assert_ne!(
+            desktop_colors[0], desktop_colors[1],
+            "new theme resolves without a prior draw"
+        );
+        // A scoped design reference is accepted without requiring a static borrow.
+        let theme = Theme::Light;
+        let mut borrowed = chart::<(), Theme>(&data)
+            .hover_group(&theme, |group| {
+                observed.borrow_mut().push(group.clone());
+                hover::Annotation::new(crate::widget::text(group.label.clone()))
+            })
+            .width(600)
+            .height(220);
+        tree.diff(&mut borrowed);
+        borrowed.layout(
+            &mut tree,
+            &renderer,
+            &layout::Limits::new(Size::ZERO, Size::new(600.0, 220.0)),
+        );
+        let layout = Layout::new(tree.size);
+        assert!(
+            borrowed
+                .annotation_overlay(&mut tree, layout, &renderer, Size::new(600.0, 220.0))
+                .is_some()
+        );
+        assert_eq!(
+            observed.borrow().last().expect("borrowed design group").entries[0].color,
+            desktop_colors[0]
+        );
+    }
+
+    #[test]
+    fn transparent_annotation_omits_shell_but_preserves_content_and_bounds() {
+        use crate::core::renderer::{Headless, Settings};
+        use crate::core::{Color, Renderer as _, Theme};
+        use crate::widget::{Space, container};
+        use iced::futures::executor;
+        let mut renderer =
+            executor::block_on(Renderer::new(Settings::default(), Some("tiny-skia"))).expect("software renderer");
+        let viewport = Rectangle::with_size(Size::new(200.0, 100.0));
+        let mut bounds = Vec::new();
+        let mut shells = Vec::new();
+        for transparent in [false, true] {
+            let mut annotation: hover::Annotation<'_, (), Theme> = hover::Annotation::new(
+                container(Space::new().width(30).height(20))
+                    .style(|_| container::Style::default().background(Color::from_rgb(1.0, 0.0, 0.0))),
+            )
+            .padding(5);
+            if transparent {
+                annotation = annotation.transparent();
+            }
+            let mut tree = Tree::new(&annotation.content);
+            tree.diff(&mut annotation.content);
+            let overlay = AnnotationOverlay::new(
+                annotation,
+                &mut tree,
+                &renderer,
+                Point::new(50.0, 50.0),
+                viewport,
+                viewport.size(),
+            );
+            bounds.push(overlay.bounds);
+            renderer.reset(viewport);
+            overlay::Overlay::draw(
+                &overlay,
+                &mut renderer,
+                &Theme::Dark,
+                &Default::default(),
+                mouse::Cursor::Unavailable,
+            );
+            let pixels = renderer.screenshot(Size::new(200, 100), 1.0, Color::WHITE);
+            let pixel = |point: Point| {
+                let index = (point.y as usize * 200 + point.x as usize) * 4;
+                pixels[index..index + 4].to_vec()
+            };
+            shells.push(pixel(Point::new(overlay.bounds.x + 2.0, overlay.bounds.center_y())));
+            assert_eq!(pixel(overlay.bounds.center()), [255, 0, 0, 255]);
+        }
+        assert_eq!(bounds[0], bounds[1], "chrome does not affect positioning or padding");
+        assert_ne!(shells[0], [255, 255, 255, 255]);
+        assert_eq!(shells[1], [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn timestamp_bars_use_data_positions_and_adapt_time_ticks() {
+        use crate::chart::plot_area::bars;
+        use crate::core::renderer::{Headless, Settings};
+        use crate::core::{Theme, text};
+        use iced::futures::executor;
+        type Paragraph = <Renderer as text::Renderer>::Paragraph;
+
+        let renderer =
+            executor::block_on(Renderer::new(Settings::default(), Some("tiny-skia"))).expect("software renderer");
+        let start = 1_711_929_600.0;
+        let day = 86_400.0;
+        for horizontal in [false, true] {
+            for mode in 0..3 {
+                let mut tick_counts = Vec::new();
+                for extent in [200.0, 650.0] {
+                    let points = (0..30)
+                        .map(|index| (start + f64::from(index) * day, 10.0))
+                        .collect::<Vec<_>>();
+                    let bars = crate::bars([crate::bar(points)]).data_labels(None);
+                    let bars = match mode {
+                        1 => bars.stacked(),
+                        2 => bars.overlaid(),
+                        _ => bars,
+                    };
+                    let bars = if horizontal { bars.horizontal() } else { bars };
+                    let axis = |axis: crate::axis::Axis| {
+                        let inset = if mode == 2 { 0.0 } else { day / 2.0 };
+                        axis.with_kind(crate::axis::Kind::Time)
+                            .with_bounds(start - inset, start + 29.0 * day + inset)
+                    };
+                    let data = crate::data(bars).animate(false);
+                    let data = if horizontal {
+                        data.y_axis(axis)
+                    } else {
+                        data.x_axis(axis)
+                    };
+                    let size = if horizontal {
+                        Size::new(400.0, extent)
+                    } else {
+                        Size::new(extent, 220.0)
+                    };
+                    let mut chart = chart::<(), Theme>(&data).width(size.width).height(size.height);
+                    let mut tree = Tree::new(&chart);
+                    chart.diff(&mut tree);
+                    chart.layout(&mut tree, &renderer, &layout::Limits::new(Size::ZERO, size));
+                    let plot_tree = &tree.children[0].children[6];
+                    let state = plot_tree.state.downcast_ref::<plot_area::State>();
+                    let domain = state.domain.as_ref().expect("domain");
+                    let rects = &plot_tree.children[0]
+                        .state
+                        .downcast_ref::<bars::State<Paragraph>>()
+                        .series_rects[0];
+                    for index in [0, 15, 29] {
+                        let x = start + index as f64 * day;
+                        let expected = if horizontal {
+                            plot_area::to_pixel(domain, state.content_rect, crate::data::Datum::new(0.0, x)).y
+                        } else {
+                            plot_area::to_pixel(domain, state.content_rect, crate::data::Datum::x(x)).x
+                        };
+                        let actual = if horizontal {
+                            rects[index].center_y()
+                        } else {
+                            rects[index].center_x()
+                        };
+                        assert!((actual - expected).abs() < 0.01);
+                        let hover = hover::Geometry::Cartesian {
+                            data_x: x,
+                            entries: vec![(0, 0, index)],
+                        };
+                        let band =
+                            category_band(&hover, &chart.scene, &tree.children[0], &HashSet::new()).expect("band");
+                        assert_eq!(
+                            band.intersection(&state.content_rect),
+                            Some(band),
+                            "clipped to data plot"
+                        );
+                        assert!(
+                            band.expand(0.001).contains(rects[index].center()),
+                            "band follows the bar's timestamp: {band:?} {:?}",
+                            rects[index]
+                        );
+                        assert!(band.width > 0.0 && band.height > 0.0);
+                        if mode == 2 && index != 15 {
+                            let slot = if horizontal {
+                                state.content_rect.height
+                            } else {
+                                state.content_rect.width
+                            } / 30.0;
+                            let extent = if horizontal { band.height } else { band.width };
+                            assert!((extent - slot / 2.0).abs() < 0.01, "edge band is clipped in half");
+                        }
+                    }
+                    let guide_index = if horizontal { 5 } else { 4 };
+                    let guide = tree.children[0].children[guide_index]
+                        .state
+                        .downcast_ref::<guide::State<Paragraph>>();
+                    tick_counts.push(guide.tick_positions.len());
+                }
+                assert!(
+                    tick_counts[1] > tick_counts[0],
+                    "existing Time axis adapts to extent: {tick_counts:?}"
+                );
+            }
+        }
     }
 
     #[test]

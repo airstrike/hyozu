@@ -349,6 +349,33 @@ pub enum FillPlan {
 }
 
 impl FillPlan {
+    /// Resolve one cached point without materializing a per-point vector.
+    pub(crate) fn color_at(&self, point: usize, seed: &Seed, chart_default: Option<&Palette>) -> Option<Color> {
+        match self {
+            Self::Static(colors) => colors.get(point).copied().flatten(),
+            Self::Ordinal {
+                indices,
+                distinct,
+                source,
+            } => {
+                let index = *indices.get(point)?;
+                match source {
+                    OrdinalSource::Range(colors) => {
+                        if colors.is_empty() {
+                            None
+                        } else {
+                            Some(colors[index % colors.len()])
+                        }
+                    }
+                    OrdinalSource::Seed(flavor) => {
+                        let flavor = flavor.as_ref().or(chart_default).unwrap_or(&Palette::TONAL);
+                        Some(Resolved::resolve(flavor, seed, (*distinct).max(1)).get(index))
+                    }
+                }
+            }
+        }
+    }
+
     /// Materialize the per-point color vector for this plan.
     ///
     /// For `Static` this is a clone of the cached vector. For `Ordinal`
@@ -580,6 +607,39 @@ mod tests {
     /// Construct a `Vec<Datum>` of length `ys.len()` with x = index, y as given.
     fn points(ys: &[f64]) -> Vec<Datum> {
         ys.iter().enumerate().map(|(i, &y)| Datum::new(i as f64, y)).collect()
+    }
+
+    #[test]
+    fn cached_point_colors_match_draw_materialization_without_extracting_again() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counter = calls.clone();
+        let encoding = key(move |index, _| {
+            counter.fetch_add(1, Ordering::SeqCst);
+            index % 2
+        });
+        let points = points(&[10.0, 20.0, 30.0]);
+        for encoding in [
+            encoding.clone(),
+            encoding.clone().range([0xff0000, 0x0000ff]),
+            encoding.clone().range(std::iter::empty::<u32>()),
+            encoding.manual([("0", 0x00ff00)]),
+        ] {
+            let plan = encoding.plan_fill(&points);
+            let count = calls.load(Ordering::SeqCst);
+            for flavor in [None, Some(Palette::SEQUENTIAL)] {
+                let expected = plan.materialize(&test_seed(), flavor.as_ref());
+                for (index, expected) in expected.into_iter().enumerate() {
+                    assert_eq!(plan.color_at(index, &test_seed(), flavor.as_ref()), expected);
+                }
+                assert_eq!(plan.color_at(points.len(), &test_seed(), flavor.as_ref()), None);
+            }
+            assert_eq!(
+                calls.load(Ordering::SeqCst),
+                count,
+                "hover never re-runs data extraction"
+            );
+        }
     }
 
     // Ordinal scale
