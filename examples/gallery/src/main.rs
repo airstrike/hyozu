@@ -1,106 +1,176 @@
-mod action;
+mod appearance;
 mod category;
 mod charts;
 mod detail;
+mod distributions;
 mod icon;
 
 use category::Category;
 use charts::{ChartId, Variant};
-
 use hyozu::Data;
-use iced::widget::{Column, button, column, container, row, scrollable, text};
-use iced::{Element, Fill, Font, Shrink, Task, Theme, Widget};
+use iced::widget::{button, column, container, row, scrollable, text, text_input, themer};
+use iced::{Alignment, Fill, Font, Subscription, Task, Widget};
+use icedcn::Theme;
+use icedcn::widget::button as control;
+use icedcn::widget::button::{Ghost, Outline};
+
+type Element<'a, Message> = iced::Element<'a, Message, Theme>;
 
 pub fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
-        .window_size([1200.0, 800.0])
+        .window_size([1200.0, 820.0])
         .title("hyozu gallery")
         .settings(iced::Settings {
-            text_size: 13.into(),
-            font: Font::MONOSPACE,
+            text_size: 14.into(),
             ..Default::default()
         })
         .fonts([icon::FONT])
         .theme(|state: &App| state.theme.clone())
+        .subscription(App::subscription)
         .run()
-}
-
-// ---------------------------------------------------------------------------
-// State
-// ---------------------------------------------------------------------------
-
-enum Screen {
-    Gallery,
-    Detail(detail::Detail),
-}
-
-struct App {
-    theme: Theme,
-    dark: bool,
-    filter: Option<Category>,
-    variants: Vec<Variant>,
-    data: Vec<Data>,
-    screen: Screen,
-    active_chart: Option<ChartId>,
 }
 
 #[derive(Debug, Clone)]
 enum Message {
     ToggleDark,
-    FilterCategory(Option<Category>),
-    SelectChart(ChartId),
-    Detail(detail::Message),
+    ToggleBrowse,
+    Orbit(f64),
+    Resize(f32),
+    Filter(Option<Category>),
+    Search(String),
+    Select(ChartId),
+    Back,
+    Source(bool),
+    Copy,
+    Copied(bool),
+    Chart(hyozu::Action),
 }
 
-// ---------------------------------------------------------------------------
-// Logic
-// ---------------------------------------------------------------------------
+struct App {
+    theme: Theme,
+    dark: bool,
+    browse: bool,
+    width: f32,
+    filter: Option<Category>,
+    search: String,
+    variants: Vec<Variant>,
+    data: Vec<Data>,
+    selected: Option<ChartId>,
+    camera: hyozu::spatial::Camera,
+    source: bool,
+    copied: bool,
+}
+
+fn heading<'a>(s: impl iced::widget::text::IntoFragment<'a>, size: u16) -> iced::widget::Text<'a, Theme> {
+    text(s).size(f32::from(size)).font(Font {
+        weight: iced::font::Weight::Semibold,
+        ..Font::DEFAULT
+    })
+}
+
+fn spring<'a, M: 'a>() -> Element<'a, M> {
+    iced::widget::space().width(Fill).boxed()
+}
+
+fn chart_colors(category: Category) -> hyozu::Palette {
+    let colors = match category {
+        Category::Bar | Category::Waterfall => [0x367b85, 0x77b3a6, 0xe5a772, 0xb07664, 0x7781ac],
+        Category::Statistical | Category::BoxPlot | Category::Violin => {
+            [0x7752a5, 0xa98abb, 0x6f8cb2, 0xbb7e76, 0x438e86]
+        }
+        _ => [0x277b70, 0x6d91c2, 0xd69551, 0xa0697e, 0x78a9a1],
+    };
+    hyozu::palette::gradient(colors)
+}
 
 impl App {
-    fn new() -> (Self, Task<Message>) {
+    fn new() -> Self {
         let variants = charts::variants();
-        let data: Vec<Data> = variants.iter().map(|v| (v.build)()).collect();
-
-        (
-            Self {
-                theme: hyozu::theme::paper(),
-                dark: false,
-                filter: None,
-                variants,
-                data,
-                screen: Screen::Gallery,
-                active_chart: None,
-            },
-            Task::none(),
-        )
+        let data = variants
+            .iter()
+            .map(|v| {
+                let chart = v.render(hyozu::spatial::Camera::default());
+                if chart.get_palette().is_some() {
+                    chart
+                } else {
+                    chart.palette(chart_colors(v.category))
+                }
+            })
+            .collect();
+        Self {
+            theme: Theme::light(),
+            dark: false,
+            browse: false,
+            width: 1200.,
+            filter: None,
+            search: String::new(),
+            variants,
+            data,
+            selected: None,
+            camera: hyozu::spatial::Camera::default(),
+            source: false,
+            copied: false,
+        }
     }
 
-    fn update(&mut self, message: Message) -> Task<Message> {
-        match message {
+    fn subscription(&self) -> Subscription<Message> {
+        Subscription::batch([
+            iced::window::resize_events().map(|(_, s)| Message::Resize(s.width)),
+            iced::keyboard::listen().filter_map(|event| match event {
+                iced::keyboard::Event::KeyPressed {
+                    key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
+                    ..
+                } => Some(Message::Back),
+                _ => None,
+            }),
+        ])
+    }
+
+    fn update(&mut self, msg: Message) -> Task<Message> {
+        match msg {
             Message::ToggleDark => {
                 self.dark = !self.dark;
-                self.theme = if self.dark {
-                    hyozu::theme::paper_dark()
-                } else {
-                    hyozu::theme::paper()
-                };
+                self.theme = if self.dark { Theme::dark() } else { Theme::light() };
             }
-            Message::FilterCategory(cat) => {
+            Message::Orbit(delta) => {
+                if let Some(id) = self.selected {
+                    self.camera.azimuth = (self.camera.azimuth + delta).rem_euclid(360.);
+                    let v = &self.variants[id.0];
+                    self.data[id.0] = v.render(self.camera).palette(chart_colors(v.category));
+                }
+            }
+            Message::ToggleBrowse => self.browse = !self.browse,
+            Message::Resize(width) => self.width = width,
+            Message::Filter(cat) => {
                 self.filter = cat;
+                self.selected = None;
+                self.browse = false;
             }
-            Message::SelectChart(id) => {
-                let variant = &self.variants[id.0];
-                self.active_chart = Some(id);
-                self.screen = Screen::Detail(detail::Detail::new(variant.source));
+            Message::Search(value) => {
+                self.search = value;
+                self.selected = None;
             }
-            Message::Detail(msg) => {
-                if let Screen::Detail(ref mut detail) = self.screen {
-                    let action = detail.update(msg);
-                    if let Some(detail::Instruction::Back) = action.instruction {
-                        self.screen = Screen::Gallery;
-                        self.active_chart = None;
-                    }
-                    return action.task.map(Message::Detail);
+            Message::Select(id) => {
+                self.selected = Some(id);
+                self.source = false;
+                self.copied = false;
+                self.browse = false;
+            }
+            Message::Back => {
+                self.selected = None;
+                self.browse = false;
+            }
+            Message::Source(value) => self.source = value,
+            Message::Copy => {
+                if let Some(id) = self.selected {
+                    return iced::clipboard::write(self.variants[id.0].source.to_owned())
+                        .map(|r| Message::Copied(r.is_ok()));
+                }
+            }
+            Message::Copied(success) => self.copied = success,
+            Message::Chart(action) => {
+                if let Some(id) = self.selected {
+                    self.data[id.0].perform(action);
                 }
             }
         }
@@ -108,167 +178,195 @@ impl App {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let sidebar = self.view_sidebar();
-
-        let content: Element<'_, Message> = match &self.screen {
-            Screen::Gallery => self.view_grid(),
-            Screen::Detail(detail) => {
-                let id = self.active_chart.unwrap();
-                let variant = &self.variants[id.0];
-                let data = &self.data[id.0];
-                detail.view(variant, data).map(Message::Detail).boxed()
+        let compact = self.width < 760.;
+        let mark = container(heading("h", 20).color(iced::Color::WHITE))
+            .center_x(33)
+            .center_y(33)
+            .style(|_| container::Style {
+                background: Some(iced::Color::from_rgb8(29, 91, 77).into()),
+                border: iced::Border::default().rounded(9),
+                ..Default::default()
+            });
+        let brand = row![mark, heading("Hyozu", 19)].align_y(Alignment::Center).spacing(10);
+        let search = text_input("Search charts…", &self.search)
+            .on_input(Message::Search)
+            .padding([8, 12])
+            .width(if compact { 155. } else { 245. });
+        let mode = if self.dark { icon::sun() } else { icon::moon() };
+        let toggle: Element<'_, Message> = control(mode.size(16).boxed())
+            .style(Outline)
+            .on_press(Message::ToggleDark)
+            .into();
+        let mut top = row![brand, spring(), search, toggle]
+            .align_y(Alignment::Center)
+            .spacing(12);
+        if compact {
+            top = top.push(control("Browse").style(Ghost).on_press(Message::ToggleBrowse).into());
+        }
+        let header = container(top)
+            .width(Fill)
+            .padding(if compact { [10, 12] } else { [13, 24] });
+        let content = if compact && self.browse {
+            self.sidebar()
+        } else {
+            let main = if let Some(id) = self.selected {
+                self.detail(id)
+            } else {
+                self.grid()
+            };
+            if compact {
+                main
+            } else {
+                row![
+                    self.sidebar(),
+                    Element::<Message>::from(icedcn::separator().orientation(icedcn::Vertical)),
+                    main
+                ]
+                .height(Fill)
+                .boxed()
             }
         };
-
-        row![sidebar, content].boxed()
+        column![header, Element::<Message>::from(icedcn::separator()), content]
+            .height(Fill)
+            .width(Fill)
+            .boxed()
     }
 
-    // -- Sidebar -----------------------------------------------------------
-
-    fn view_sidebar(&self) -> Element<'_, Message> {
-        let heading = text("hyozu").size(20);
-
-        // "All" filter button
-        let all_btn = sidebar_button("All", self.filter.is_none(), Message::FilterCategory(None));
-
-        let mut sidebar_col = column![heading, all_btn].spacing(6);
-
+    fn sidebar(&self) -> Element<'_, Message> {
+        let mut nav = column![text("Library").size(12).color(self.theme.muted.foreground)].spacing(3);
+        nav = nav.push(self.nav_item(None, "All charts", self.variants.len()));
+        nav = nav.push(
+            container(text("Chart families").size(12).color(self.theme.muted.foreground))
+                .padding([11, 0])
+                .boxed(),
+        );
         for &cat in Category::ALL {
-            sidebar_col = sidebar_col.push(sidebar_button(
-                cat.label(),
-                self.filter == Some(cat),
-                Message::FilterCategory(Some(cat)),
-            ));
+            let count = self.variants.iter().filter(|v| v.category == cat).count();
+            nav = nav.push(self.nav_item(Some(cat), cat.label(), count));
         }
-
-        // Sun/moon toggle at bottom
-        let theme_icon = if self.dark { icon::sun() } else { icon::moon() };
-
-        let theme_btn = button(theme_icon.size(16))
-            .padding([4, 8])
-            .on_press(Message::ToggleDark)
-            .style(button::text);
-
-        let spacer = container(Column::<Element<'_, Message>>::new()).height(Fill);
-
-        let sidebar_content = column![sidebar_col, spacer, theme_btn]
-            .spacing(6)
-            .padding(12)
-            .height(Fill);
-
-        container(sidebar_content)
-            .width(180)
+        container(scrollable(nav).height(Fill))
+            .width(if self.width < 760. {
+                Fill
+            } else {
+                iced::Length::Fixed(192.)
+            })
             .height(Fill)
-            .style(|theme: &Theme| {
-                let palette = theme.palette();
-                container::Style {
-                    background: Some(palette.background.weak.color.into()),
+            .padding([15, 12])
+            .boxed()
+    }
+
+    fn nav_item<'a>(&self, cat: Option<Category>, label: &'a str, count: usize) -> Element<'a, Message> {
+        let active = cat == self.filter;
+        button(row![text(label).size(13), spring(), text(count.to_string()).size(11)].align_y(Alignment::Center))
+            .on_press(Message::Filter(cat))
+            .width(Fill)
+            .padding([6, 10])
+            .style(move |theme: &Theme, status| {
+                let highlighted = active || matches!(status, button::Status::Hovered | button::Status::Pressed);
+                button::Style {
+                    background: highlighted.then(|| iced::Background::Color(theme.muted.base.into())),
+                    text_color: theme.neutral.foreground.into(),
+                    border: iced::Border::default().rounded(6),
                     ..Default::default()
                 }
             })
             .boxed()
     }
 
-    // -- Chart grid --------------------------------------------------------
-
-    fn view_grid(&self) -> Element<'_, Message> {
-        let visible: Vec<&Variant> = self
+    fn grid(&self) -> Element<'_, Message> {
+        let query = self.search.trim().to_lowercase();
+        let mut visible: Vec<_> = self
             .variants
             .iter()
-            .filter(|v| self.filter.is_none() || self.filter == Some(v.category))
+            .filter(|v| {
+                self.filter.is_none_or(|cat| v.category == cat)
+                    && (v.name.to_lowercase().contains(&query)
+                        || v.category.label().to_lowercase().contains(&query)
+                        || self.data[v.id.0]
+                            .get_title()
+                            .is_some_and(|s| s.to_lowercase().contains(&query)))
+            })
             .collect();
-
-        let mut grid_col = column![].spacing(16).padding(16);
-
-        for pair in visible.chunks(2) {
-            let mut chart_row = row![].spacing(16);
-
-            for variant in pair {
-                chart_row = chart_row.push(self.view_card(variant));
-            }
-
-            if pair.len() == 1 {
-                chart_row = chart_row.push(
-                    container(Column::<Element<'_, Message>>::new())
-                        .width(Fill)
-                        .height(Shrink)
-                        .boxed(),
-                );
-            }
-
-            grid_col = grid_col.push(chart_row);
+        if self.filter.is_none() && query.is_empty() {
+            const FIRST: &[usize] = &[25, 19, 30, 4, 27, 8];
+            visible.sort_by_key(|v| FIRST.iter().position(|&i| i == v.id.0).unwrap_or(FIRST.len() + v.id.0));
         }
-
-        scrollable(grid_col).width(Fill).height(Fill).boxed()
-    }
-
-    // -- Single chart card -------------------------------------------------
-
-    fn view_card<'a>(&'a self, variant: &'a Variant) -> Element<'a, Message> {
-        let id = variant.id;
-
-        let chart_widget = hyozu::chart(&self.data[id.0]).height(220).padding(10);
-
-        let label = text(variant.name).size(12);
-
-        let card = button(column![chart_widget, label].spacing(4).width(Fill))
-            .padding(8)
-            .on_press(Message::SelectChart(id))
-            .style(card_button_style);
-
-        container(card).width(Fill).boxed()
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-fn sidebar_button(label: &str, active: bool, msg: Message) -> Element<'_, Message> {
-    let btn = button(text(label).size(12))
-        .padding([4, 8])
-        .width(Fill)
-        .on_press(msg)
-        .style(move |theme, status| sidebar_button_style(theme, status, active));
-
-    btn.boxed()
-}
-
-fn sidebar_button_style(theme: &Theme, status: button::Status, active: bool) -> button::Style {
-    let palette = theme.palette();
-    let muted = palette.background.base.text.scale_alpha(0.6);
-    let bright = palette.background.base.text;
-    let fill = palette.background.strong.color.scale_alpha(0.4);
-
-    button::Style {
-        background: if active {
-            Some(fill.into())
-        } else if matches!(status, button::Status::Hovered) {
-            Some(fill.scale_alpha(0.5).into())
+        let title = self.filter.map_or("Chart gallery", Category::label);
+        let count = visible.len();
+        let mut grid = column![
+            heading(title, 30),
+            text(format!("{count} {}", if count == 1 { "example" } else { "examples" }))
+                .color(self.theme.muted.foreground)
+                .size(14),
+            iced::widget::space().height(8)
+        ]
+        .spacing(6);
+        let columns = if self.width >= 1480. {
+            3
+        } else if self.width >= 980. {
+            2
         } else {
-            None
-        },
-        text_color: if active { bright } else { muted },
-        border: iced::Border::default(),
-        ..Default::default()
+            1
+        };
+        for chunk in visible.chunks(columns) {
+            let mut r = iced::widget::Row::new().spacing(16);
+            for &v in chunk {
+                r = r.push(self.card(v));
+            }
+            for _ in chunk.len()..columns {
+                r = r.push(spring());
+            }
+            grid = grid.push(r.boxed()).push(iced::widget::space().height(4).boxed());
+        }
+        if visible.is_empty() {
+            grid = grid.push(
+                icedcn::card(
+                    column![
+                        heading("No matching charts", 18),
+                        text("Try another name or choose a different family.")
+                    ]
+                    .spacing(6)
+                    .boxed(),
+                )
+                .padding(20)
+                .width(Fill)
+                .into(),
+            );
+        }
+        scrollable(grid.padding(if self.width < 760. { 16 } else { 26 }))
+            .height(Fill)
+            .width(Fill)
+            .boxed()
     }
-}
 
-fn card_button_style(theme: &Theme, status: button::Status) -> button::Style {
-    let palette = theme.palette();
-    let bg = palette.background.weak.color.scale_alpha(0.3);
-
-    button::Style {
-        background: match status {
-            button::Status::Hovered => Some(palette.background.weak.color.scale_alpha(0.5).into()),
-            _ => Some(bg.into()),
-        },
-        border: iced::Border {
-            width: 1.0,
-            radius: 6.0.into(),
-            color: palette.background.strong.color.scale_alpha(0.2),
-        },
-        text_color: palette.background.base.text,
-        ..Default::default()
+    fn card<'a>(&'a self, v: &'a Variant) -> Element<'a, Message> {
+        let h = appearance::chart_height(self.width < 760.);
+        let chart = themer(
+            Some(self.theme.iced_theme().clone()),
+            hyozu::chart::<Message, iced::Theme>(&self.data[v.id.0])
+                .style(hyozu::chart::transparent)
+                .padding(10)
+                .height(h),
+        );
+        let header = row![
+            heading(v.name, 17),
+            spring(),
+            text("↗").size(17).color(self.theme.muted.foreground)
+        ]
+        .align_y(Alignment::Center);
+        let detail = text(v.category.label()).size(12).color(self.theme.muted.foreground);
+        let card: Element<'_, Message> = icedcn::card(column![header, detail, chart].spacing(4).boxed())
+            .padding(16)
+            .width(Fill)
+            .into();
+        button(card)
+            .width(Fill)
+            .padding(0)
+            .on_press(Message::Select(v.id))
+            .style(|_, _| button::Style {
+                text_color: iced::Color::BLACK,
+                ..Default::default()
+            })
+            .boxed()
     }
 }

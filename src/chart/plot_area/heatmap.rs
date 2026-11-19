@@ -292,6 +292,38 @@ where
     ) where
         Theme: crate::design::Design + ?Sized,
     {
+        let mut labels = crate::chart::labels::Layer::new(crate::chart::labels::Space::new(layout.bounds()));
+        self.draw_with_labels(
+            tree,
+            renderer,
+            theme,
+            _style,
+            layout,
+            _cursor,
+            _viewport,
+            _color_offset,
+            _palette,
+            &mut labels,
+        );
+        labels.draw(renderer, _viewport);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn draw_with_labels<'p, Theme>(
+        &self,
+        tree: &'p crate::core::widget::Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        _style: &crate::core::renderer::Style,
+        layout: crate::core::Layout,
+        _cursor: crate::core::mouse::Cursor,
+        _viewport: &crate::core::Rectangle,
+        _color_offset: usize,
+        _palette: &crate::palette::Resolved,
+        labels: &mut crate::chart::labels::Layer<'p, Renderer::Paragraph>,
+    ) where
+        Theme: crate::design::Design + ?Sized,
+    {
         let state = tree.state.downcast_ref::<State<Renderer::Paragraph>>();
         let layout_bounds = layout.bounds();
         let background = theme.background_color();
@@ -409,7 +441,7 @@ where
         // Draw the cell-value labels on top via the cached paragraphs.
         for (idx, anchor, color) in label_draws {
             if let Some(paragraph) = state.labels.get(idx) {
-                renderer.fill_paragraph(paragraph.raw(), anchor + translation, color, layout_bounds);
+                labels.push(paragraph.raw(), anchor + translation, color);
             }
         }
     }

@@ -619,6 +619,7 @@ where
                     | crate::Mark::Tick(_)
                     | crate::Mark::Pie(_)
                     | crate::Mark::Gauge(_)
+                    | crate::Mark::Diagram(_)
                     | crate::Mark::Treemap(_)
                     | crate::Mark::Choropleth(_)
                     | crate::Mark::Text(_) => {}
@@ -1003,6 +1004,17 @@ where
                         }
                     }
                 },
+                crate::Mark::Diagram(d) => {
+                    if let Some(b) = d.bounds() {
+                        let (lo, hi) = if is_x_axis {
+                            (b.x_min, b.x_max)
+                        } else {
+                            (b.y_min, b.y_max)
+                        };
+                        min = min.min(lo);
+                        max = max.max(hi);
+                    }
+                }
                 crate::Mark::Pie(_)
                 | crate::Mark::Gauge(_)
                 | crate::Mark::Treemap(_)

@@ -10,6 +10,12 @@ pub enum Category {
     BoxPlot,
     Violin,
     Waterfall,
+    Statistical,
+    Diagram,
+    Financial,
+    Signal,
+    Field,
+    Spatial,
 }
 
 impl Category {
@@ -24,6 +30,12 @@ impl Category {
         Self::BoxPlot,
         Self::Violin,
         Self::Waterfall,
+        Self::Statistical,
+        Self::Diagram,
+        Self::Financial,
+        Self::Signal,
+        Self::Field,
+        Self::Spatial,
     ];
 
     pub fn label(self) -> &'static str {
@@ -37,6 +49,12 @@ impl Category {
             Self::Gauge => "Gauge",
             Self::BoxPlot => "Box Plot",
             Self::Violin => "Violin",
+            Self::Financial => "Financial",
+            Self::Spatial => "3D",
+            Self::Field => "Scientific fields",
+            Self::Signal => "Signal",
+            Self::Diagram => "Diagram",
+            Self::Statistical => "Statistical",
             Self::Waterfall => "Waterfall",
         }
     }

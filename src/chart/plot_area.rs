@@ -10,6 +10,7 @@ pub mod band;
 pub mod bars;
 pub mod boxplot;
 pub mod choropleth;
+pub(crate) mod diagram;
 pub mod gauge;
 pub mod geo;
 pub mod heatmap;
@@ -163,6 +164,7 @@ where
     Band(Band<'a, Message, Renderer>),
     Tick(Tick<'a, Message, Renderer>),
     Heatmap(Heatmap<'a, Message, Renderer>),
+    Diagram(&'a crate::Diagram),
     Treemap(Treemap<'a, Message, Renderer>),
     Violin(Violin<'a, Message, Renderer>),
     Text(Text<'a, Message, Renderer>),
@@ -316,6 +318,7 @@ where
             crate::Mark::Band(band) => Series::Band(Band::new(band)),
             crate::Mark::Tick(tick) => Series::Tick(Tick::new(tick)),
             crate::Mark::Heatmap(hm) => Series::Heatmap(Heatmap::new(hm)),
+            crate::Mark::Diagram(d) => Series::Diagram(d),
             crate::Mark::Treemap(tm) => Series::Treemap(Treemap::new(tm)),
             crate::Mark::Violin(v) => Series::Violin(Violin::new(v)),
             crate::Mark::Text(t) => Series::Text(Text::new(t)),
@@ -336,6 +339,7 @@ where
                 Series::Xy(_) => 1,
                 Series::Pie(pie) => pie.data.slices.len(),
                 Series::Gauge(_) => 1,
+                Series::Diagram(d) => d.entries.len(),
                 Series::Treemap(tm) => tm.data.items.len(),
                 Series::Waterfall(_) => 3,
                 Series::Heatmap(_) => 0,
@@ -370,6 +374,7 @@ where
                 Series::Band(band) => band.state(),
                 Series::Tick(tick) => tick.state(),
                 Series::Heatmap(hm) => hm.state(),
+                Series::Diagram(_) => diagram::state::<Renderer::Paragraph>(),
                 Series::Treemap(tm) => tm.state(),
                 Series::Violin(v) => v.state(),
                 Series::Text(t) => t.state(),
@@ -417,6 +422,7 @@ where
                     Series::Band(_) => tree::Tag::of::<band::State<Renderer::Paragraph>>(),
                     Series::Tick(_) => tree::Tag::of::<tick::State>(),
                     Series::Heatmap(_) => tree::Tag::of::<heatmap::State<Renderer::Paragraph>>(),
+                    Series::Diagram(_) => tree::Tag::of::<diagram::State<Renderer::Paragraph>>(),
                     Series::Treemap(_) => tree::Tag::of::<treemap::State<Renderer::Paragraph>>(),
                     Series::Violin(_) => tree::Tag::of::<violin::State>(),
                     Series::Text(_) => tree::Tag::of::<text::State<Renderer::Paragraph>>(),
@@ -437,6 +443,7 @@ where
                         Series::Band(band) => band.state(),
                         Series::Tick(tick) => tick.state(),
                         Series::Heatmap(hm) => hm.state(),
+                        Series::Diagram(_) => diagram::state::<Renderer::Paragraph>(),
                         Series::Treemap(tm) => tm.state(),
                         Series::Violin(v) => v.state(),
                         Series::Text(t) => t.state(),
@@ -456,6 +463,7 @@ where
                         Series::Band(band) => band.diff(tree),
                         Series::Tick(tick) => tick.diff(tree),
                         Series::Heatmap(hm) => hm.diff(tree),
+                        Series::Diagram(_) => {}
                         Series::Treemap(tm) => tm.diff(tree),
                         Series::Violin(v) => v.diff(tree),
                         Series::Text(t) => t.diff(tree),
@@ -476,6 +484,7 @@ where
                 Series::Band(band) => band.state(),
                 Series::Tick(tick) => tick.state(),
                 Series::Heatmap(hm) => hm.state(),
+                Series::Diagram(_) => diagram::state::<Renderer::Paragraph>(),
                 Series::Treemap(tm) => tm.state(),
                 Series::Violin(v) => v.state(),
                 Series::Text(t) => t.state(),
@@ -709,6 +718,14 @@ where
                         }
                     }
                 },
+                Series::Diagram(d) => {
+                    if let Some(b) = d.bounds() {
+                        x_min = x_min.min(b.x_min);
+                        x_max = x_max.max(b.x_max);
+                        y_min = y_min.min(b.y_min);
+                        y_max = y_max.max(b.y_max);
+                    }
+                }
                 // Non-Cartesian marks don't use Cartesian bounds. Text is
                 // a passive label layer that projects through whatever
                 // plane the underlying point mark uses; its items don't
@@ -956,6 +973,9 @@ where
                 }
                 Series::Heatmap(hm) => {
                     hm.layout(series_tree, renderer, limits, use_domain, plot_rect, design);
+                }
+                Series::Diagram(d) => {
+                    diagram::layout(d, series_tree, renderer, limits.bounds(), use_domain, plot_rect, design)
                 }
                 Series::Treemap(tm) => {
                     tm.layout(series_tree, renderer, limits, use_domain, plot_rect, design);
@@ -1342,6 +1362,50 @@ where
     ) where
         D: crate::design::Design + ?Sized,
     {
+        let mut labels = crate::chart::labels::Layer::new(crate::chart::labels::Space::new(layout.bounds()));
+        self.draw_with_labels(
+            tree,
+            renderer,
+            design,
+            style,
+            layout,
+            cursor,
+            viewport,
+            palette,
+            chart_user_palette,
+            selection,
+            hidden_series,
+            corners,
+            track,
+            bottom_axis_line,
+            left_axis_line,
+            &mut labels,
+        );
+        labels.draw(renderer, viewport);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn draw_with_labels<'p, D>(
+        &self,
+        tree: &'p crate::core::widget::Tree,
+        renderer: &mut Renderer,
+        design: &D,
+        style: &crate::core::renderer::Style,
+        layout: crate::core::Layout,
+        cursor: crate::core::mouse::Cursor,
+        viewport: &crate::core::Rectangle,
+        palette: &crate::palette::Resolved,
+        chart_user_palette: Option<&crate::palette::Palette>,
+        selection: &Option<crate::target::Target>,
+        hidden_series: &std::collections::HashSet<String>,
+        corners: crate::core::border::Radius,
+        track: Option<crate::core::Color>,
+        bottom_axis_line: bool,
+        left_axis_line: bool,
+        labels: &mut crate::chart::labels::Layer<'p, Renderer::Paragraph>,
+    ) where
+        D: crate::design::Design + ?Sized,
+    {
         // Track cumulative color offset across series
         let mut color_offset: usize = 0;
 
@@ -1356,7 +1420,7 @@ where
             let series_tree = &tree.children[i];
             match series {
                 Series::Area(a) => {
-                    a.draw(
+                    a.draw_with_labels(
                         series_tree,
                         renderer,
                         design,
@@ -1366,13 +1430,14 @@ where
                         viewport,
                         color_offset,
                         palette,
+                        labels,
                     );
                     color_offset += a.data.series.len();
                 }
                 Series::Line(line) => {
                     let hidden = line.data.name().map(|n| hidden_series.contains(n)).unwrap_or(false);
                     if !hidden {
-                        line.draw(
+                        line.draw_with_labels(
                             series_tree,
                             renderer,
                             design,
@@ -1382,6 +1447,7 @@ where
                             viewport,
                             color_offset,
                             palette,
+                            labels,
                         );
                     }
                     color_offset += 1;
@@ -1396,7 +1462,7 @@ where
                     } else {
                         !bottom_axis_line
                     };
-                    bars.draw(
+                    bars.draw_with_labels(
                         series_tree,
                         renderer,
                         design,
@@ -1413,6 +1479,7 @@ where
                         track,
                         baseline_exposed,
                         hidden_series,
+                        labels,
                     );
                     color_offset += bars.data.series.len();
                 }
@@ -1445,7 +1512,7 @@ where
                     );
                 }
                 Series::Pie(pie) => {
-                    pie.draw(
+                    pie.draw_with_labels(
                         series_tree,
                         renderer,
                         design,
@@ -1458,11 +1525,12 @@ where
                         i,
                         selection,
                         corners,
+                        labels,
                     );
                     color_offset += pie.data.slices.len();
                 }
                 Series::Gauge(gauge) => {
-                    gauge.draw(
+                    gauge.draw_with_labels(
                         series_tree,
                         renderer,
                         design,
@@ -1473,11 +1541,12 @@ where
                         color_offset,
                         palette,
                         corners,
+                        labels,
                     );
                     color_offset += 1;
                 }
                 Series::Waterfall(wf) => {
-                    wf.draw(series_tree, renderer, design, style, layout, cursor, viewport);
+                    wf.draw_with_labels(series_tree, renderer, design, style, layout, cursor, viewport, labels);
                     color_offset += 3;
                 }
                 Series::Xy(xy) => {
@@ -1498,11 +1567,11 @@ where
                     color_offset += 1;
                 }
                 Series::Rule(rule) => {
-                    rule.draw(series_tree, renderer, design, style, layout, cursor, viewport);
+                    rule.draw_with_labels(series_tree, renderer, design, style, layout, cursor, viewport, labels);
                     // Rules don't consume color slots
                 }
                 Series::Band(band) => {
-                    band.draw(series_tree, renderer, design, style, layout, cursor, viewport);
+                    band.draw_with_labels(series_tree, renderer, design, style, layout, cursor, viewport, labels);
                     // Bands don't consume color slots
                 }
                 Series::Tick(tick) => {
@@ -1510,7 +1579,7 @@ where
                     // Ticks don't consume color slots
                 }
                 Series::Heatmap(hm) => {
-                    hm.draw(
+                    hm.draw_with_labels(
                         series_tree,
                         renderer,
                         design,
@@ -1520,11 +1589,30 @@ where
                         viewport,
                         color_offset,
                         palette,
+                        labels,
                     );
                     // Heatmap uses gradient sampling, not discrete slots
                 }
+                Series::Diagram(d) => {
+                    let selected = match selection {
+                        Some(crate::Target::Entry { mark, index, .. }) if *mark == i => Some(*index),
+                        _ => None,
+                    };
+                    diagram::draw(
+                        d,
+                        series_tree,
+                        renderer,
+                        design,
+                        layout,
+                        color_offset,
+                        palette,
+                        labels,
+                        selected,
+                    );
+                    color_offset += d.entries.len();
+                }
                 Series::Treemap(tm) => {
-                    tm.draw(
+                    tm.draw_with_labels(
                         series_tree,
                         renderer,
                         design,
@@ -1534,6 +1622,7 @@ where
                         viewport,
                         color_offset,
                         palette,
+                        labels,
                     );
                     color_offset += tm.data.items.len();
                 }
@@ -1552,7 +1641,7 @@ where
                     color_offset += v.data.entries.len();
                 }
                 Series::Text(t) => {
-                    t.draw(series_tree, renderer, design, style, layout, cursor, viewport);
+                    t.draw_with_labels(series_tree, renderer, design, style, layout, cursor, viewport, labels);
                     // Text labels don't claim a palette slot.
                 }
             }

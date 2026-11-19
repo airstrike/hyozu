@@ -1,24 +1,32 @@
 pub mod alignment;
 pub mod animation;
+pub mod cartesian;
 pub mod chart;
 pub mod color;
 pub mod data;
 pub mod design;
 pub mod encoding;
 pub mod feature;
+pub mod field;
 pub mod geo;
 pub mod geometry;
 pub mod item;
 pub mod map;
 pub mod palette;
+pub mod parts;
 pub mod props;
 pub mod scale;
 pub mod sparkline;
+pub mod spatial;
+#[cfg(feature = "spectral")]
+pub mod spectral;
+pub mod stats;
 pub mod target;
 #[cfg(feature = "tatami")]
 pub mod tatami;
 pub mod text;
 pub mod theme;
+pub mod vector;
 pub mod widget;
 
 // Make our imports look like iced's built-in widgets
@@ -42,6 +50,7 @@ pub use geo::{GeoData, MapScope, ProjectionKind};
 
 pub use data::axis::{self, Axis, Orientation};
 pub use data::legend;
+pub use data::mark::diagram::{Diagram, funnel, hierarchical_treemap, radar, radial_bars, sankey, sunburst};
 pub use data::mark::text::text;
 pub use data::mark::{
     self, Area, Band, BandOrientation, Bars, BoxPlot, Choropleth, ChoroplethEntry, Gauge, Heatmap, LegendEntry, Line,

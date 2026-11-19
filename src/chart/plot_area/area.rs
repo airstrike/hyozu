@@ -1,6 +1,4 @@
-use super::line::{
-    alignment_for_position, clamp_to_bounds, compute_label_rect, dash_segments, draw_markers, place_label,
-};
+use super::line::{alignment_for_position, compute_label_rect, dash_segments, draw_markers, place_label};
 use super::{Domain, to_pixel};
 use crate::animation;
 use crate::core::layout::Limits;
@@ -328,7 +326,6 @@ where
                 // Guarantee the label stays inside the plot area even at the
                 // first/last data point, where the centered ideal rect would
                 // otherwise bleed past the edge and get clipped.
-                let label_rect = clamp_to_bounds(label_rect, rect);
 
                 // Shape the label paragraph theme-free, keyed in lockstep with
                 // `series_label_texts`. Rendered in `draw` via `fill_paragraph`.
@@ -372,6 +369,38 @@ where
         _viewport: &crate::core::Rectangle,
         color_offset: usize,
         palette: &crate::palette::Resolved,
+    ) where
+        Theme: crate::design::Design + ?Sized,
+    {
+        let mut labels = crate::chart::labels::Layer::new(crate::chart::labels::Space::new(layout.bounds()));
+        self.draw_with_labels(
+            tree,
+            renderer,
+            theme,
+            _style,
+            layout,
+            _cursor,
+            _viewport,
+            color_offset,
+            palette,
+            &mut labels,
+        );
+        labels.draw(renderer, _viewport);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn draw_with_labels<'p, Theme>(
+        &self,
+        tree: &'p crate::core::widget::Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        _style: &crate::core::renderer::Style,
+        layout: crate::core::Layout,
+        _cursor: crate::core::mouse::Cursor,
+        _viewport: &crate::core::Rectangle,
+        color_offset: usize,
+        palette: &crate::palette::Resolved,
+        labels: &mut crate::chart::labels::Layer<'p, Renderer::Paragraph>,
     ) where
         Theme: crate::design::Design + ?Sized,
     {
@@ -572,8 +601,6 @@ where
         // glyphs are drawn afterward via the cached paragraphs
         // (`fill_paragraph`) so they sit on top. Suppressed mid-sweep so
         // labels don't pop in over an envelope still growing into place.
-        let mut label_frame = Frame::new(renderer, layout_bounds.size());
-        let mut any_label = false;
         let mut text_draws: Vec<(usize, usize, Point, crate::core::Color)> = Vec::new();
 
         if !animating {
@@ -607,16 +634,11 @@ where
                 for (drawn_idx, ((label_rect, paragraph), resolved_pos)) in
                     rects.iter().zip(paragraphs.iter()).zip(positions.iter()).enumerate()
                 {
-                    any_label = true;
-
                     if let Some(fill_color) = label_fill_color {
-                        let fill_path = Path::new(|b| {
-                            b.rectangle(
-                                Point::new(label_rect.x, label_rect.y),
-                                crate::core::Size::new(label_rect.width, label_rect.height),
-                            );
-                        });
-                        label_frame.fill(&fill_path, fill_color);
+                        labels.background(
+                            *label_rect + crate::core::Vector::new(layout_bounds.x, layout_bounds.y),
+                            fill_color,
+                        );
                     }
 
                     let (align_x, align_y) = alignment_for_position(*resolved_pos);
@@ -651,13 +673,6 @@ where
             }
         }
 
-        if any_label {
-            let label_geometry = label_frame.into_geometry();
-            renderer.with_translation(translation, |renderer| {
-                renderer.draw_geometry(label_geometry);
-            });
-        }
-
         // Draw the label text on top of any background fills via the cached
         // paragraphs.
         for (series_idx, drawn_idx, anchor, color) in text_draws {
@@ -666,7 +681,7 @@ where
                 .get(series_idx)
                 .and_then(|labels| labels.get(drawn_idx))
             {
-                renderer.fill_paragraph(paragraph.raw(), anchor + translation, color, layout_bounds);
+                labels.push(paragraph.raw(), anchor + translation, color);
             }
         }
     }

@@ -149,6 +149,8 @@ fn axes_for_mark(mark: &Mark) -> (Option<Axis>, Option<Axis>) {
         Mark::Choropleth(_) => (Choropleth::x_axis(), Choropleth::y_axis()),
         Mark::Pie(_) => (Pie::x_axis(), Pie::y_axis()),
         Mark::Gauge(_) => (Gauge::x_axis(), Gauge::y_axis()),
+        Mark::Diagram(d) if d.cartesian => (Some(Xy::x_axis()), Some(Xy::y_axis())),
+        Mark::Diagram(_) => (None, None),
         Mark::Treemap(_) => (Treemap::x_axis(), Treemap::y_axis()),
         Mark::Waterfall(_) => (Some(Waterfall::x_axis()), Some(Waterfall::y_axis())),
         Mark::Xy(_) => (Some(Xy::x_axis()), Some(Xy::y_axis())),
@@ -255,6 +257,12 @@ impl IntoData for Xy {
 }
 
 impl IntoData for Heatmap {
+    fn into_data(self) -> Data {
+        Mark::from(self).into_data()
+    }
+}
+
+impl IntoData for mark::Diagram {
     fn into_data(self) -> Data {
         Mark::from(self).into_data()
     }

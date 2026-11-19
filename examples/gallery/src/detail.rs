@@ -1,77 +1,68 @@
-use crate::action::Action;
-use crate::charts::Variant;
-use crate::icon;
+use super::*;
+use iced::widget::column;
 
-use hyozu::Data;
-use iced::widget::{button, column, container, row, scrollable, text, text_editor};
-use iced::{Element, Fill, Font, Length, Widget};
-
-// ---------------------------------------------------------------------------
-// State
-// ---------------------------------------------------------------------------
-
-pub struct Detail {
-    code: text_editor::Content,
-}
-
-#[derive(Debug, Clone)]
-pub enum Message {
-    Back,
-    EditorAction(text_editor::Action),
-}
-
-pub enum Instruction {
-    Back,
-}
-
-// ---------------------------------------------------------------------------
-// Logic
-// ---------------------------------------------------------------------------
-
-impl Detail {
-    pub fn new(source: &str) -> Self {
-        Self {
-            code: text_editor::Content::with_text(source),
+impl App {
+    pub(super) fn detail(&self, id: ChartId) -> Element<'_, Message> {
+        let v = &self.variants[id.0];
+        let back: Element<'_, Message> = control("←  Gallery").style(Ghost).on_press(Message::Back).into();
+        let preview = control("Preview").on_press(Message::Source(false));
+        let preview: Element<'_, Message> = if self.source {
+            preview.style(Ghost).into()
+        } else {
+            preview.style(Outline).into()
+        };
+        let code = control("Source").on_press(Message::Source(true));
+        let code: Element<'_, Message> = if self.source {
+            code.style(Outline).into()
+        } else {
+            code.style(Ghost).into()
+        };
+        let mut actions = row![back, spring(), preview, code]
+            .spacing(7)
+            .align_y(Alignment::Center);
+        if matches!(v.build, charts::Builder::Orbital(_)) && !self.source {
+            actions = actions
+                .push(control("↶").style(Outline).on_press(Message::Orbit(-20.)).into())
+                .push(control("↷").style(Outline).on_press(Message::Orbit(20.)).into());
         }
-    }
-
-    pub fn update(&mut self, message: Message) -> Action<Instruction, Message> {
-        match message {
-            Message::Back => Action::instruction(Instruction::Back),
-            Message::EditorAction(action) => {
-                self.code.perform(action);
-                Action::none()
+        if self.source {
+            actions = actions.push(
+                control(if self.copied { "Copied" } else { "Copy code" })
+                    .style(Outline)
+                    .on_press(Message::Copy)
+                    .into(),
+            );
+        }
+        let content: Element<'_, Message> = if self.source {
+            {
+                let code: Element<'_, Message> = icedcn::widget::code_block(v.source)
+                    .language("rs")
+                    .copyable(false)
+                    .into();
+                scrollable(code).height(Fill).boxed()
             }
-        }
-    }
-
-    pub fn view<'a>(&'a self, variant: &'a Variant, data: &'a Data) -> Element<'a, Message> {
-        let back_btn = button(icon::arrow_left().size(16))
-            .padding([4, 8])
-            .on_press(Message::Back)
-            .style(button::text);
-
-        let title = text(variant.name).size(16);
-        let top_bar = row![back_btn, title].spacing(8).align_y(iced::Alignment::Center);
-
-        let chart_widget = hyozu::chart(data).height(300).padding(10);
-
-        let editor = text_editor(&self.code)
-            .on_action(Message::EditorAction)
-            .highlight("rs")
-            .font(Font::MONOSPACE)
-            .size(12);
-
-        let content = column![
-            top_bar,
-            container(chart_widget).width(Fill),
-            scrollable(container(editor).width(Fill).padding([8, 0])).height(Fill),
+        } else {
+            themer(
+                Some(self.theme.iced_theme().clone()),
+                hyozu::chart::<Message, iced::Theme>(&self.data[id.0])
+                    .on_action(Message::Chart)
+                    .style(hyozu::chart::transparent)
+                    .padding(18)
+                    .height(Fill),
+            )
+            .boxed()
+        };
+        let surface: Element<'_, Message> = icedcn::card(content).width(Fill).height(Fill).padding(8).into();
+        column![
+            actions,
+            heading(v.name, 30),
+            text(v.category.label()).size(14).color(self.theme.muted.foreground),
+            surface
         ]
-        .spacing(8)
-        .padding(16)
+        .spacing(12)
+        .padding(if self.width < 760. { 16 } else { 26 })
         .width(Fill)
-        .height(Fill);
-
-        container(content).width(Fill).height(Length::Fill).boxed()
+        .height(Fill)
+        .boxed()
     }
 }

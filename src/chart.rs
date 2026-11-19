@@ -1,6 +1,7 @@
 pub mod donut;
 pub mod guide;
 pub mod hover;
+mod labels;
 pub mod legend;
 mod navigation;
 pub mod plot_area;
@@ -391,6 +392,16 @@ fn find_nearest_hover<Message>(
     content_rect: Rectangle,
     geo_plane: Option<&plot_area::geo::Plane>,
 ) -> Option<hover::Geometry> {
+    for (mark_idx, (mark, tree)) in plot_area.series.iter().zip(&plot_area_tree.children).enumerate().rev() {
+        if let plot_area::Series::Diagram(_) = mark {
+            let state = tree
+                .state
+                .downcast_ref::<plot_area::diagram::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
+            if let Some(entry_idx) = state.pick(local) {
+                return Some(hover::Geometry::Diagram { mark_idx, entry_idx });
+            }
+        }
+    }
     if let Some(pie_hover) = find_pie_hover(local, plot_area_tree) {
         return Some(pie_hover);
     }
@@ -841,6 +852,18 @@ fn build_hover_entry<'b, Message>(
                 }
                 _ => None,
             }
+        }
+        hover::Geometry::Diagram { mark_idx, entry_idx } => {
+            let plot_area::Series::Diagram(draw) = plot_area.series.get(*mark_idx)? else {
+                return None;
+            };
+            let entry = draw.entries().get(*entry_idx)?;
+            Some(hover::Entry::Diagram {
+                mark_idx: *mark_idx,
+                entry_idx: *entry_idx,
+                label: &entry.name,
+                value: entry.quantitative.then_some(entry.value),
+            })
         }
         hover::Geometry::Pie { mark_idx, slice_idx } => {
             let plot_area::Series::Pie(pie) = plot_area.series.get(*mark_idx)? else {
@@ -1949,6 +1972,24 @@ where
             state.selected = None;
         }
 
+        let label_hit = if has_action
+            && matches!(
+                event,
+                Event::Mouse(
+                    mouse::Event::ButtonPressed(mouse::Button::Left)
+                        | mouse::Event::ButtonReleased(mouse::Button::Left)
+                ) | Event::Touch(touch::Event::FingerPressed { .. } | touch::Event::FingerLifted { .. })
+            )
+            && cursor.is_over(*viewport)
+        {
+            layout.iter(&tree.children).next().and_then(|(scene_layout, _)| {
+                self.scene
+                    .label_at(scene_tree, scene_layout, cursor.position()?, &state.hidden_series)
+            })
+        } else {
+            None
+        };
+
         match event {
             Event::Keyboard(keyboard::Event::KeyPressed {
                 key: Key::Named(key), ..
@@ -2024,7 +2065,7 @@ where
 
             // === CLICK HANDLING ===
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
-                if has_action && cursor.is_over(plot_bounds) =>
+                if has_action && (cursor.is_over(plot_bounds) || label_hit.is_some()) =>
             {
                 state.is_pressed = true;
                 shell.capture_event();
@@ -2040,6 +2081,11 @@ where
                 if state.is_pressed {
                     state.is_pressed = false;
                     shell.capture_event();
+
+                    if let Some(target) = label_hit {
+                        shell.publish(on_action(Action::Clicked(target)));
+                        return;
+                    }
 
                     // Use position_in to get plot-area-local coordinates
                     let Some(local) = cursor.position_in(plot_bounds) else {
@@ -2060,45 +2106,6 @@ where
                         plot_area::treemap::State<<Renderer as crate::core::text::Renderer>::Paragraph>,
                     >();
                     let choropleth_tag = tree::Tag::of::<plot_area::choropleth::State>();
-
-                    // First pass: hit-test labels (labels win when overlapping shapes)
-                    for (mark_idx, mark_tree) in plot_area_tree.children.iter().enumerate() {
-                        if mark_tree.tag == bars_tag {
-                            let bars_state = mark_tree.state.downcast_ref::<plot_area::bars::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
-
-                            for (series_idx, label_rects) in bars_state.label_rects.iter().enumerate() {
-                                for (label_idx, maybe_rect) in label_rects.iter().enumerate() {
-                                    if let Some(rect) = maybe_rect
-                                        && rect.contains(local)
-                                    {
-                                        shell.publish(on_action(Action::Clicked(crate::target::Target::EntryLabel {
-                                            mark: mark_idx,
-                                            series: series_idx,
-                                            index: label_idx,
-                                        })));
-                                        return;
-                                    }
-                                }
-                            }
-                        } else if mark_tree.tag == pie_tag {
-                            let pie_state = mark_tree
-                                .state
-                                .downcast_ref::<plot_area::pie::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
-
-                            for (label_idx, maybe_rect) in pie_state.label_rects.iter().enumerate() {
-                                if let Some(rect) = maybe_rect
-                                    && rect.contains(local)
-                                {
-                                    shell.publish(on_action(Action::Clicked(crate::target::Target::EntryLabel {
-                                        mark: mark_idx,
-                                        series: 0,
-                                        index: label_idx,
-                                    })));
-                                    return;
-                                }
-                            }
-                        }
-                    }
 
                     if let Some(target) = find_geo_feature_click(local, plot_area_tree, self.scene.plot_area()) {
                         shell.publish(on_action(Action::Clicked(target)));
@@ -2131,6 +2138,20 @@ where
                                     mark: mark_idx,
                                     series: 0,
                                     index: slice_idx,
+                                })));
+                                return;
+                            }
+                        } else if mark_tree.tag
+                            == tree::Tag::of::<
+                                plot_area::diagram::State<<Renderer as crate::core::text::Renderer>::Paragraph>,
+                            >()
+                        {
+                            let state = mark_tree.state.downcast_ref::<plot_area::diagram::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
+                            if let Some(index) = state.pick(local) {
+                                shell.publish(on_action(Action::Clicked(crate::Target::Entry {
+                                    mark: mark_idx,
+                                    series: 0,
+                                    index,
                                 })));
                                 return;
                             }
@@ -2589,6 +2610,51 @@ fn draw_tooltip_overlay<Message>(
             draw_box,
             hidden_series,
         ),
+        hover::Geometry::Diagram { mark_idx, entry_idx } => {
+            let Some(plot_area::Series::Diagram(d)) = scene.plot_area().series.get(*mark_idx) else {
+                return;
+            };
+            let Some(e) = d.entries().get(*entry_idx) else {
+                return;
+            };
+            let Some(anchor) = cursor.position() else {
+                return;
+            };
+            if !draw_box || !e.quantitative {
+                return;
+            }
+            let bg = design.background_color();
+            let text = design.text_pair();
+            let palette = scene.resolve_palette(design);
+            let color = e
+                .color
+                .unwrap_or_else(|| palette.get(scene.plot_area().color_offset_for(*mark_idx, *entry_idx)))
+                .resolve(bg, text, &design.seed(), None);
+            let entry = hover::Row {
+                tooltip: TooltipEntry {
+                    x: *entry_idx as f64,
+                    y: e.value,
+                    series_name: Some(e.name.clone()),
+                    series_index: 0,
+                    mark_index: *mark_idx,
+                    color,
+                },
+                anchor,
+                color,
+                highlight: hover::Highlight::None,
+            };
+            draw_tooltip_box(
+                renderer,
+                design,
+                tooltip_config,
+                &[entry],
+                anchor,
+                chart_bounds.x + chart_bounds.width,
+                chart_bounds,
+                text.resolve(bg, None),
+                viewport,
+            );
+        }
         hover::Geometry::Pie { mark_idx, slice_idx } => draw_pie_tooltip_overlay(
             renderer,
             design,
@@ -2648,7 +2714,8 @@ fn hover_mark_indices_are_current(hover: &hover::Geometry, mark_count: usize) ->
         hover::Geometry::Cartesian { entries, .. } => {
             !entries.is_empty() && entries.iter().all(|(mark_idx, _, _)| *mark_idx < mark_count)
         }
-        hover::Geometry::Pie { mark_idx, .. }
+        hover::Geometry::Diagram { mark_idx, .. }
+        | hover::Geometry::Pie { mark_idx, .. }
         | hover::Geometry::Geographic { mark_idx, .. }
         | hover::Geometry::ChoroplethArea { mark_idx, .. } => *mark_idx < mark_count,
     }
@@ -3892,6 +3959,73 @@ pub fn filled(design: &dyn design::Design) -> Style {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clicks_reach_the_overhanging_part_of_a_stacked_bar_label() {
+        use crate::core::renderer::{Headless, Settings};
+        use crate::core::{Theme, shell, text};
+        use iced::futures::executor;
+        type Paragraph = <Renderer as text::Renderer>::Paragraph;
+        let renderer =
+            executor::block_on(Renderer::new(Settings::default(), Some("tiny-skia"))).expect("software renderer");
+        let data = crate::data(
+            crate::bars!([320, 410, 390, 480, 520, 610], [220, 280, 310, 350, 290, 370], [
+                150, 190, 170, 210, 230, 260
+            ])
+            .stacked(),
+        )
+        .y_axis_bounds(0., 1240.)
+        .title("Revenue by Segment");
+        let mut chart = chart::<Action, Theme>(&data)
+            .width(410)
+            .height(212)
+            .padding(10)
+            .on_action(|a| a);
+        let mut tree = Tree::new(&chart);
+        chart.diff(&mut tree);
+        chart.layout(
+            &mut tree,
+            &renderer,
+            &layout::Limits::new(Size::ZERO, Size::new(410., 212.)),
+        );
+        let layout = Layout::new(tree.size).move_to((73., 37.));
+        let (scene, scene_tree) = layout.iter(&tree.children).next().expect("scene");
+        let (plot, plot_tree) = scene.iter(&scene_tree.children).nth(6).expect("plot");
+        let state = plot_tree.children[0]
+            .state
+            .downcast_ref::<plot_area::bars::State<Paragraph>>();
+        let label = state.label_rects[2][5].expect("Q6 label") + (plot.bounds().position() - Point::ORIGIN);
+        let placed = chart.scene.label_space(scene_tree, scene).place(label);
+        let position = Point::new(placed.center_x(), placed.y + 1.);
+        assert!(
+            position.y < plot.bounds().y,
+            "test point must be outside plot: {position:?}, {:?}",
+            plot.bounds()
+        );
+        let viewport = Rectangle::with_size(Size::new(800., 600.));
+        let mut bus = shell::Bus::new();
+        for event in [
+            mouse::Event::ButtonPressed(mouse::Button::Left),
+            mouse::Event::ButtonReleased(mouse::Button::Left),
+        ] {
+            let mut shell = Shell::new(&window::Headless, shell::Waker::noop(), &mut bus);
+            chart.update(
+                &mut tree,
+                &Event::Mouse(event),
+                layout,
+                mouse::Cursor::Available(position),
+                &renderer,
+                &mut shell,
+                &viewport,
+            );
+        }
+        assert!(bus.drain().any(|(a, _)| a
+            == Action::Clicked(crate::Target::EntryLabel {
+                mark: 0,
+                series: 2,
+                index: 5
+            })));
+    }
 
     #[test]
     fn grouped_bars_hover_and_keyboard_targets_share_categories() {

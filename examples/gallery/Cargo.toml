@@ -5,7 +5,8 @@ edition = "2024"
 publish = false
 
 [dependencies]
-hyozu = { path = "../.." }
+icedcn = { git = "https://github.com/airstrike/icedcn", rev = "f42fd4f390504bd82ec9617805cb6cd26e82f95f", default-features = false, features = ["highlighter"] }
+hyozu = { path = "../..", features = ["spectral"] }
 iced = { version = "0.15.0-dev", features = ["highlighter"] }
 
 [build-dependencies]

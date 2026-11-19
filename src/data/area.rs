@@ -373,6 +373,14 @@ impl Area {
                 // label overlay that projects through the same plane as
                 // an underlying mark (cartesian or geo) — its items'
                 // datums never extend the chart's data range.
+                Mark::Diagram(d) => {
+                    if let Some(b) = d.bounds() {
+                        x_min = x_min.min(b.x_min);
+                        x_max = x_max.max(b.x_max);
+                        y_min = y_min.min(b.y_min);
+                        y_max = y_max.max(b.y_max);
+                    }
+                }
                 Mark::Pie(_) | Mark::Gauge(_) | Mark::Treemap(_) | Mark::Choropleth(_) | Mark::Text(_) => {}
             }
         }

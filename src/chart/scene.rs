@@ -25,6 +25,7 @@ fn mark_value_format(mark: &Mark) -> Option<crate::scale::Format<f64>> {
         | Mark::Choropleth(_)
         | Mark::Line(_)
         | Mark::Gauge(_)
+        | Mark::Diagram(_)
         | Mark::Treemap(_)
         | Mark::Waterfall(_)
         | Mark::Xy(_)
@@ -995,6 +996,86 @@ where
         tree.size = available;
     }
 
+    pub(crate) fn label_at(
+        &self,
+        tree: &Tree,
+        layout: crate::core::Layout,
+        position: crate::core::Point,
+        hidden: &std::collections::HashSet<String>,
+    ) -> Option<crate::Target> {
+        if !layout.bounds().contains(position) {
+            return None;
+        }
+        let space = self.label_space(tree, layout);
+        let (plot, plot_tree) = layout.iter(&tree.children).nth(6)?;
+        let shift = plot.bounds().position() - crate::core::Point::ORIGIN;
+        let hit = |rect: &Option<crate::core::Rectangle>| {
+            rect.is_some_and(|rect| space.place(rect + shift).contains(position))
+        };
+        for (mark, (series, child)) in self.plot_area.series.iter().zip(&plot_tree.children).enumerate().rev() {
+            match series {
+                crate::chart::plot_area::Series::Bars(bars) => {
+                    let state = child
+                        .state
+                        .downcast_ref::<crate::chart::plot_area::bars::State<Renderer::Paragraph>>();
+                    for (series, rects) in state.label_rects.iter().enumerate() {
+                        if bars
+                            .data
+                            .series(series)
+                            .and_then(|s| s.name())
+                            .is_some_and(|name| hidden.contains(name))
+                        {
+                            continue;
+                        }
+                        if let Some(index) = rects.iter().position(hit) {
+                            return Some(crate::Target::EntryLabel { mark, series, index });
+                        }
+                    }
+                }
+                crate::chart::plot_area::Series::Pie(_) => {
+                    let state = child
+                        .state
+                        .downcast_ref::<crate::chart::plot_area::pie::State<Renderer::Paragraph>>();
+                    if let Some(index) = state.label_rects.iter().position(hit) {
+                        return Some(crate::Target::EntryLabel { mark, series: 0, index });
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    pub(crate) fn label_space(&self, tree: &Tree, layout: crate::core::Layout) -> crate::chart::labels::Space {
+        let children_layouts: Vec<_> = layout.iter(&tree.children).map(|(l, _)| l).collect();
+        let mut label_space = crate::chart::labels::Space::new(layout.bounds());
+        if self.title.is_some() {
+            let bounds = children_layouts[0].bounds();
+            let title = tree.children[0]
+                .state
+                .downcast_ref::<title::State<Renderer::Paragraph>>();
+            let size = title.paragraph.min_bounds();
+            label_space.reserve(crate::core::Rectangle {
+                x: bounds.center_x() - size.width / 2.,
+                y: bounds.y + 10.,
+                width: size.width,
+                height: size.height,
+            });
+        }
+        for (index, active) in [
+            (1, self.legend.is_some()),
+            (2, self.top_axis.is_some()),
+            (3, self.right_axis.is_some()),
+            (4, self.bottom_axis.is_some()),
+            (5, self.left_axis.is_some()),
+        ] {
+            if active {
+                label_space.reserve(children_layouts[index].bounds());
+            }
+        }
+        label_space
+    }
+
     /// Draws the scene by delegating to its 7 pieces.
     /// Follows the same order as layout() - navigates layout tree and delegates.
     #[allow(clippy::too_many_arguments)]
@@ -1126,7 +1207,8 @@ where
             .unwrap_or(false);
         let left_axis_line = self.left_axis.as_ref().map(|g| g.axis().shows_line()).unwrap_or(false);
 
-        self.plot_area.draw(
+        let mut labels = crate::chart::labels::Layer::new(self.label_space(tree, layout));
+        self.plot_area.draw_with_labels(
             &tree.children[6],
             renderer,
             design,
@@ -1142,7 +1224,9 @@ where
             track,
             bottom_axis_line,
             left_axis_line,
+            &mut labels,
         );
+        labels.draw(renderer, viewport);
 
         // Scale legends. Overlaid panels float inside the plot area;
         // inset strips live outside the plot area in rectangles the scene

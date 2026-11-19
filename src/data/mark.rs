@@ -5,6 +5,7 @@ pub mod bar;
 pub mod boxplot;
 pub mod bubble_map;
 pub mod choropleth;
+pub mod diagram;
 pub mod gauge;
 pub mod heatmap;
 pub mod line;
@@ -25,6 +26,7 @@ pub use bubble_map::{MapPoint, bubble_map, bubble_map_with_labels, map_point};
 pub use choropleth::{
     Choropleth, ChoroplethEntry, IntoChoropleth, choropleth, choropleth_entry, choropleth_entry_available,
 };
+pub use diagram::{Diagram, funnel, hierarchical_treemap, radar, radial_bars, sankey, sunburst};
 pub use gauge::{Gauge, gauge};
 pub use heatmap::{Heatmap, heatmap};
 pub use line::{IntoLines, Line, LineStyle, line};
@@ -79,6 +81,7 @@ pub enum Mark {
     Line(Line),
     Pie(Pie),
     Gauge(Gauge),
+    Diagram(Diagram),
     Treemap(Treemap),
     Waterfall(Waterfall),
     Xy(Xy),
@@ -186,6 +189,16 @@ impl Mark {
                     })
                 })
                 .collect(),
+            Mark::Diagram(d) => d
+                .entries
+                .iter()
+                .map(|e| LegendEntry {
+                    name: e.name.clone(),
+                    color: e.color,
+                    swatch: LegendSwatch::Square,
+                    value: None,
+                })
+                .collect(),
             Mark::Treemap(tm) => tm
                 .items
                 .iter()
@@ -232,6 +245,7 @@ impl Mark {
             | Mark::Rule(_)
             | Mark::Text(_)
             | Mark::Tick(_)
+            | Mark::Diagram(_)
             | Mark::Treemap(_)
             | Mark::Violin(_)
             | Mark::Waterfall(_)
@@ -309,6 +323,12 @@ impl From<Tick> for Mark {
 impl From<Heatmap> for Mark {
     fn from(heatmap: Heatmap) -> Self {
         Mark::Heatmap(heatmap)
+    }
+}
+
+impl From<Diagram> for Mark {
+    fn from(d: Diagram) -> Self {
+        Self::Diagram(d)
     }
 }
 

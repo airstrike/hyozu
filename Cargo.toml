@@ -4,6 +4,7 @@ version = "0.3.0"
 edition = "2024"
 
 [dependencies]
+rustfft = { version = "6.4", optional = true }
 iced_core = "0.15.0-dev"
 iced_widget = { version = "0.15.0-dev", features = ["canvas"] }
 jiff = "0.2"
@@ -12,6 +13,7 @@ serde_json = { version = "1", optional = true }
 tatami = { git = "https://github.com/airstrike/tatami", branch = "master", optional = true }
 
 [features]
+spectral = ["dep:rustfft"]
 advanced = []
 geojson = ["dep:serde", "dep:serde_json"]
 # Enables the `hyozu::tatami` adapter module — converters from tatami OLAP
@@ -29,6 +31,7 @@ members = ["examples/*"]
 [patch.crates-io]
 iced = { git = "https://github.com/airstrike/iced.git", branch = "dev" }
 iced_core = { git = "https://github.com/airstrike/iced.git", branch = "dev" }
+iced_highlighter = { git = "https://github.com/airstrike/iced.git", branch = "dev" }
 iced_graphics = { git = "https://github.com/airstrike/iced.git", branch = "dev" }
 iced_runtime = { git = "https://github.com/airstrike/iced.git", branch = "dev" }
 iced_widget = { git = "https://github.com/airstrike/iced.git", branch = "dev" }

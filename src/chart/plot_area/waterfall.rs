@@ -350,6 +350,25 @@ where
     ) where
         Theme: crate::design::Design + ?Sized,
     {
+        let mut labels = crate::chart::labels::Layer::new(crate::chart::labels::Space::new(layout.bounds()));
+        self.draw_with_labels(tree, renderer, theme, _style, layout, _cursor, _viewport, &mut labels);
+        labels.draw(renderer, _viewport);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn draw_with_labels<'p, Theme>(
+        &self,
+        tree: &'p crate::core::widget::Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        _style: &crate::core::renderer::Style,
+        layout: crate::core::Layout,
+        _cursor: crate::core::mouse::Cursor,
+        _viewport: &crate::core::Rectangle,
+        labels: &mut crate::chart::labels::Layer<'p, Renderer::Paragraph>,
+    ) where
+        Theme: crate::design::Design + ?Sized,
+    {
         let state = tree.state.downcast_ref::<State<Renderer::Paragraph>>();
 
         if state.rects.is_empty() {
@@ -563,7 +582,7 @@ where
         // Draw the data-label text on top via the cached paragraphs.
         for (i, anchor, color) in label_draws {
             if let Some(paragraph) = state.labels.get(i) {
-                renderer.fill_paragraph(paragraph.raw(), anchor + translation, color, layout_bounds);
+                labels.push(paragraph.raw(), anchor + translation, color);
             }
         }
     }

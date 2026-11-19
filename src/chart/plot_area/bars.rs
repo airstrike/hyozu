@@ -866,6 +866,52 @@ where
     ) where
         Theme: crate::design::Design + ?Sized,
     {
+        let mut labels = crate::chart::labels::Layer::new(crate::chart::labels::Space::new(_layout.bounds()));
+        self.draw_with_labels(
+            tree,
+            renderer,
+            theme,
+            _style,
+            _layout,
+            _cursor,
+            _viewport,
+            color_offset,
+            palette,
+            chart_user_palette,
+            mark_index,
+            selection,
+            corners,
+            track,
+            baseline_exposed,
+            hidden_series,
+            &mut labels,
+        );
+        labels.draw(renderer, _viewport);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn draw_with_labels<'p, Theme>(
+        &self,
+        tree: &'p crate::core::widget::Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        _style: &crate::core::renderer::Style,
+        _layout: crate::core::Layout,
+        _cursor: crate::core::mouse::Cursor,
+        _viewport: &crate::core::Rectangle,
+        color_offset: usize,
+        palette: &crate::palette::Resolved,
+        chart_user_palette: Option<&crate::palette::Palette>,
+        mark_index: usize,
+        selection: &Option<crate::target::Target>,
+        corners: crate::core::border::Radius,
+        track: Option<crate::core::Color>,
+        baseline_exposed: bool,
+        hidden_series: &std::collections::HashSet<String>,
+        labels: &mut crate::chart::labels::Layer<'p, Renderer::Paragraph>,
+    ) where
+        Theme: crate::design::Design + ?Sized,
+    {
         let state = tree.state.downcast_ref::<State<Renderer::Paragraph>>();
 
         let hidden = |index: usize| {
@@ -883,7 +929,6 @@ where
         let mut bar_frame = Frame::new(renderer, layout_bounds.size());
         // Single frame for label background fills (the text itself is drawn
         // directly via `fill_paragraph`, not into this frame).
-        let mut label_frame = Frame::new(renderer, layout_bounds.size());
 
         // Data-label render list: `(series, bar, anchor, color)`. The anchor is
         // layout-local (matching the bar rects); it is offset by `layout_bounds`
@@ -1135,13 +1180,10 @@ where
                         && let Some(Some(lr)) = state.label_rects.get(series_idx).and_then(|rects| rects.get(bar_idx))
                     {
                         let fill_resolved = fill_color_spec.resolve(background, text_pair, &seed, None);
-                        let fill_path = Path::new(|b| {
-                            b.rectangle(
-                                crate::core::Point::new(lr.x, lr.y),
-                                crate::core::Size::new(lr.width, lr.height),
-                            );
-                        });
-                        label_frame.fill(&fill_path, fill_resolved);
+                        labels.background(
+                            *lr + crate::core::Vector::new(layout_bounds.x, layout_bounds.y),
+                            fill_resolved,
+                        );
                     }
 
                     // Resolve label color based on position
@@ -1274,27 +1316,11 @@ where
                     if should_highlight_label(series_idx, bar_idx)
                         && let Some(Some(lr)) = state.label_rects.get(series_idx).and_then(|rects| rects.get(bar_idx))
                     {
-                        let outer_rect = Rectangle {
-                            x: lr.x - 1.0,
-                            y: lr.y - 1.0,
-                            width: lr.width + 2.0,
-                            height: lr.height + 2.0,
-                        };
-                        let outer_path = Path::new(|b| {
-                            b.rectangle(
-                                crate::core::Point::new(outer_rect.x, outer_rect.y),
-                                crate::core::Size::new(outer_rect.width, outer_rect.height),
-                            );
-                        });
-                        selection_frame.stroke(&outer_path, Stroke::default().with_color(outer_color).with_width(1.0));
-
-                        let inner_path = Path::new(|b| {
-                            b.rectangle(
-                                crate::core::Point::new(lr.x, lr.y),
-                                crate::core::Size::new(lr.width, lr.height),
-                            );
-                        });
-                        selection_frame.stroke(&inner_path, Stroke::default().with_color(inner_color).with_width(1.0));
+                        labels.outline(
+                            *lr + crate::core::Vector::new(layout_bounds.x, layout_bounds.y),
+                            outer_color,
+                            inner_color,
+                        );
                     }
                 }
             }
@@ -1308,21 +1334,11 @@ where
             renderer.draw_geometry(bar_geometry);
         });
 
-        let label_geometry = label_frame.into_geometry();
-        renderer.with_translation(translation, |renderer| {
-            renderer.draw_geometry(label_geometry);
-        });
-
-        // Draw the data-label text on top of any background fills via cached
-        // paragraphs shaped in `layout`. Anchors are layout-local, so add the
-        // plot translation to reach absolute coordinates. Clip to the plot
-        // rect (`layout_bounds`) — the same clip the label canvas frame
-        // applied before — so an overhanging label is cut at the plot edge
-        // exactly as it was when shaped via `fill_text`.
+        // Data labels share the chart draw pass and use absolute anchors.
         for (series_idx, bar_idx, anchor, color) in label_draws {
             if let Some(paragraph) = state.labels.get(series_idx).and_then(|s| s.get(bar_idx)) {
                 let anchor = anchor + translation;
-                renderer.fill_paragraph(paragraph.raw(), anchor, color, layout_bounds);
+                labels.push(paragraph.raw(), anchor, color);
             }
         }
 

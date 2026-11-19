@@ -49,6 +49,10 @@ pub(crate) enum Highlight {
 #[non_exhaustive]
 #[derive(PartialEq)]
 pub(crate) enum Geometry {
+    Diagram {
+        mark_idx: usize,
+        entry_idx: usize,
+    },
     /// Hover over a Cartesian mark snapped to `data_x`.
     Cartesian {
         /// Snapped data-space x coordinate.
@@ -115,6 +119,13 @@ pub(crate) struct Row {
 /// theme directly.
 #[non_exhaustive]
 pub enum Entry<'a> {
+    /// A selected flow, region or scientific mark. Series spanning several values carry no single measurement.
+    Diagram {
+        mark_idx: usize,
+        entry_idx: usize,
+        label: &'a str,
+        value: Option<f64>,
+    },
     /// Hover over a Cartesian mark (Line / Area / Xy / Bars).
     Cartesian {
         mark_idx: usize,

@@ -413,6 +413,44 @@ where
     ) where
         Theme: crate::design::Design + ?Sized,
     {
+        let mut labels = crate::chart::labels::Layer::new(crate::chart::labels::Space::new(layout.bounds()));
+        self.draw_with_labels(
+            tree,
+            renderer,
+            theme,
+            _style,
+            layout,
+            _cursor,
+            _viewport,
+            color_offset,
+            palette,
+            mark_index,
+            selection,
+            corners,
+            &mut labels,
+        );
+        labels.draw(renderer, _viewport);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn draw_with_labels<'p, Theme>(
+        &self,
+        tree: &'p crate::core::widget::Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        _style: &crate::core::renderer::Style,
+        layout: crate::core::Layout,
+        _cursor: crate::core::mouse::Cursor,
+        _viewport: &crate::core::Rectangle,
+        color_offset: usize,
+        palette: &crate::palette::Resolved,
+        mark_index: usize,
+        selection: &Option<crate::target::Target>,
+        corners: crate::core::border::Radius,
+        labels: &mut crate::chart::labels::Layer<'p, Renderer::Paragraph>,
+    ) where
+        Theme: crate::design::Design + ?Sized,
+    {
         let state = tree.state.downcast_ref::<State<Renderer::Paragraph>>();
 
         if state.slice_angles.is_empty() {
@@ -530,13 +568,10 @@ where
                     && let Some(Some(lr)) = state.label_rects.get(i)
                 {
                     let fill_resolved = fill_color_spec.resolve(background, text_pair, &seed, None);
-                    let fill_path = Path::new(|b| {
-                        b.rectangle(
-                            crate::core::Point::new(lr.x, lr.y),
-                            crate::core::Size::new(lr.width, lr.height),
-                        );
-                    });
-                    frame.fill(&fill_path, fill_resolved);
+                    labels.background(
+                        *lr + crate::core::Vector::new(layout_bounds.x, layout_bounds.y),
+                        fill_resolved,
+                    );
                 }
 
                 let (lx, ly, align_x, align_y) = label_anchor(label.position, mid, cx, cy, radius, inner_radius);
@@ -637,27 +672,11 @@ where
                     continue;
                 }
                 if let Some(lr) = maybe_rect {
-                    let outer_rect = crate::core::Rectangle {
-                        x: lr.x - 1.0,
-                        y: lr.y - 1.0,
-                        width: lr.width + 2.0,
-                        height: lr.height + 2.0,
-                    };
-                    let outer_path = Path::new(|b| {
-                        b.rectangle(
-                            crate::core::Point::new(outer_rect.x, outer_rect.y),
-                            crate::core::Size::new(outer_rect.width, outer_rect.height),
-                        );
-                    });
-                    selection_frame.stroke(&outer_path, Stroke::default().with_color(outer_color).with_width(1.0));
-
-                    let inner_path = Path::new(|b| {
-                        b.rectangle(
-                            crate::core::Point::new(lr.x, lr.y),
-                            crate::core::Size::new(lr.width, lr.height),
-                        );
-                    });
-                    selection_frame.stroke(&inner_path, Stroke::default().with_color(inner_color).with_width(1.0));
+                    labels.outline(
+                        *lr + crate::core::Vector::new(layout_bounds.x, layout_bounds.y),
+                        outer_color,
+                        inner_color,
+                    );
                 }
             }
 
@@ -702,7 +721,7 @@ where
         // previous draw order where the labels were baked into `frame`.
         for (i, anchor, color) in label_draws {
             if let Some(paragraph) = state.labels.get(i) {
-                renderer.fill_paragraph(paragraph.raw(), anchor + translation, color, layout_bounds);
+                labels.push(paragraph.raw(), anchor + translation, color);
             }
         }
 

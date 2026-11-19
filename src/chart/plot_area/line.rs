@@ -219,11 +219,11 @@ where
                         // For fixed positions, use pathfinding too to avoid obstacles
                         let start_rect = compute_label_rect(*pixel_point, label_width, label_height, other);
                         let slot_rect =
-                            search_from_position(start_rect, &segments, &state.label_rects, obstacles, Some(rect), 10)
+                            search_from_position(start_rect, &segments, &state.label_rects, obstacles, None, 10)
                                 .map(|(slot, _)| slot)
                                 .unwrap_or(start_rect);
-                        // Guarantee visibility at edges even if no valid slot exists.
-                        (other, clamp_to_bounds(slot_rect, rect))
+                        // The chart-level label pass places overhanging labels inside the card.
+                        (other, slot_rect)
                     }
                 };
 
@@ -271,6 +271,38 @@ where
         _viewport: &crate::core::Rectangle,
         color_offset: usize,
         palette: &crate::palette::Resolved,
+    ) where
+        Theme: crate::design::Design + ?Sized,
+    {
+        let mut labels = crate::chart::labels::Layer::new(crate::chart::labels::Space::new(layout.bounds()));
+        self.draw_with_labels(
+            tree,
+            renderer,
+            theme,
+            _style,
+            layout,
+            _cursor,
+            _viewport,
+            color_offset,
+            palette,
+            &mut labels,
+        );
+        labels.draw(renderer, _viewport);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn draw_with_labels<'p, Theme>(
+        &self,
+        tree: &'p crate::core::widget::Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        _style: &crate::core::renderer::Style,
+        layout: crate::core::Layout,
+        _cursor: crate::core::mouse::Cursor,
+        _viewport: &crate::core::Rectangle,
+        color_offset: usize,
+        palette: &crate::palette::Resolved,
+        labels: &mut crate::chart::labels::Layer<'p, Renderer::Paragraph>,
     ) where
         Theme: crate::design::Design + ?Sized,
     {
@@ -394,8 +426,6 @@ where
             let label_fill_color = label_config
                 .fill
                 .map(|spec| spec.resolve(background, text_pair, &seed, None));
-
-            let mut label_frame = Frame::new(renderer, layout_bounds.size());
             let mut text_anchors: Vec<(usize, Point)> = Vec::new();
 
             for (idx, ((label_rect, paragraph), resolved_pos)) in state
@@ -408,13 +438,10 @@ where
                 // Background fill, if configured. The placement search already
                 // produced a tight rect for the text, so we just use it.
                 if let Some(fill_color) = label_fill_color {
-                    let fill_path = Path::new(|b| {
-                        b.rectangle(
-                            Point::new(label_rect.x, label_rect.y),
-                            crate::core::Size::new(label_rect.width, label_rect.height),
-                        );
-                    });
-                    label_frame.fill(&fill_path, fill_color);
+                    labels.background(
+                        *label_rect + crate::core::Vector::new(layout_bounds.x, layout_bounds.y),
+                        fill_color,
+                    );
                 }
 
                 let (align_x, align_y) = alignment_for_position(*resolved_pos);
@@ -448,16 +475,12 @@ where
             }
 
             let translation = crate::core::Vector::new(layout_bounds.x, layout_bounds.y);
-            let label_geometry = label_frame.into_geometry();
-            renderer.with_translation(translation, |renderer| {
-                renderer.draw_geometry(label_geometry);
-            });
 
             // Draw the label text on top of any background fills via the
             // cached paragraphs.
             for (idx, anchor) in text_anchors {
                 if let Some(paragraph) = state.labels.get(idx) {
-                    renderer.fill_paragraph(paragraph.raw(), anchor + translation, label_color, layout_bounds);
+                    labels.push(paragraph.raw(), anchor + translation, label_color);
                 }
             }
         }
