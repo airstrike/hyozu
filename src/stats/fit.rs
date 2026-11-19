@@ -126,6 +126,86 @@ pub fn jitter(samples: &[[f64; 2]], width: [f64; 2], seed: u64) -> Xy {
     )
 }
 
+/// Conditional quantile line minimizing the asymmetric absolute residual loss.
+/// For a fixed slope the optimal intercept is the corresponding residual quantile.
+/// Centering x keeps the search stable for large timestamp offsets.
+pub fn quantile(samples: &[[f64; 2]], probability: f64) -> Option<crate::Line> {
+    if !(0. < probability && probability < 1.) {
+        return None;
+    }
+    let mut points: Vec<_> = samples
+        .iter()
+        .copied()
+        .filter(|p| p.iter().all(|v| v.is_finite()))
+        .collect();
+    points.sort_by(|a, b| a[0].total_cmp(&b[0]));
+    let lo = points.first()?[0];
+    let hi = points.last()?[0];
+    if hi <= lo {
+        return None;
+    }
+    for p in &mut points {
+        p[0] = (p[0] - lo) / (hi - lo);
+    }
+    let rank = ((points.len() as f64 * probability).ceil() as usize)
+        .saturating_sub(1)
+        .min(points.len() - 1);
+    let fit = |slope: f64| {
+        let mut residuals: Vec<_> = points.iter().map(|&[x, y]| y - slope * x).collect();
+        let intercept = *residuals.select_nth_unstable_by(rank, f64::total_cmp).1;
+        let loss = residuals
+            .iter()
+            .map(|&r| {
+                let e = r - intercept;
+                if e >= 0. {
+                    probability * e
+                } else {
+                    (probability - 1.) * e
+                }
+            })
+            .sum::<f64>();
+        (intercept, loss)
+    };
+    let (min, max) = points
+        .iter()
+        .fold((points[0][1], points[0][1]), |(a, b), p| (a.min(p[1]), b.max(p[1])));
+    let mut width = (max - min).max(1.);
+    let mut mid = 0.;
+    let mut found = false;
+    for _ in 0..128 {
+        let loss = fit(mid).1;
+        let left = fit(mid - width).1;
+        let right = fit(mid + width).1;
+        if loss <= left && loss <= right {
+            found = true;
+            break;
+        }
+        mid += if left < right { -width } else { width };
+        width *= 2.;
+        if !width.is_finite() {
+            return None;
+        }
+    }
+    if !found {
+        return None;
+    }
+    let (mut a, mut b) = (mid - width, mid + width);
+    for _ in 0..96 {
+        let u = a + (b - a) / 3.;
+        let v = b - (b - a) / 3.;
+        if fit(u).1 <= fit(v).1 {
+            b = v;
+        } else {
+            a = u;
+        }
+    }
+    let slope = a.midpoint(b);
+    let intercept = fit(slope).0;
+    let end = intercept + slope;
+    (intercept.is_finite() && end.is_finite())
+        .then(|| line([(lo, intercept), (hi, end)]).with_name(format!("Quantile {probability}")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -242,16 +242,41 @@ pub fn tiles(x: &[f64], y: &[f64], values: &[f64]) -> Option<Diagram> {
 /// The origin is a cell center. Cube-coordinate rounding assigns boundary
 /// points deterministically, including negative coordinates.
 pub fn hexbin(points: &[[f64; 2]], radius: f64) -> Option<Diagram> {
+    hex_cells(
+        points.iter().map(|&[x, y]| [x, y, 1.]),
+        radius,
+        |cell: &mut usize, _| *cell += 1,
+        |n| n as f64,
+    )
+}
+
+/// Reduce finite scalar observations inside each occupied hexagon. For
+/// example a caller can supply a mean, sum, median or maximum.
+pub fn hexbin_values(points: &[[f64; 3]], radius: f64, reduce: impl Fn(&[f64]) -> f64) -> Option<Diagram> {
+    hex_cells(
+        points.iter().copied(),
+        radius,
+        |cell: &mut Vec<f64>, z| cell.push(z),
+        |cell| reduce(&cell),
+    )
+}
+
+fn hex_cells<T: Default>(
+    points: impl Iterator<Item = [f64; 3]>,
+    radius: f64,
+    mut insert: impl FnMut(&mut T, f64),
+    reduce: impl Fn(T) -> f64,
+) -> Option<Diagram> {
     if !radius.is_finite() || radius <= 0. {
         return None;
     }
     let root3 = 3_f64.sqrt();
     let mut cells = std::collections::BTreeMap::new();
-    for &[x, y] in points.iter().filter(|p| p.iter().all(|v| v.is_finite())) {
+    for [x, y, z] in points.filter(|p| p.iter().all(|v| v.is_finite())) {
         let q = 2. / 3. * x / radius;
         let r = (-x / 3. + y / root3) / radius;
         let s = -q - r;
-        if [q, r, s].iter().any(|v| v.abs() >= i64::MAX as f64) {
+        if [q, r, s].iter().any(|v| !v.is_finite() || v.abs() >= i64::MAX as f64) {
             continue;
         }
         let (mut rq, mut rr, rs) = (q.round(), r.round(), s.round());
@@ -261,34 +286,226 @@ pub fn hexbin(points: &[[f64; 2]], radius: f64) -> Option<Diagram> {
         } else if dr > ds {
             rr = -rq - rs;
         }
-        *cells.entry((rq as i64, rr as i64)).or_insert(0usize) += 1;
+        insert(cells.entry((rq as i64, rr as i64)).or_default(), z);
     }
-    let mut levels: Vec<_> = cells.values().copied().collect();
-    levels.sort_unstable();
-    levels.dedup();
+    let faces = cells
+        .into_iter()
+        .map(|((q, r), cell)| {
+            let cx = radius * 1.5 * q as f64;
+            let cy = radius * root3 * (r as f64 + 0.5 * q as f64);
+            let corners = (0..6)
+                .map(|i| {
+                    let angle = f64::from(i) * std::f64::consts::TAU / 6.;
+                    [cx + radius * angle.cos(), cy + radius * angle.sin()]
+                })
+                .collect();
+            (reduce(cell), corners)
+        })
+        .collect();
+    Some(scalar_faces(faces))
+}
+
+/// Color arbitrary quadrilateral mesh cells by measured scalar. Vertices
+/// are ordered by y row, then x column. Any nonfinite corner masks its cell.
+pub fn quad_mesh(columns: usize, rows: usize, vertices: &[[f64; 2]], values: &[f64]) -> Option<Diagram> {
+    if rows < 2
+        || columns < 2
+        || rows.checked_mul(columns)? != vertices.len()
+        || (rows - 1).checked_mul(columns - 1)? != values.len()
+    {
+        return None;
+    }
+    let faces: Vec<_> = values
+        .iter()
+        .enumerate()
+        .map(|(i, &value)| {
+            let a = i / (columns - 1) * columns + i % (columns - 1);
+            (
+                value,
+                [
+                    vertices[a],
+                    vertices[a + 1],
+                    vertices[a + columns + 1],
+                    vertices[a + columns],
+                ]
+                .to_vec(),
+            )
+        })
+        .collect();
+    Some(scalar_faces(faces))
+}
+
+fn scalar_faces(mut faces: Vec<(f64, Vec<[f64; 2]>)>) -> Diagram {
+    faces.retain(|(value, vertices)| value.is_finite() && vertices.iter().flatten().all(|v| v.is_finite()));
+    let mut levels: Vec<_> = faces.iter().map(|p| p.0).filter(|v| v.is_finite()).collect();
+    levels.sort_by(f64::total_cmp);
+    levels.dedup_by(|a, b| a.total_cmp(b).is_eq());
     let mut d = Diagram::cartesian();
-    for &n in &levels {
-        d.entry(&n.to_string(), n as f64);
+    for &v in &levels {
+        d.entry(&v.to_string(), v);
     }
-    for ((q, r), n) in cells {
-        let cx = radius * 1.5 * q as f64;
-        let cy = radius * root3 * (r as f64 + 0.5 * q as f64);
-        if let Ok(id) = levels.binary_search(&n) {
-            d.path(
-                id,
-                (0..6)
-                    .map(|i| {
-                        let theta = i as f64 * std::f64::consts::TAU / 6.;
-                        [cx + radius * theta.cos(), cy + radius * theta.sin()]
-                    })
-                    .collect(),
-                true,
-                1.,
-            );
+    for (v, vertices) in faces {
+        if let Ok(slot) = levels.binary_search_by(|x| x.total_cmp(&v)) {
+            d.path(slot, vertices, true, 1.);
         }
     }
     d.scalar_colors();
+    d
+}
+
+impl Mesh {
+    /// Flat triangle coloring by the mean of the three vertex values.
+    pub fn face_colors(&self) -> Diagram {
+        scalar_faces(
+            self.triangles()
+                .map(|tri| {
+                    (
+                        tri.iter().map(|p| p.value / 3.).sum(),
+                        tri.into_iter().map(Sample::position).collect(),
+                    )
+                })
+                .collect(),
+        )
+    }
+
+    /// Product-kernel bivariate Gaussian density at each grid vertex.
+    /// The two bandwidths use the x and y coordinate units.
+    pub fn density(x: &[f64], y: &[f64], points: &[[f64; 2]], bandwidth: [f64; 2]) -> Option<Self> {
+        if !axis(x) || !axis(y) || bandwidth.iter().any(|v| !v.is_finite() || *v <= 0.) {
+            return None;
+        }
+        let points: Vec<_> = points.iter().filter(|p| p.iter().all(|v| v.is_finite())).collect();
+        if points.is_empty() {
+            return None;
+        }
+        let denom = points.len() as f64 * std::f64::consts::TAU * bandwidth[0] * bandwidth[1];
+        let mut z = Vec::with_capacity(x.len().checked_mul(y.len())?);
+        for &yy in y {
+            for &xx in x {
+                z.push(
+                    points
+                        .iter()
+                        .map(|p| {
+                            let dx = (xx - p[0]) / bandwidth[0];
+                            let dy = (yy - p[1]) / bandwidth[1];
+                            (-0.5 * (dx * dx + dy * dy)).exp()
+                        })
+                        .sum::<f64>()
+                        / denom,
+                );
+            }
+        }
+        Self::grid(x, y, &z)
+    }
+}
+
+/// An RGBA8 image in Cartesian coordinates, row zero at the top. The
+/// renderer uploads a single texture and uses the requested interpolation.
+#[cfg(feature = "raster")]
+pub fn image(
+    width: u32,
+    height: u32,
+    rgba: Vec<u8>,
+    x: [f64; 2],
+    y: [f64; 2],
+    filter: crate::core::image::FilterMethod,
+) -> Option<Diagram> {
+    if width == 0
+        || height == 0
+        || (width as usize).checked_mul(height as usize)?.checked_mul(4)? != rgba.len()
+        || !axis(&x)
+        || !axis(&y)
+    {
+        return None;
+    }
+    let mut d = Diagram::cartesian();
+    d.image = Some(
+        crate::core::image::Image::new(crate::core::image::Handle::from_rgba(width, height, rgba))
+            .filter_method(filter),
+    );
+    d.range = Some(crate::data::area::Bounds {
+        x_min: x[0],
+        x_max: x[1],
+        y_min: y[0],
+        y_max: y[1],
+    });
     Some(d)
+}
+
+/// Color a scalar image through a caller-supplied normalized color map.
+/// Nonfinite samples are transparent. Row zero is the upper image edge.
+#[cfg(feature = "raster")]
+pub fn scalar_image(
+    dimensions: [u32; 2],
+    values: &[f64],
+    extent: [[f64; 2]; 2],
+    limits: [f64; 2],
+    filter: crate::core::image::FilterMethod,
+    color: impl Fn(f64) -> [u8; 4],
+) -> Option<Diagram> {
+    let [w, h] = dimensions;
+    let [lo, hi] = limits;
+    if (w as usize).checked_mul(h as usize)? != values.len() || !axis(&limits) {
+        return None;
+    }
+    let rgba = values
+        .iter()
+        .flat_map(|&v| {
+            if v.is_finite() {
+                color(((v - lo) / (hi - lo)).clamp(0., 1.))
+            } else {
+                [0; 4]
+            }
+        })
+        .collect();
+    image(w, h, rgba, extent[0], extent[1], filter)
+}
+
+#[cfg(test)]
+mod mesh_tests {
+    use super::*;
+    #[test]
+    fn hexagons_reduce_measurements_separately_and_skip_missing_values() {
+        let d = hexbin_values(
+            &[[0., 0., 1.], [0., 0., 5.], [3., 0., 12.], [0., 0., f64::NAN]],
+            0.5,
+            |v| v.iter().sum::<f64>() / v.len() as f64,
+        )
+        .expect("hex means");
+        assert_eq!(d.entries().iter().map(|e| e.value).collect::<Vec<_>>(), [3., 12.]);
+        assert_eq!(d.shapes.len(), 2);
+    }
+    #[test]
+    fn density_matches_an_analytic_gaussian_and_repeated_samples() {
+        let m = Mesh::density(&[0., 1.], &[0., 1.], &[[0., 0.], [0., 0.], [f64::NAN, 2.]], [1., 2.]).expect("Gaussian");
+        let normal = 1. / (std::f64::consts::TAU * 2.);
+        assert!((m.samples[0].value - normal).abs() < 1e-12);
+        assert!((m.samples[1].value - normal * (-0.5_f64).exp()).abs() < 1e-12);
+        assert!(Mesh::density(&[0., 1.], &[0., 1.], &[], [1., 2.]).is_none());
+    }
+    #[test]
+    fn warped_corners_and_flat_triangle_means_are_preserved() {
+        let p = [[0., 0.], [2., 0.], [-1., 1.], [3., 1.]];
+        let q = quad_mesh(2, 2, &p, &[7.]).expect("one quad");
+        assert_eq!(q.shapes[0].points, [p[0], p[1], p[3], p[2]]);
+        assert_eq!(q.entries()[0].value, 7.);
+        assert!(quad_mesh(3, 2, &p, &[7.]).is_none());
+        let m = Mesh::grid(&[0., 1.], &[0., 1.], &[0., 0., 0., 6.]).expect("two faces");
+        let c = m.face_colors();
+        assert_eq!(c.shapes.len(), 2);
+        assert!(c.entries().iter().all(|e| e.value == 2. || e.value == 0.));
+    }
+    #[cfg(feature = "raster")]
+    #[test]
+    fn rgba_validates_row_bytes_and_keeps_real_extent() {
+        use crate::core::image::FilterMethod;
+        assert!(image(2, 1, vec![0; 7], [0., 1.], [0., 1.], FilterMethod::Nearest).is_none());
+        let i = image(2, 1, vec![0; 8], [-2., 1.], [4., 8.], FilterMethod::Linear).expect("RGBA image");
+        let b = i.bounds().expect("coordinate extent");
+        assert_eq!((b.x_min, b.x_max, b.y_min, b.y_max), (-2., 1., 4., 8.));
+        assert!(i.image.is_some());
+        assert!(i.shapes.is_empty());
+    }
 }
 
 #[cfg(test)]

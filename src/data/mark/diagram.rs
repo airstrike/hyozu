@@ -28,6 +28,8 @@ pub struct Diagram {
     pub(crate) square: bool,
     pub(crate) cartesian: bool,
     pub(crate) smooth_faces: bool,
+    #[cfg(feature = "raster")]
+    pub(crate) image: Option<crate::core::image::Image>,
     pub(crate) range: Option<crate::data::area::Bounds>,
     pub(crate) color_domain: Option<(f64, f64)>,
 }
@@ -37,6 +39,16 @@ impl Diagram {
         Self {
             cartesian: true,
             ..Self::default()
+        }
+    }
+
+    pub(crate) fn transpose(&mut self) {
+        for p in self.shapes.iter_mut().flat_map(|s| &mut s.points) {
+            p.swap(0, 1);
+        }
+        if let Some(b) = self.range.as_mut() {
+            std::mem::swap(&mut b.x_min, &mut b.y_min);
+            std::mem::swap(&mut b.x_max, &mut b.y_max);
         }
     }
 
@@ -461,6 +473,39 @@ pub fn sankey<S: AsRef<str>>(names: &[S], flows: &[Flow]) -> Option<Diagram> {
     }
     for (i, shape) in node_shapes {
         d.polygon(i, shape, 1.);
+    }
+    Some(d)
+}
+
+/// Concentric doughnuts, with each ring normalized independently and a
+/// consistent category color across rings. The first row is the innermost ring.
+pub fn rings<S: AsRef<str>, V: AsRef<[f64]>>(categories: &[S], rows: &[V], hole: f64) -> Option<Diagram> {
+    if categories.is_empty() || rows.is_empty() || !(0.0..1.0).contains(&hole) {
+        return None;
+    }
+    let mut d = Diagram {
+        square: true,
+        ..Diagram::default()
+    };
+    for name in categories {
+        d.series(name.as_ref());
+    }
+    let width = (1. - hole) * 0.46 / rows.len() as f64;
+    for (i, row) in rows.iter().enumerate() {
+        let values = row.as_ref();
+        let total: f64 = values.iter().sum();
+        if values.len() != categories.len() || !total.is_finite() || total <= 0. || values.iter().any(|v| *v < 0.) {
+            return None;
+        }
+        let inner = 0.46 * hole + i as f64 * width;
+        let mut t = 0.;
+        for (j, &v) in values.iter().enumerate() {
+            let end = t + v / total;
+            if end > t {
+                d.polygon(j, sector(inner, inner + width * 0.96, t, end), 1.);
+            }
+            t = end;
+        }
     }
     Some(d)
 }

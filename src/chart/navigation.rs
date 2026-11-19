@@ -12,6 +12,7 @@ type Paragraph = <Renderer as text::Renderer>::Paragraph;
 
 pub(super) fn targets<Message>(plot: &plot_area::PlotArea<'_, Message, Renderer>, tree: &Tree) -> Vec<Point> {
     let mut points = Vec::new();
+    let mut discrete = Vec::new();
     let mut append = |data: &[Datum], pixels: &[Point]| {
         points.extend(data.iter().zip(pixels).filter_map(|(datum, pixel)| {
             (datum.x.is_finite() && datum.y.is_finite() && pixel.x.is_finite() && pixel.y.is_finite())
@@ -41,12 +42,24 @@ pub(super) fn targets<Message>(plot: &plot_area::PlotArea<'_, Message, Renderer>
                     append(&series.points, &pixels);
                 }
             }
+            plot_area::Series::Pie(_) => {
+                let st = child.state.downcast_ref::<plot_area::pie::State<Paragraph>>();
+                let r = st.inner_radius.midpoint(st.outer_radius);
+                discrete.extend(st.slice_angles.iter().filter(|(a, b)| a != b).map(|(a, b)| {
+                    let angle = a.midpoint(*b);
+                    Point::new(st.center.0 + r * angle.cos(), st.center.1 + r * angle.sin())
+                }));
+            }
+            plot_area::Series::Diagram(mark) if !mark.cartesian && !mark.smooth_faces => {
+                let st = child.state.downcast_ref::<plot_area::diagram::State<Paragraph>>();
+                discrete.extend(st.category_targets(mark.entries().len()));
+            }
             _ => {}
         }
     }
     points.sort_by(|a, b| a.0.total_cmp(&b.0));
     points.dedup_by(|a, b| a.0 == b.0);
-    points.into_iter().map(|(_, pixel)| pixel).collect()
+    points.into_iter().map(|(_, pixel)| pixel).chain(discrete).collect()
 }
 
 pub(super) fn step(key: Named, current: Option<usize>, count: usize) -> Option<usize> {

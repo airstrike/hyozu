@@ -44,6 +44,8 @@ impl Geometry {
 #[derive(Default, Clone)]
 pub struct Scene {
     names: Vec<String>,
+    aspect: Option<[f64; 3]>,
+    hide_axes: bool,
     shapes: Vec<(usize, Geometry)>,
 }
 
@@ -184,13 +186,18 @@ impl Scene {
         let (sa, ca) = camera.azimuth.to_radians().sin_cos();
         let (se, ce) = camera.elevation.to_radians().sin_cos();
         let transform = |p: Point| {
-            let [x, y, z] = std::array::from_fn(|i| {
+            let mut coordinates: Point = std::array::from_fn(|i| {
                 if max[i] > min[i] {
                     (p[i] - min[i]) / (max[i] - min[i]) * 2. - 1.
                 } else {
                     0.
                 }
             });
+            let aspect = self.aspect.unwrap_or([1.; 3]);
+            for i in 0..3 {
+                coordinates[i] *= aspect[i];
+            }
+            let [x, y, z] = coordinates;
             let u = x * ca + y * sa;
             let depth = (-x * sa + y * ca) * ce + z * se;
             let v = z * ce - (-x * sa + y * ca) * se;
@@ -205,16 +212,28 @@ impl Scene {
                 }
             }
         }
-        let extent = corners.iter().map(|p| p[0].abs().max(p[1].abs())).fold(1e-12, f64::max);
+        let extent = if self.hide_axes {
+            self.shapes
+                .iter()
+                .flat_map(|(_, shape)| shape.points())
+                .copied()
+                .map(transform)
+                .map(|p| p[0].abs().max(p[1].abs()))
+                .fold(1e-12, f64::max)
+        } else {
+            corners.iter().map(|p| p[0].abs().max(p[1].abs())).fold(1e-12, f64::max)
+        };
         let screen = |p: Point| [0.5 + 0.43 * p[0] / extent, 0.50 - 0.43 * p[1] / extent];
         // Axes originate at the lower corner in world coordinates.
-        for i in 0..3 {
-            let mut end = min;
-            end[i] = max[i];
-            let a = screen(transform(min));
-            let b = screen(transform(end));
-            d.guide(vec![a.map(|v| v as f32), b.map(|v| v as f32)]);
-            d.labels.push((b.map(|v| v as f32), ["X", "Y", "Z"][i].to_owned()));
+        if !self.hide_axes {
+            for i in 0..3 {
+                let mut end = min;
+                end[i] = max[i];
+                let a = screen(transform(min));
+                let b = screen(transform(end));
+                d.guide(vec![a.map(|v| v as f32), b.map(|v| v as f32)]);
+                d.labels.push((b.map(|v| v as f32), ["X", "Y", "Z"][i].to_owned()));
+            }
         }
         let mut order: Vec<_> = self
             .shapes
@@ -265,6 +284,283 @@ impl Scene {
             }
         }
         Some(d)
+    }
+}
+
+impl Scene {
+    /// Set the projected box's relative axis lengths.
+    pub fn aspect(&mut self, aspect: [f64; 3]) -> bool {
+        if aspect.iter().any(|v| !v.is_finite() || *v <= 0.) {
+            return false;
+        }
+        let max = aspect.into_iter().fold(0., f64::max);
+        self.aspect = Some(aspect.map(|v| v / max));
+        true
+    }
+
+    pub fn show_axes(&mut self, show: bool) {
+        self.hide_axes = !show;
+    }
+
+    /// One quadrilateral surface strip between successive pairs of traces.
+    pub fn fill_between(&mut self, id: usize, a: &[Point], b: &[Point]) -> bool {
+        if a.len() != b.len() || id >= self.names.len() {
+            return false;
+        }
+        for (x, y) in a.windows(2).zip(b.windows(2)) {
+            self.polygon(id, &[x[0], x[1], y[1], y[0]]);
+        }
+        true
+    }
+
+    /// Stems parallel to the z axis, with a point at each measured endpoint.
+    pub fn stems(&mut self, id: usize, points: &[Point], baseline: f64) {
+        if !baseline.is_finite() {
+            return;
+        }
+        for &p in points {
+            self.line(id, &[[p[0], p[1], baseline], p]);
+        }
+        self.scatter(id, points);
+    }
+
+    /// Oriented 3D arrow with a cone head defined in world coordinates.
+    pub fn arrow(&mut self, id: usize, origin: Point, delta: Point) {
+        let length = delta[0].hypot(delta[1]).hypot(delta[2]);
+        if !length.is_finite() || length == 0. {
+            return;
+        }
+        let dir = delta.map(|x| x / length);
+        let cross = |a: Point, b: Point| {
+            [
+                a[1] * b[2] - a[2] * b[1],
+                a[2] * b[0] - a[0] * b[2],
+                a[0] * b[1] - a[1] * b[0],
+            ]
+        };
+        let perp = cross(
+            dir,
+            if dir[2].abs() < 0.85 {
+                [0., 0., 1.]
+            } else {
+                [1., 0., 0.]
+            },
+        );
+        let norm = perp[0].hypot(perp[1]).hypot(perp[2]);
+        let u = perp.map(|v| v / norm);
+        let v = cross(dir, u);
+        let tip = std::array::from_fn(|i| origin[i] + delta[i]);
+        let base: Point = std::array::from_fn(|i| origin[i] + 0.76 * delta[i]);
+        self.line(id, &[origin, base]);
+        let ring = |n: usize| {
+            let a = n as f64 * std::f64::consts::TAU / 8.;
+            std::array::from_fn(|i| base[i] + 0.065 * length * (a.cos() * u[i] + a.sin() * v[i]))
+        };
+        for i in 0..8 {
+            self.polygon(id, &[tip, ring(i), ring(i + 1)]);
+        }
+    }
+}
+
+/// Extruded pie segments; each input supplies the name, weight and radial
+/// explosion distance as a fraction of radius. Thickness is in radius units.
+pub fn pie<S: AsRef<str>>(slices: &[(S, f64, f64)], thickness: f64) -> Option<Scene> {
+    if !thickness.is_finite()
+        || thickness <= 0.
+        || slices
+            .iter()
+            .any(|(_, v, e)| !v.is_finite() || *v < 0. || !e.is_finite() || *e < 0.)
+    {
+        return None;
+    }
+    let total: f64 = slices.iter().map(|s| s.1).sum();
+    if !total.is_finite() || total <= 0. {
+        return None;
+    }
+    let mut scene = Scene::default();
+    scene.show_axes(false);
+    scene.aspect([1., 1., thickness / 2.]);
+    let mut angle = 0.;
+    for (name, value, offset) in slices {
+        let id = scene.series(name.as_ref());
+        if *value == 0. {
+            continue;
+        }
+        let arc = value / total * std::f64::consts::TAU;
+        let mid = angle + arc / 2.;
+        let (cx, cy) = (offset * mid.cos(), offset * mid.sin());
+        let n = (arc * 24.).ceil().max(2.) as usize;
+        let point = |i: usize, z| {
+            let a = angle + arc * i as f64 / n as f64;
+            [cx + a.cos(), cy + a.sin(), z]
+        };
+        for i in 0..n {
+            scene.polygon(id, &[[cx, cy, thickness], point(i, thickness), point(i + 1, thickness)]);
+            scene.polygon(id, &[
+                point(i, 0.),
+                point(i + 1, 0.),
+                point(i + 1, thickness),
+                point(i, thickness),
+            ]);
+            scene.polygon(id, &[[cx, cy, 0.], point(i + 1, 0.), point(i, 0.)]);
+        }
+        for edge in [0, n] {
+            scene.polygon(id, &[[cx, cy, 0.], point(edge, 0.), point(edge, thickness), [
+                cx, cy, thickness,
+            ]]);
+        }
+        angle += arc;
+    }
+    Some(scene)
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum CategoryMark {
+    Column,
+    Bar,
+    Line,
+    Area,
+}
+#[derive(Clone, Copy, Debug)]
+pub enum Stack {
+    Grouped,
+    Sum,
+    Percent,
+}
+
+/// Office-style category charts with group depth, cumulative stacks or
+/// normalized stacks. Positive and negative contributions stack separately.
+pub fn categories<S: AsRef<str>, V: AsRef<[f64]>>(
+    series: &[(S, V)],
+    mark: CategoryMark,
+    stack: Stack,
+) -> Option<Scene> {
+    let n = series.first()?.1.as_ref().len();
+    if n == 0
+        || series
+            .iter()
+            .any(|s| s.1.as_ref().len() != n || s.1.as_ref().iter().any(|v| !v.is_finite()))
+    {
+        return None;
+    }
+    let mut pos = vec![0.; n];
+    let mut neg = vec![0.; n];
+    let totals: Vec<f64> = (0..n)
+        .map(|i| series.iter().map(|s| s.1.as_ref()[i].abs()).sum())
+        .collect();
+    if totals.iter().any(|v| !v.is_finite()) {
+        return None;
+    }
+    let mut scene = Scene::default();
+    if !matches!(stack, Stack::Grouped) {
+        scene.aspect([1., 0.25, 1.]);
+    }
+    for (j, (name, values)) in series.iter().enumerate() {
+        let id = scene.series(name.as_ref());
+        let y = if matches!(stack, Stack::Grouped) { j as f64 } else { 0. };
+        let mut lower = Vec::new();
+        let mut upper = Vec::new();
+        for (i, &value) in values.as_ref().iter().enumerate() {
+            let x = i as f64;
+            let value = if matches!(stack, Stack::Percent) {
+                if totals[i] > 0. { value / totals[i] } else { 0. }
+            } else {
+                value
+            };
+            let base = if matches!(stack, Stack::Grouped) {
+                0.
+            } else if value >= 0. {
+                pos[i]
+            } else {
+                neg[i]
+            };
+            let end = base + value;
+            if !end.is_finite() {
+                return None;
+            }
+            if value >= 0. {
+                pos[i] = end;
+            } else {
+                neg[i] = end;
+            }
+            let (lo, hi) = (base.min(end), base.max(end));
+            match mark {
+                CategoryMark::Column => scene.cuboid(id, [x - 0.32, y - 0.3, lo], [x + 0.32, y + 0.3, hi]),
+                CategoryMark::Bar => scene.cuboid(id, [lo, y - 0.3, x - 0.32], [hi, y + 0.3, x + 0.32]),
+                CategoryMark::Line => {
+                    lower.push([x, y - 0.09, end]);
+                    upper.push([x, y + 0.09, end]);
+                }
+                CategoryMark::Area => {
+                    lower.push([x, y, base]);
+                    upper.push([x, y, end]);
+                }
+            }
+        }
+        scene.fill_between(id, &lower, &upper);
+    }
+    Some(scene)
+}
+
+#[cfg(test)]
+mod category_tests {
+    use super::*;
+    #[test]
+    fn world_space_geometry_and_percent_stacks_have_correct_extent() {
+        let p = pie(&[("a", 3., 0.), ("b", 1., 0.2)], 0.25).expect("pie");
+        assert_eq!(p.names.len(), 2);
+        assert!(p.hide_axes);
+        assert!(
+            p.shapes
+                .iter()
+                .flat_map(|(_, g)| g.points())
+                .all(|p| p[2] == 0. || p[2] == 0.25)
+        );
+        let bars = categories(
+            &[("a", [1., 0.]), ("b", [3., 0.])],
+            CategoryMark::Column,
+            Stack::Percent,
+        )
+        .expect("stacks");
+        let extent = |id| {
+            bars.shapes
+                .iter()
+                .filter(|(i, _)| *i == id)
+                .flat_map(|(_, g)| g.points())
+                .map(|p| p[2])
+                .fold(0., f64::max)
+        };
+        assert_eq!(extent(0), 0.25);
+        assert_eq!(extent(1), 1.);
+        assert!(
+            categories(
+                &[("a", vec![2.]), ("b", vec![3., 1.])],
+                CategoryMark::Bar,
+                Stack::Grouped
+            )
+            .is_none()
+        );
+    }
+    #[test]
+    fn arrows_ribbons_and_stems_keep_their_endpoints() {
+        let mut s = Scene::default();
+        let id = s.series("v");
+        s.arrow(id, [1., 2., 3.], [2., -1., 4.]);
+        assert!(
+            s.shapes
+                .iter()
+                .flat_map(|(_, g)| g.points())
+                .any(|&p| p == [3., 1., 7.])
+        );
+        s.stems(id, &[[0., 1., 4.]], -3.);
+        assert!(
+            s.shapes
+                .iter()
+                .flat_map(|(_, g)| g.points())
+                .any(|&p| p == [0., 1., -3.])
+        );
+        assert!(!s.fill_between(id, &[[0.; 3]], &[]));
+        assert!(s.project(Camera::default()).is_some());
     }
 }
 

@@ -7,7 +7,7 @@ mod icon;
 
 use category::Category;
 use charts::{ChartId, Variant};
-use hyozu::Data;
+
 use iced::widget::{button, column, container, row, scrollable, text, text_input, themer};
 use iced::{Alignment, Fill, Font, Subscription, Task, Widget};
 use icedcn::Theme;
@@ -32,6 +32,7 @@ pub fn main() -> iced::Result {
 
 #[derive(Debug, Clone)]
 enum Message {
+    Brush(hyozu::brush::Selection),
     ToggleDark,
     ToggleBrowse,
     Orbit(f64),
@@ -43,7 +44,7 @@ enum Message {
     Source(bool),
     Copy,
     Copied(bool),
-    Chart(hyozu::Action),
+    Chart(usize, hyozu::Action),
 }
 
 struct App {
@@ -54,7 +55,7 @@ struct App {
     filter: Option<Category>,
     search: String,
     variants: Vec<Variant>,
-    data: Vec<Data>,
+    data: Vec<charts::Preview>,
     selected: Option<ChartId>,
     camera: hyozu::spatial::Camera,
     source: bool,
@@ -88,14 +89,7 @@ impl App {
         let variants = charts::variants();
         let data = variants
             .iter()
-            .map(|v| {
-                let chart = v.render(hyozu::spatial::Camera::default());
-                if chart.get_palette().is_some() {
-                    chart
-                } else {
-                    chart.palette(chart_colors(v.category))
-                }
-            })
+            .map(|v| v.render(hyozu::spatial::Camera::default()))
             .collect();
         Self {
             theme: Theme::light(),
@@ -128,6 +122,14 @@ impl App {
 
     fn update(&mut self, msg: Message) -> Task<Message> {
         match msg {
+            Message::Brush(s) => {
+                if let Some(id) = self.selected
+                    && let charts::Preview::Brush(ex) = &mut self.data[id.0]
+                {
+                    ex.selection = s;
+                    s.apply(&mut ex.chart);
+                }
+            }
             Message::ToggleDark => {
                 self.dark = !self.dark;
                 self.theme = if self.dark { Theme::dark() } else { Theme::light() };
@@ -136,7 +138,7 @@ impl App {
                 if let Some(id) = self.selected {
                     self.camera.azimuth = (self.camera.azimuth + delta).rem_euclid(360.);
                     let v = &self.variants[id.0];
-                    self.data[id.0] = v.render(self.camera).palette(chart_colors(v.category));
+                    self.data[id.0] = v.render(self.camera);
                 }
             }
             Message::ToggleBrowse => self.browse = !self.browse,
@@ -163,14 +165,14 @@ impl App {
             Message::Source(value) => self.source = value,
             Message::Copy => {
                 if let Some(id) = self.selected {
-                    return iced::clipboard::write(self.variants[id.0].source.to_owned())
+                    return iced::clipboard::write(self.variants[id.0].source.to_string())
                         .map(|r| Message::Copied(r.is_ok()));
                 }
             }
             Message::Copied(success) => self.copied = success,
-            Message::Chart(action) => {
+            Message::Chart(panel, action) => {
                 if let Some(id) = self.selected {
-                    self.data[id.0].perform(action);
+                    self.data[id.0].perform(panel, action);
                 }
             }
         }
@@ -283,7 +285,7 @@ impl App {
                     && (v.name.to_lowercase().contains(&query)
                         || v.category.label().to_lowercase().contains(&query)
                         || self.data[v.id.0]
-                            .get_title()
+                            .title()
                             .is_some_and(|s| s.to_lowercase().contains(&query)))
             })
             .collect();
@@ -339,15 +341,42 @@ impl App {
             .boxed()
     }
 
+    fn preview(&self, id: ChartId, interactive: bool, height: iced::Length) -> Element<'_, Message> {
+        let render = |panel, chart| {
+            let c = hyozu::chart::<Message, iced::Theme>(chart)
+                .style(hyozu::chart::transparent)
+                .padding(if interactive { 18 } else { 8 })
+                .height(Fill);
+            if interactive {
+                c.on_action(move |a| Message::Chart(panel, a)).boxed()
+            } else {
+                c.boxed()
+            }
+        };
+        let content = match &self.data[id.0] {
+            charts::Preview::Brush(ex) if !interactive => render(0, &ex.chart),
+            charts::Preview::Brush(ex) => {
+                let chart = render(0, &ex.chart);
+                let brush = hyozu::brush::brush(
+                    ex.selection,
+                    &ex.overview,
+                    iced::Color::from_rgb8(58, 142, 140),
+                    Message::Brush,
+                );
+                iced::widget::column![chart, brush].spacing(4).boxed()
+            }
+            charts::Preview::Single(chart) => render(0, chart.as_ref()),
+            charts::Preview::Facets(grid) => grid.view_with(render),
+        };
+        container(themer(Some(self.theme.iced_theme().clone()), content))
+            .width(Fill)
+            .height(height)
+            .boxed()
+    }
+
     fn card<'a>(&'a self, v: &'a Variant) -> Element<'a, Message> {
         let h = appearance::chart_height(self.width < 760.);
-        let chart = themer(
-            Some(self.theme.iced_theme().clone()),
-            hyozu::chart::<Message, iced::Theme>(&self.data[v.id.0])
-                .style(hyozu::chart::transparent)
-                .padding(10)
-                .height(h),
-        );
+        let chart = self.preview(v.id, false, iced::Length::Fixed(h));
         let header = row![
             heading(v.name, 17),
             spring(),

@@ -18,6 +18,8 @@ struct Region {
 
 pub(crate) struct State<P: text::Paragraph> {
     regions: Vec<Region>,
+    #[cfg(feature = "raster")]
+    image_bounds: Option<crate::core::Rectangle>,
     labels: Vec<(Point, paragraph::Plain<P>)>,
 }
 
@@ -26,6 +28,8 @@ pub(super) fn state<P: text::Paragraph + 'static>() -> Tree {
         tag: tree::Tag::of::<State<P>>(),
         state: tree::State::new(State::<P> {
             regions: Vec::new(),
+            #[cfg(feature = "raster")]
+            image_bounds: None,
             labels: Vec::new(),
         }),
         ..Tree::empty()
@@ -33,6 +37,48 @@ pub(super) fn state<P: text::Paragraph + 'static>() -> Tree {
 }
 
 impl<P: text::Paragraph> State<P> {
+    /// Interior keyboard stops for native category layouts. A scanline midpoint
+    /// stays inside a concave polygon or annular sector where its centroid can
+    /// fall in the hole. Only one region is needed for a logical entry.
+    pub(crate) fn category_targets(&self, entries: usize) -> Vec<Point> {
+        let mut points = vec![None; entries];
+        for region in self.regions.iter().rev() {
+            let Some(id) = region.entry else {
+                continue;
+            };
+            if points[id].is_some() || region.vertices.len() < 2 {
+                continue;
+            }
+            if !region.closed {
+                points[id] = Some(region.vertices[0] + (region.vertices[1] - region.vertices[0]) * 0.5);
+                continue;
+            }
+            let (lo, hi) = region
+                .vertices
+                .iter()
+                .fold((f32::INFINITY, f32::NEG_INFINITY), |(a, b), p| (a.min(p.y), b.max(p.y)));
+            let y = lo.midpoint(hi);
+            let mut cuts = Vec::new();
+            let mut before = region.vertices[region.vertices.len() - 1];
+            for &after in &region.vertices {
+                if (before.y > y) != (after.y > y) {
+                    cuts.push(before.x + (y - before.y) * (after.x - before.x) / (after.y - before.y));
+                }
+                before = after;
+            }
+            cuts.sort_by(f32::total_cmp);
+            if let Some(pair) = cuts
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .max_by(|a, b| (a[1] - a[0]).total_cmp(&(b[1] - b[0])))
+            {
+                points[id] = Some(Point::new(pair[0].midpoint(pair[1]), y));
+            }
+        }
+        points.into_iter().flatten().collect()
+    }
+
     pub(crate) fn pick(&self, point: Point) -> Option<usize> {
         self.regions.iter().rev().find_map(|region| {
             let index = region.entry?;
@@ -99,6 +145,14 @@ pub(super) fn layout<R: text::Renderer>(
             )
         }
     };
+    #[cfg(feature = "raster")]
+    {
+        state.image_bounds = d.image.as_ref().and(d.bounds()).map(|b| {
+            let upper = point([b.x_min, b.y_max]);
+            let lower = point([b.x_max, b.y_min]);
+            crate::core::Rectangle::new(upper, crate::core::Size::new(lower.x - upper.x, lower.y - upper.y))
+        });
+    }
     state.regions.clear();
     for shape in &d.shapes {
         let vertices: Vec<_> = shape.points.iter().copied().map(point).collect();
@@ -176,6 +230,10 @@ pub(super) fn draw<'p, R, D: Design + ?Sized>(
     let bounds = layout.bounds();
     let translation = bounds.position() - Point::ORIGIN;
     let mut frame = Frame::new(renderer, bounds.size());
+    #[cfg(feature = "raster")]
+    if let (Some(bounds), Some(image)) = (state.image_bounds, &d.image) {
+        frame.draw_image(bounds, image.clone());
+    }
     let background = theme.background_color();
     let text = theme.text_pair();
     let seed = theme.seed();
@@ -228,5 +286,42 @@ pub(super) fn draw<'p, R, D: Design + ?Sized>(
     renderer.with_translation(translation, |r| r.draw_geometry(geometry));
     for (anchor, p) in &state.labels {
         labels.push(p.raw(), *anchor + translation, ink);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn keyboard_stops_land_inside_annular_sectors() {
+        use crate::core::renderer::{Headless, Settings};
+        type Renderer = crate::widget::Renderer;
+        type Paragraph = <Renderer as text::Renderer>::Paragraph;
+        let renderer = iced::futures::executor::block_on(Renderer::new(Settings::default(), Some("tiny-skia")))
+            .expect("software renderer");
+        let d = crate::rings(&["a", "b"], &[[1., 2.], [2., 1.]], 0.4).expect("two rings");
+        let mut tree = state::<Paragraph>();
+        let size = Size::new(400., 280.);
+        let unit = super::super::Range { min: 0., max: 1. };
+        let domain = super::super::Domain {
+            x: unit,
+            y: unit,
+            y_transform: crate::Transform::default(),
+        };
+        layout(
+            &d,
+            &mut tree,
+            &renderer,
+            size,
+            &domain,
+            crate::core::Rectangle::with_size(size),
+            None,
+        );
+        let st = tree.state.downcast_ref::<State<Paragraph>>();
+        let stops = st.category_targets(2);
+        assert_eq!(stops.len(), 2);
+        for (i, p) in stops.into_iter().enumerate() {
+            assert_eq!(st.pick(p), Some(i));
+        }
     }
 }

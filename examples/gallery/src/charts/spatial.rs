@@ -72,3 +72,96 @@ pub fn voxels(camera: Camera) -> Data {
     }
     project(s, camera, "Occupied voxels")
 }
+
+pub fn pie(camera: Camera) -> Data {
+    project(
+        hyozu::spatial::pie(
+            &[("Direct", 52., 0.), ("Partners", 31., 0.), ("Other", 17., 0.16)],
+            0.32,
+        )
+        .expect("positive wedges"),
+        camera,
+        "Orders by channel",
+    )
+}
+
+const REVENUE: [(&str, [f64; 5]); 3] = [
+    ("Direct", [12., 15., 14., 18., 20.]),
+    ("Partners", [8., 10., 12., 11., 15.]),
+    ("Retail", [5., 6., 4., 8., 9.]),
+];
+pub fn columns(camera: Camera) -> Data {
+    use hyozu::spatial::{CategoryMark, Stack, categories};
+    project(
+        categories(&REVENUE, CategoryMark::Column, Stack::Sum).expect("aligned categories"),
+        camera,
+        "Stacked quarterly revenue",
+    )
+}
+pub fn horizontal(camera: Camera) -> Data {
+    use hyozu::spatial::{CategoryMark, Stack, categories};
+    project(
+        categories(&REVENUE, CategoryMark::Bar, Stack::Percent).expect("positive totals"),
+        camera,
+        "Share by channel",
+    )
+}
+pub fn ribbons(camera: Camera) -> Data {
+    use hyozu::spatial::{CategoryMark, Stack, categories};
+    project(
+        categories(&REVENUE, CategoryMark::Line, Stack::Grouped).expect("aligned categories"),
+        camera,
+        "Series across reporting periods",
+    )
+}
+pub fn areas(camera: Camera) -> Data {
+    use hyozu::spatial::{CategoryMark, Stack, categories};
+    project(
+        categories(&REVENUE, CategoryMark::Area, Stack::Grouped).expect("aligned categories"),
+        camera,
+        "Channel volume by period",
+    )
+}
+pub fn between(camera: Camera) -> Data {
+    let t: Vec<_> = (0..=50).map(|i| f64::from(i) / 8.).collect();
+    let edge = |h: f64| {
+        t.iter()
+            .map(|&v| [v, v.cos() + h * 0.3, v.sin() + h * (0.5 + 0.2 * v.cos())])
+            .collect::<Vec<_>>()
+    };
+    let mut s = Scene::default();
+    let id = s.series("Interval");
+    s.fill_between(id, &edge(0.), &edge(1.));
+    project(s, camera, "Uncertainty along a trajectory")
+}
+pub fn stems(camera: Camera) -> Data {
+    let p: Vec<_> = (0..28)
+        .map(|i| {
+            let a = f64::from(i) * 0.45;
+            [a.cos(), a.sin(), 0.6 * a.cos() + 0.32 * (2. * a).sin()]
+        })
+        .collect();
+    let mut s = Scene::default();
+    let id = s.series("Samples");
+    s.stems(id, &p, 0.);
+    project(s, camera, "Signed impulse response")
+}
+pub fn quiver(camera: Camera) -> Data {
+    let mut s = Scene::default();
+    let id = s.series("Velocity");
+    for j in -2..=2 {
+        for i in -2..=2 {
+            let (x, y) = (f64::from(i), f64::from(j));
+            s.arrow(id, [x, y, 0.], [-0.25 * y, 0.25 * x, 0.32]);
+        }
+    }
+    project(s, camera, "Three-dimensional flow")
+}
+
+pub fn trisurf(camera: Camera) -> Data {
+    let (pts, faces) = super::fields::survey();
+    let mut s = Scene::default();
+    let id = s.series("Elevation");
+    s.mesh(id, &pts, &faces, false);
+    project(s, camera, "Triangulated survey surface")
+}

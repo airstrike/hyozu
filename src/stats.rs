@@ -148,35 +148,6 @@ pub fn pareto<S: AsRef<str>>(entries: &[(S, u64)]) -> Data {
         .right_axis(|a| a.with_bounds(0., 1.).labels(|v: f64| format!("{:.0}%", v * 100.)))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn irregular_histogram_conserves_mass_and_includes_last_edge() {
-        let bins = Bins::new(&[0., 1., 3.], &[-1., 0., 1., 2., 3., f64::NAN, 4.]).expect("valid edges");
-        assert_eq!(bins.counts(), &[1, 3]);
-        assert_eq!(bins.intervals(true).collect::<Vec<_>>(), [
-            (0., 1., 0.25),
-            (1., 3., 0.375)
-        ]);
-        assert!(Bins::new(&[0., 0.], &[]).is_none());
-        assert!(Bins::new(&[0., f64::NAN], &[]).is_none());
-    }
-
-    #[test]
-    fn ecdf_collapses_ties_into_one_jump() {
-        let chart = ecdf(&[4., 1., 1., 1., f64::INFINITY]);
-        let points = &chart.line(0).expect("line").points;
-        assert_eq!(points.iter().map(|p| (p.x, p.y)).collect::<Vec<_>>(), [
-            (1., 0.),
-            (1., 0.75),
-            (4., 0.75),
-            (4., 1.)
-        ]);
-    }
-}
-
 pub mod fit;
 
 /// Stacked dots at each bin midpoint, one dot per included observation.
@@ -268,4 +239,129 @@ fn percent_values<S, V: AsRef<[f64]>>(series: &[(S, V)]) -> Option<Vec<Vec<f64>>
             })
             .collect(),
     )
+}
+
+/// Reference line for a Q–Q plot through two linearly interpolated sample
+/// percentiles and the corresponding theoretical quantiles.
+pub fn qq_line(samples: &[f64], reference: [f64; 2], quantile: impl Fn(f64) -> f64) -> Option<Line> {
+    let sorted = finite_sorted(samples);
+    let [p, q] = reference;
+    if sorted.len() < 2 || !(0. < p && p < q && q < 1.) {
+        return None;
+    }
+    let sample = |p: f64| {
+        let i = (sorted.len() - 1) as f64 * p;
+        sorted[i.floor() as usize] * (1. - i.fract()) + sorted[i.ceil() as usize] * i.fract()
+    };
+    let (x1, x2) = (quantile(p), quantile(q));
+    if !x1.is_finite() || !x2.is_finite() || x2 <= x1 {
+        return None;
+    }
+    let slope = (sample(q) - sample(p)) / (x2 - x1);
+    let lo = quantile(0.5 / sorted.len() as f64);
+    let hi = quantile(1. - 0.5 / sorted.len() as f64);
+    let y = |x| sample(p) + slope * (x - x1);
+    [lo, hi, y(lo), y(hi)]
+        .into_iter()
+        .all(f64::is_finite)
+        .then(|| line([(lo, y(lo)), (hi, y(hi))]).with_name("Reference"))
+}
+
+/// Bubble area represents the multiplicity of each distinct finite (x,y) pair.
+pub fn count_points(samples: &[[f64; 2]], maximum_diameter: f32) -> Option<Xy> {
+    if !maximum_diameter.is_finite() || maximum_diameter <= 0. {
+        return None;
+    }
+    let mut points: Vec<_> = samples
+        .iter()
+        .filter(|p| p.iter().all(|v| v.is_finite()))
+        .map(|p| p.map(|v| if v == 0. { 0. } else { v }))
+        .collect();
+    points.sort_by(|a, b| a[0].total_cmp(&b[0]).then(a[1].total_cmp(&b[1])));
+    let mut counts = Vec::new();
+    let mut positions = Vec::new();
+    for group in points.chunk_by(|a, b| a == b) {
+        positions.push((group[0][0], group[0][1]));
+        counts.push(group.len() as f64);
+    }
+    let max = counts.iter().copied().fold(1., f64::max);
+    Some(
+        xy(positions).size_by(
+            crate::encoding::size_by(move |i, _| counts[i])
+                .domain(0.0..=max)
+                .range(0.0..=maximum_diameter),
+        ),
+    )
+}
+
+/// Lines at the cumulative stack boundaries for aligned nonnegative categories.
+pub fn stacked_lines<S: AsRef<str>, V: AsRef<[f64]>>(series: &[(S, V)], percent: bool) -> Option<Data> {
+    let mut values = percent_values(series)?;
+    let mut totals = vec![0.; values.first()?.len()];
+    let mut marks = Vec::new();
+    for ((name, raw), normalized) in series.iter().zip(&mut values) {
+        let data = if percent { normalized.as_slice() } else { raw.as_ref() };
+        for (sum, &v) in totals.iter_mut().zip(data) {
+            *sum += v;
+        }
+        marks.push(Mark::Line(line(totals.clone()).with_name(name.as_ref())));
+    }
+    Some(data(marks))
+}
+
+#[cfg(test)]
+mod transform_tests {
+    use super::*;
+    #[test]
+    fn quantile_resists_outliers_and_resolves_conditional_slope() {
+        let p = [[0., 1.], [1., 3.], [2., 5.], [3., 7.], [4., 9.], [3., 900.], [
+            1., -800.,
+        ]];
+        let l = fit::quantile(&p, 0.5).expect("median regression");
+        assert!((l.points[0].y - 1.).abs() < 1e-7 && (l.points[1].y - 9.).abs() < 1e-7);
+        assert!(fit::quantile(&[[0., 1.], [0., 2.]], 0.5).is_none());
+    }
+    #[test]
+    fn qq_interpolation_count_area_and_normalized_stack() {
+        let q = qq_line(&[1., 3., 5., 7., 9.], [0.25, 0.75], |p| p).expect("linear reference");
+        assert!((q.points[0].y - 1.8).abs() < 1e-10);
+        let c = count_points(&[[-0., 1.], [0., 1.], [0., 1.], [0., 1.], [2., 1.]], 20.).expect("duplicates");
+        assert_eq!(c.points.len(), 2);
+        assert_eq!(c.resolved_size_at(0, 0.), 20.);
+        assert_eq!(c.resolved_size_at(1, 0.), 10.);
+        let lines = stacked_lines(&[("a", [1., 0.]), ("b", [3., 0.])], true).expect("aligned series");
+        let Mark::Line(l) = &lines.marks()[1] else {
+            panic!("line")
+        };
+        assert_eq!([l.points[0].y, l.points[1].y], [1., 0.]);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn irregular_histogram_conserves_mass_and_includes_last_edge() {
+        let bins = Bins::new(&[0., 1., 3.], &[-1., 0., 1., 2., 3., f64::NAN, 4.]).expect("valid edges");
+        assert_eq!(bins.counts(), &[1, 3]);
+        assert_eq!(bins.intervals(true).collect::<Vec<_>>(), [
+            (0., 1., 0.25),
+            (1., 3., 0.375)
+        ]);
+        assert!(Bins::new(&[0., 0.], &[]).is_none());
+        assert!(Bins::new(&[0., f64::NAN], &[]).is_none());
+    }
+
+    #[test]
+    fn ecdf_collapses_ties_into_one_jump() {
+        let chart = ecdf(&[4., 1., 1., 1., f64::INFINITY]);
+        let points = &chart.line(0).expect("line").points;
+        assert_eq!(points.iter().map(|p| (p.x, p.y)).collect::<Vec<_>>(), [
+            (1., 0.),
+            (1., 0.75),
+            (4., 0.75),
+            (4., 1.)
+        ]);
+    }
 }

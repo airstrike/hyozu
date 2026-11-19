@@ -1,11 +1,13 @@
 pub mod alignment;
 pub mod animation;
+pub mod brush;
 pub mod cartesian;
 pub mod chart;
 pub mod color;
 pub mod data;
 pub mod design;
 pub mod encoding;
+pub mod facet;
 pub mod feature;
 pub mod field;
 pub mod geo;
@@ -50,7 +52,7 @@ pub use geo::{GeoData, MapScope, ProjectionKind};
 
 pub use data::axis::{self, Axis, Orientation};
 pub use data::legend;
-pub use data::mark::diagram::{Diagram, funnel, hierarchical_treemap, radar, radial_bars, sankey, sunburst};
+pub use data::mark::diagram::{Diagram, funnel, hierarchical_treemap, radar, radial_bars, rings, sankey, sunburst};
 pub use data::mark::text::text;
 pub use data::mark::{
     self, Area, Band, BandOrientation, Bars, BoxPlot, Choropleth, ChoroplethEntry, Gauge, Heatmap, LegendEntry, Line,

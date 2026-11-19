@@ -85,3 +85,54 @@ pub fn percent_areas() -> Data {
         .y_axis_labels(|v: f64| format!("{:.0}%", v * 100.))
         .title("Channel share through time")
 }
+
+pub fn quantile_lines() -> hyozu::Data {
+    let p: Vec<_> = (0..100)
+        .map(|i| {
+            let x = f64::from(i) / 15.;
+            [x, 1. + 0.5 * x + (x * 3.8).sin() * (0.3 + x * 0.28)]
+        })
+        .collect();
+    let mut m = vec![hyozu::Mark::Xy(hyozu::xy(
+        p.iter().map(|p| (p[0], p[1])).collect::<Vec<_>>(),
+    ))];
+    for q in [0.1, 0.5, 0.9] {
+        m.push(hyozu::stats::fit::quantile(&p, q).expect("finite quantile line").into());
+    }
+    hyozu::data(m).title("Conditional quantiles")
+}
+pub fn qq_reference() -> hyozu::Data {
+    let v: Vec<_> = (1..48)
+        .map(|i| {
+            let p = f64::from(i) / 48.;
+            (p / (1. - p)).ln() * 1.2 + 0.4
+        })
+        .collect();
+    let dist = |p: f64| (p / (1. - p)).ln();
+    hyozu::data(vec![
+        hyozu::Mark::Xy(hyozu::stats::qq(&v, dist)),
+        hyozu::stats::qq_line(&v, [0.25, 0.75], dist)
+            .expect("finite reference quantiles")
+            .into(),
+    ])
+    .title("Logistic Q–Q reference")
+}
+pub fn count() -> hyozu::Data {
+    let p: Vec<_> = (0..70)
+        .map(|i| [f64::from(i % 7), f64::from((i * i / 3) % 5)])
+        .collect();
+    hyozu::data(hyozu::stats::count_points(&p, 25.).expect("positive point size"))
+        .title("Frequency at coincident positions")
+}
+pub fn stack_lines() -> hyozu::Data {
+    hyozu::stats::stacked_lines(
+        &[
+            ("Direct", [2., 3., 4., 3., 5.]),
+            ("Retail", [1., 2., 1., 3., 2.]),
+            ("Partners", [2., 1., 2., 2., 3.]),
+        ],
+        true,
+    )
+    .expect("aligned categories")
+    .title("Cumulative revenue shares")
+}

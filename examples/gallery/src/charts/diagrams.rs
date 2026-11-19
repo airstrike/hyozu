@@ -83,3 +83,15 @@ pub fn split_pie() -> Data {
 pub fn split_bar() -> Data {
     split(hyozu::parts::Breakdown::Bar)
 }
+
+pub fn rings() -> hyozu::Data {
+    hyozu::data(
+        hyozu::rings(
+            &["Direct", "Retail", "Partners"],
+            &[[3., 2., 1.], [4., 3., 2.], [6., 4., 2.]],
+            0.32,
+        )
+        .expect("positive ring totals"),
+    )
+    .title("Channel mix over three years")
+}

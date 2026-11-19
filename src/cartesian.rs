@@ -175,6 +175,252 @@ pub fn events(rows: &[&[f64]], height: f64) -> Diagram {
     d
 }
 
+/// A high–low–close record with no opening price.
+#[derive(Clone, Copy, Debug)]
+pub struct Hlc {
+    pub x: f64,
+    pub high: f64,
+    pub low: f64,
+    pub close: f64,
+}
+
+pub fn hlc(quotes: &[Hlc], width: f64) -> Diagram {
+    let mut d = Diagram::cartesian();
+    let id = d.series("Price");
+    if !width.is_finite() || width <= 0. {
+        return d;
+    }
+    for q in quotes.iter().filter(|q| {
+        [q.x, q.high, q.low, q.close].iter().all(|v| v.is_finite()) && q.low <= q.close && q.close <= q.high
+    }) {
+        d.path(id, vec![[q.x, q.low], [q.x, q.high]], false, 1.);
+        d.path(id, vec![[q.x, q.close], [q.x + 0.5 * width, q.close]], false, 1.);
+    }
+    d
+}
+
+/// Price against a secondary value axis and volume columns against the
+/// primary axis. Both layers use their actual x positions.
+pub fn with_volume(price: Diagram, volume: &[[f64; 2]], width: f64) -> crate::Data {
+    let mut bars = Diagram::cartesian();
+    let id = bars.series("Volume");
+    if width.is_finite() && width > 0. {
+        for &[x, n] in volume
+            .iter()
+            .filter(|p| p[0].is_finite() && p[1].is_finite() && p[1] >= 0.)
+        {
+            let (lo, hi) = (x - width / 2., x + width / 2.);
+            bars.path(id, vec![[lo, 0.], [hi, 0.], [hi, n], [lo, n]], true, 0.4);
+        }
+    }
+    let mut chart = crate::data(bars)
+        .secondary(vec![price.into()])
+        .y_axis(|a| a.title("Volume"))
+        .right_axis(|a| a.title("Price"));
+    // Make both plots use identical x-axis bounds even if records are missing
+    // at either end or the quote and column widths differ.
+    let a = chart.primary_bounds();
+    let b = chart.secondary_area().bounds();
+    let (lo, hi) = (a.x_min.min(b.x_min), a.x_max.max(b.x_max));
+    chart = chart.x_axis_bounds(lo, hi).top_axis(|a| a.with_bounds(lo, hi).none());
+    chart
+}
+
+/// Oriented capped ranges. Lower and upper values are x coordinates.
+pub fn horizontal_ranges(intervals: &[Interval], cap: f64) -> Diagram {
+    let mut d = error_bars(intervals, cap);
+    d.transpose();
+    d
+}
+
+/// Mean markers with independent lower/upper ranges.
+pub fn point_ranges(rows: &[(Interval, f64)], caps: f64) -> crate::Data {
+    let valid: Vec<_> = rows.iter().filter(|(r, m)| r.valid() && m.is_finite()).collect();
+    let intervals: Vec<_> = valid.iter().map(|(r, _)| *r).collect();
+    let points: Vec<_> = valid.into_iter().map(|(r, m)| (r.x, *m)).collect();
+    crate::data(vec![error_bars(&intervals, caps).into(), crate::xy(points).into()])
+}
+
+/// Rectangular intervals with a horizontal measure through each box.
+pub fn crossbars(rows: &[(Interval, f64)], width: f64) -> Diagram {
+    let mut d = Diagram::cartesian();
+    let id = d.series("Range");
+    if !width.is_finite() || width <= 0. {
+        return d;
+    }
+    for &(r, m) in rows.iter().filter(|(r, m)| r.valid() && m.is_finite()) {
+        let (l, h) = (r.x - width / 2., r.x + width / 2.);
+        d.path(id, vec![[l, r.low], [h, r.low], [h, r.high], [l, r.high]], true, 0.35);
+        d.path(id, vec![[l, m], [h, m]], false, 1.);
+    }
+    d
+}
+
+/// Filled polygon rings in Cartesian coordinates, drawn in input order.
+pub fn polygons<S: AsRef<str>, V: AsRef<[[f64; 2]]>>(groups: &[(S, V)]) -> Diagram {
+    let mut d = Diagram::cartesian();
+    for (name, p) in groups {
+        if p.as_ref().len() < 3 {
+            continue;
+        }
+        let id = d.series(name.as_ref());
+        d.path(id, p.as_ref().to_vec(), true, 1.);
+    }
+    d
+}
+
+/// Segments from each origin at its angle in radians and signed length.
+pub fn spokes(samples: &[([f64; 2], f64, f64)]) -> Diagram {
+    segments(
+        &samples
+            .iter()
+            .map(|&(p, a, l)| (p, [p[0] + a.cos() * l, p[1] + a.sin() * l]))
+            .collect::<Vec<_>>(),
+    )
+}
+
+/// Sample a cubic Bézier with two control points between each pair of endpoints.
+pub fn curves(curves: &[[[f64; 2]; 4]], steps: usize) -> Diagram {
+    let mut d = Diagram::cartesian();
+    let id = d.series("Curves");
+    if steps == 0 {
+        return d;
+    }
+    for curve in curves {
+        let p = (0..=steps)
+            .map(|i| {
+                let t = i as f64 / steps as f64;
+                let s = 1. - t;
+                std::array::from_fn(|j| {
+                    s * s * s * curve[0][j]
+                        + 3. * s * s * t * curve[1][j]
+                        + 3. * s * t * t * curve[2][j]
+                        + t * t * t * curve[3][j]
+                })
+            })
+            .collect();
+        d.path(id, p, false, 1.);
+    }
+    d
+}
+
+/// A strip of ticks at the supplied baseline. `length` uses perpendicular data units.
+pub fn rug(samples: &[f64], baseline: f64, length: f64, horizontal: bool) -> Diagram {
+    segments(
+        &samples
+            .iter()
+            .map(|&x| {
+                if horizontal {
+                    ([x, baseline], [x, baseline + length])
+                } else {
+                    ([baseline, x], [baseline + length, x])
+                }
+            })
+            .collect::<Vec<_>>(),
+    )
+}
+
+/// Piecewise-constant values on explicit consecutive intervals, optionally
+/// connecting both ends to a baseline.
+pub fn stairs(edges: &[f64], values: &[f64], baseline: Option<f64>) -> Option<Diagram> {
+    if values.is_empty()
+        || edges.len().checked_sub(1)? != values.len()
+        || edges.iter().chain(values).any(|v| !v.is_finite())
+        || edges.windows(2).any(|w| w[0] >= w[1])
+        || baseline.is_some_and(|b| !b.is_finite())
+    {
+        return None;
+    }
+    let mut d = Diagram::cartesian();
+    let id = d.series("Stairs");
+    let mut path = Vec::new();
+    if let Some(b) = baseline {
+        path.push([edges[0], b]);
+    }
+    for (w, &y) in edges.windows(2).zip(values) {
+        path.extend([[w[0], y], [w[1], y]]);
+    }
+    if let Some(b) = baseline {
+        path.push([*edges.last()?, b]);
+    }
+    d.path(id, path, false, 1.);
+    Some(d)
+}
+
+/// Sample a function over an inclusive domain. Nonfinite function values
+/// split the line into visible segments.
+pub fn function(range: [f64; 2], intervals: usize, f: impl Fn(f64) -> f64) -> Option<Diagram> {
+    let [a, b] = range;
+    if intervals == 0 || !a.is_finite() || !b.is_finite() || a >= b {
+        return None;
+    }
+    let mut d = Diagram::cartesian();
+    let id = d.series("Function");
+    let mut path = Vec::new();
+    for i in 0..=intervals {
+        let t = i as f64 / intervals as f64;
+        let x = a * (1. - t) + b * t;
+        let y = f(x);
+        if y.is_finite() {
+            path.push([x, y]);
+        } else {
+            d.path(id, std::mem::take(&mut path), false, 1.);
+        }
+    }
+    d.path(id, path, false, 1.);
+    Some(d)
+}
+
+#[cfg(test)]
+mod interval_tests {
+    use super::*;
+    #[test]
+    fn stairs_gaps_and_transposition_preserve_data_coordinates() {
+        let d = stairs(&[0., 2., 5.], &[3., 4.], Some(0.)).expect("stairs");
+        assert_eq!(d.shapes[0].points, [
+            [0., 0.],
+            [0., 3.],
+            [2., 3.],
+            [2., 4.],
+            [5., 4.],
+            [5., 0.]
+        ]);
+        let f = function([-2., 2.], 4, |x| 1. / x).expect("sampled function");
+        assert_eq!(f.shapes.len(), 2);
+        let h = horizontal_ranges(
+            &[Interval {
+                x: 4.,
+                low: 1.,
+                high: 6.,
+            }],
+            0.2,
+        );
+        assert_eq!(h.shapes[0].points, [[1., 4.], [6., 4.]]);
+    }
+    #[test]
+    fn volume_and_quotes_have_independent_y_axes_and_synchronized_x_axes() {
+        let q = hlc(
+            &[Hlc {
+                x: 3.,
+                low: 4.,
+                close: 5.,
+                high: 7.,
+            }],
+            0.4,
+        );
+        assert_eq!(q.shapes.len(), 2);
+        let d = with_volume(q, &[[0., 1200.], [6., 800.]], 0.4);
+        assert_eq!(d.primary_bounds().y_max, 1200.);
+        assert_eq!(d.secondary_area().bounds().y_max, 7.);
+        let bottom = d.x_axis_ref().expect("primary x");
+        let top = d.secondary_area().x_axis.as_ref().expect("secondary x");
+        assert_eq!(
+            (bottom.lower_bound, bottom.upper_bound),
+            (top.lower_bound, top.upper_bound)
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

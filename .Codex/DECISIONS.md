@@ -63,3 +63,35 @@ Labels remain part of the chart's rendering and interaction lifecycle while gain
 ### Followups
 
 Revisit obstacle granularity if unusually dense layouts require placement between individual guide ticks.
+
+## D3 — Compose facets from independent chart widgets
+
+**Date:** 2026-11-18 · **Context:** ggplot2 facet coverage · **Status:** decided
+
+### Issue
+
+A facet group needs coordinated axis bounds while preserving each panel’s marks, legend interactions and keyboard targets.
+
+### Investigation
+
+Hyozu already calculates numeric bounds from each Data instance and routes interaction through its chart widget. iced rows and columns can assign each panel an equal share of the available space.
+
+### Options
+
+| | **A — compose ordinary charts** | B — add a facet mark to one plot area |
+|---|---|---|
+| Axes and titles | **Each panel owns its axes and title** | Requires multiple local transforms and guide sets |
+| Interaction | **Existing chart handles each panel’s events** | The plot must identify the panel before each hit test |
+| Shared scale | **Pool bounds at grid construction** | Resolve bounds within one compound scene |
+
+### Decision
+
+Use A. The Grid accepts pregrouped chart data and the caller chooses fixed or free scales on either axis. The Gallery maps panel indices back to the corresponding Data instance.
+
+### Why
+
+The same charts can appear independently or inside a grid. Each panel retains its established renderer, input behavior and event mapping.
+
+### Followups
+
+None.

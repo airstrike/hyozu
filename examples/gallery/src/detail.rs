@@ -35,22 +35,14 @@ impl App {
         }
         let content: Element<'_, Message> = if self.source {
             {
-                let code: Element<'_, Message> = icedcn::widget::code_block(v.source)
+                let code: Element<'_, Message> = icedcn::widget::code_block(v.source.as_ref())
                     .language("rs")
                     .copyable(false)
                     .into();
                 scrollable(code).height(Fill).boxed()
             }
         } else {
-            themer(
-                Some(self.theme.iced_theme().clone()),
-                hyozu::chart::<Message, iced::Theme>(&self.data[id.0])
-                    .on_action(Message::Chart)
-                    .style(hyozu::chart::transparent)
-                    .padding(18)
-                    .height(Fill),
-            )
-            .boxed()
+            self.preview(id, true, Fill)
         };
         let surface: Element<'_, Message> = icedcn::card(content).width(Fill).height(Fill).padding(8).into();
         column![

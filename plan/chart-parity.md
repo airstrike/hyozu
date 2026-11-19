@@ -35,3 +35,32 @@ The baseline is Hyozu `2892f6c`. A chart family is usable when callers can suppl
 | `parts::split_pie` | User-selected tail categories combine into one main wedge and a second weighted pie or stacked bar | Pie of pie, Bar of pie |
 
 The spectral implementation uses the optional `spectral` feature and [RustFFT](https://docs.rs/rustfft/latest/rustfft/struct.FftPlanner.html). Sampling and scaling follow [SciPy’s Welch definition](https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.welch.html) and [Matplotlib’s spectrogram](https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.specgram.html).
+
+## Reference acceptance inventory
+
+The library exposes the chart types below to callers supplying their own data. The gallery provides runnable fixtures and the source for each example. “Structural coverage” means the documented mark, transform or coordinate layout exists. It does not establish identical defaults, file formats or every rendering parameter.
+
+| Ecosystem and reference surface | Coverage through native Hyozu APIs | Representative evidence |
+|---|---|---|
+| Recharts 3 chart containers | Line, area, bar, scatter/bubble, combined Cartesian, pie/doughnut, radial bars, radar, funnel, treemap, Sankey and sunburst. Mouse hover and selection, keyboard traversal for Cartesian, pie and category diagram marks, shared x-domain selection with a two-handle brush. | Radar, Sankey, hierarchical treemap, domain brush. [Recharts API](https://recharts.github.io/en-US/api/) |
+| Excel categories | Column/bar, line/area and stacks, scatter/bubble, pie/doughnut and split pies, stock OHLC and HLC with optional volume, surface/wireframe, radar, treemap/sunburst, histogram/Pareto, box/whisker, waterfall, funnel, map and dual-axis combinations. A native spatial scene supports grouped/stacked/normalized columns and bars, depth-separated areas and lines, and extruded/exploded pie wedges. | Stacked lines, nested doughnuts, price and volume, 3D categories, extruded pie. [Microsoft chart types](https://support.microsoft.com/en-us/excel/available-chart-types-in-office) |
+| PowerPoint chart families | Uses the same Microsoft category catalog. The native renderer covers the listed families and variations above. | The fixtures use ordinary Hyozu widgets. PowerPoint document import/export belongs to the host application. [Microsoft chart types](https://support.microsoft.com/en-us/excel/available-chart-types-in-office) |
+| ggplot2 standard geoms and statistics | Bars and cumulative stacks, line/path, points/counts/jitter, intervals in both orientations, crossbars/point ranges, ribbon, polygons, segments/Bézier/spokes, rug, explicit stair steps, text, reference marks, tiles/raster, irregular/regular contours, histogram/frequency polygon/hex cells, Gaussian 1D and 2D KDE, ECDF, Q–Q and reference line, OLS, LOESS, conditional quantile fit, sampled functions and box/violin. | Quantile regression, KDE, rug, Q–Q reference, polygon groups and fixed/free-scale panel grids. [ggplot2 reference](https://ggplot2.tidyverse.org/reference/index.html) |
+| Matplotlib pairwise and statistical plot types | Plot, scatter, bar, stem, fill-between, stackplot, explicit edge stairs, histogram, boxplot, horizontal/vertical error bars, violin, event rows, rectangular histogram, hex counts or a caller-supplied scalar reducer, pie and ECDF. | Interval stairs, unequal-width bins, hexagon scalar means and horizontal error bars. [Matplotlib plot types](https://matplotlib.org/stable/plot_types/index.html) |
+| Matplotlib gridded and irregular fields | Native RGBA and scalar image textures, curvilinear quad mesh, contours/isobands, wind barbs, quiver, streamlines, explicit triangle connectivity, triangle face colors and wireframes. | Raster image, curvilinear cells, irregular survey contours and flat triangle colors. [Matplotlib plot types](https://matplotlib.org/stable/plot_types/index.html) |
+| Matplotlib 3D and volumetric plot types | World-coordinate bars, ruled fills between 3D traces, lines, arrows, scatter, stems, grid and triangulated surfaces, voxels and wireframes. Projection supports camera orbit and perspective. | Triangulated survey surface, 3D quiver, stem and ribbon. [Matplotlib plot types](https://matplotlib.org/stable/plot_types/index.html) |
+| Matplotlib signal analysis | Windowed magnitude and wrapped/unwrapped phase in radians, Welch PSD and cross-spectral magnitude/coherence, spectrogram and discrete lag correlation. | Signal gallery and numerical FFT tests. [Matplotlib signal example](https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.specgram.html) |
+
+The scientific fixtures exercise the reference gallery’s named plot types. General artist styling, streamlines on arbitrary meshes, arbitrary coordinate reference systems, full ggplot2 grammar extension and automatic Office file round-tripping are independent capabilities. Geographic rendering currently supports Mercator, equirectangular, cylindrical equal-area and Natural Earth projections. Fixed/free facets synchronize finite numeric primary-axis bounds at construction. Facets do not infer a dataset’s grouping variable.
+
+## Reproduce
+
+From the checkout run `cargo run --locked -p gallery`. The optional `raster` feature enables iced image textures and `spectral` enables RustFFT. The gallery enables both. Each live example is searchable by name or family. Selecting a card opens its full-size chart and source. The 3D examples provide camera rotation and the domain brush changes the detail chart’s x-axis.
+
+| Native Rawr evidence | Inspect |
+|---|---|
+| Gallery at desktop and narrow widths | [Before](chart-parity/gallery-before.png), [after](chart-parity/gallery-after.png), [narrow source view](chart-parity/narrow-source.png) |
+| Revenue by Segment, Q6 top label | [Clipped](chart-parity/q6-before.png), [fully visible](chart-parity/q6-after.png) |
+| Independent live panels using one numeric domain | [Fixed facets](chart-parity/fixed-facets.png) |
+| Data-space image and extruded native geometry | [Raster image](chart-parity/native-raster.png), [3D pie](chart-parity/extruded-pie.png) |
+| Domain selection changes the detail chart's x-axis | [Initial range](chart-parity/brush-before.png), [adjusted range](chart-parity/brush-after.png) |
