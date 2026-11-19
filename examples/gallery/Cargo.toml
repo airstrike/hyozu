@@ -6,7 +6,7 @@ publish = false
 
 [dependencies]
 icedcn = { git = "https://github.com/airstrike/icedcn", rev = "f42fd4f390504bd82ec9617805cb6cd26e82f95f", default-features = false, features = ["highlighter"] }
-hyozu = { path = "../..", features = ["spectral", "raster"] }
+hyozu = { path = "../..", features = ["spectral", "raster", "simple-features"] }
 iced = { version = "0.15.0-dev", features = ["highlighter"] }
 
 [build-dependencies]

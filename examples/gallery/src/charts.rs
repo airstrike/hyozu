@@ -9,6 +9,7 @@ pub(super) mod brush;
 mod cartesian;
 mod diagrams;
 mod facets;
+mod features;
 mod fields;
 mod gauge_basic;
 mod gauge_zones;
@@ -22,6 +23,7 @@ mod scatter_basic;
 mod scatter_multi;
 mod spatial;
 mod spectra;
+mod summaries;
 mod violin_basic;
 mod waterfall_basic;
 
@@ -742,6 +744,86 @@ pub fn variants() -> Vec<Variant> {
             Flat,
             cartesian::boxed_labels,
             "charts/cartesian.rs"
+        ),
+        variant!(
+            110,
+            "Simple features",
+            Geography,
+            Flat,
+            features::geometry,
+            "charts/features.rs"
+        ),
+        variant!(
+            111,
+            "Feature text",
+            Geography,
+            Flat,
+            features::names,
+            "charts/features.rs"
+        ),
+        variant!(
+            112,
+            "Boxed feature labels",
+            Geography,
+            Flat,
+            features::boxed,
+            "charts/features.rs"
+        ),
+        variant!(
+            113,
+            "Mean and standard error",
+            Statistical,
+            Flat,
+            summaries::point_range,
+            "charts/summaries.rs"
+        ),
+        variant!(
+            114,
+            "Binned means",
+            Statistical,
+            Flat,
+            summaries::binned,
+            "charts/summaries.rs"
+        ),
+        variant!(
+            115,
+            "Grouped summaries",
+            Statistical,
+            Flat,
+            summaries::grouped,
+            "charts/summaries.rs"
+        ),
+        variant!(
+            116,
+            "Rectangular scalar means",
+            Field,
+            Flat,
+            summaries::grid,
+            "charts/summaries.rs"
+        ),
+        variant!(
+            117,
+            "Custom connection",
+            Line,
+            Flat,
+            summaries::connector,
+            "charts/summaries.rs"
+        ),
+        variant!(
+            118,
+            "Robust data ellipse",
+            Statistical,
+            Flat,
+            summaries::robust,
+            "charts/summaries.rs"
+        ),
+        variant!(
+            119,
+            "Aligned stacked area",
+            Area,
+            Flat,
+            summaries::aligned,
+            "charts/summaries.rs"
         ),
     ]
 }

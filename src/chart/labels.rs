@@ -1,6 +1,6 @@
 //! Data labels share the chart's drawing plane. Marks remain in their own
 //! canvas frames, while glyphs can use the breathing room around the plot.
-use crate::core::{Color, Point, Rectangle, Size, Vector, alignment, text};
+use crate::core::{Color, Point, Rectangle, Vector, text};
 
 #[derive(Clone, Default)]
 pub(crate) struct Space {
@@ -102,23 +102,9 @@ impl<'p, P: text::Paragraph> Layer<'p, P> {
         color: Color,
         background: Option<(Color, f32)>,
     ) {
-        let Size { width, height } = paragraph.min_bounds();
-        let x = match paragraph.align_x() {
-            text::Alignment::Center => width / 2.,
-            text::Alignment::Right => width,
-            _ => 0.,
-        };
-        let y = match paragraph.align_y() {
-            alignment::Vertical::Top => 0.,
-            alignment::Vertical::Center => height / 2.,
-            alignment::Vertical::Bottom => height,
-        };
-        let rect = Rectangle {
-            x: anchor.x - x,
-            y: anchor.y - y,
-            width,
-            height,
-        };
+        // fill_paragraph receives the glyph box's top-left corner. Mark
+        // renderers have already converted their data anchor to this origin.
+        let rect = Rectangle::new(anchor, paragraph.min_bounds());
         let rect = background.map_or(rect, |(_, padding)| rect.expand(padding));
         let placed = self.space.place(rect);
         if let Some((fill, _)) = background {
@@ -140,8 +126,13 @@ impl<'p, P: text::Paragraph> Layer<'p, P> {
         let Some(clip) = self.space.outer.intersection(viewport) else {
             return;
         };
-        for (bounds, color) in self.plates {
-            if let Some(bounds) = bounds.intersection(&clip) {
+        if self.plates.is_empty() && self.outlines.is_empty() && self.labels.is_empty() {
+            return;
+        }
+        // Keep plates and glyphs in the same renderer layer above the plot.
+        // A separate child layer for plates would composite over the glyphs.
+        renderer.with_layer(clip, |renderer| {
+            for (bounds, color) in self.plates {
                 renderer.fill_quad(
                     crate::core::renderer::Quad {
                         bounds,
@@ -150,36 +141,86 @@ impl<'p, P: text::Paragraph> Layer<'p, P> {
                     color,
                 );
             }
-        }
-        if !self.outlines.is_empty() {
-            renderer.with_layer(clip, |renderer| {
-                for (bounds, outer, inner) in self.outlines {
-                    for (bounds, color) in [(bounds.expand(1.), outer), (bounds, inner)] {
-                        renderer.fill_quad(
-                            crate::core::renderer::Quad {
-                                bounds,
-                                border: crate::core::Border {
-                                    color,
-                                    width: 1.,
-                                    ..Default::default()
-                                },
+            for (bounds, outer, inner) in self.outlines {
+                for (bounds, color) in [(bounds.expand(1.), outer), (bounds, inner)] {
+                    renderer.fill_quad(
+                        crate::core::renderer::Quad {
+                            bounds,
+                            border: crate::core::Border {
+                                color,
+                                width: 1.,
                                 ..Default::default()
                             },
-                            Color::TRANSPARENT,
-                        );
-                    }
+                            ..Default::default()
+                        },
+                        Color::TRANSPARENT,
+                    );
                 }
-            });
-        }
-        for (paragraph, anchor, color) in self.labels {
-            renderer.fill_paragraph(paragraph, anchor, color, clip);
-        }
+            }
+            for (paragraph, anchor, color) in self.labels {
+                renderer.fill_paragraph(paragraph, anchor, color, clip);
+            }
+        });
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn backed_labels_paint_visible_glyphs_inside_their_plate() {
+        use crate::core::renderer::{Headless, Settings};
+        use crate::core::{Font, Size};
+        type Renderer = crate::widget::Renderer;
+        type Paragraph = <Renderer as text::Renderer>::Paragraph;
+        let mut renderer = iced::futures::executor::block_on(Renderer::new(Settings::default(), Some("tiny-skia")))
+            .expect("software renderer");
+        let mut paragraph = text::paragraph::Plain::<Paragraph>::default();
+        paragraph.update(text::Text {
+            content: "Harbor",
+            bounds: Size::INFINITE,
+            size: 22.into(),
+            font: Font::DEFAULT,
+            line_height: Default::default(),
+            align_x: text::Alignment::Left,
+            align_y: crate::core::alignment::Vertical::Top,
+            shaping: text::Shaping::Basic,
+            wrapping: text::Wrapping::None,
+            hint_factor: None,
+            ellipsis: text::Ellipsis::None,
+            letter_spacing: Default::default(),
+            font_features: Default::default(),
+            font_variations: Default::default(),
+            weight: None,
+        });
+        let clip = Rectangle::with_size(Size::new(180., 70.));
+        let mut layer = Layer::new(Space::new(clip));
+        layer.push_backed(
+            paragraph.raw(),
+            Point::new(40., 15.),
+            Color::from_rgb(1., 0., 0.),
+            Some((Color::from_rgb(0., 0., 1.), 4.)),
+        );
+        let plate = layer.plates[0].0;
+        layer.draw(&mut renderer, &clip);
+        let pixels = renderer.screenshot(Size::new(180, 70), 1., Color::WHITE);
+        let mut red = 0;
+        let mut blue = 0;
+        for (i, rgba) in pixels.as_chunks::<4>().0.iter().enumerate() {
+            if rgba[0] > 160 && rgba[1] < 90 && rgba[2] < 90 {
+                red += 1;
+                assert!(plate.contains(Point::new((i % 180) as f32, (i / 180) as f32)));
+            }
+            if rgba[0] < 30 && rgba[1] < 30 && rgba[2] > 220 {
+                blue += 1;
+            }
+        }
+        assert!(
+            red > 20 && blue > 100,
+            "visible glyph pixels {red}, background pixels {blue}"
+        );
+    }
+
     #[test]
     fn four_edges_stay_within_card_and_clear_title() {
         let mut space = Space::new(Rectangle {

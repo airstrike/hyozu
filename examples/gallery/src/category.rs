@@ -17,6 +17,7 @@ pub enum Category {
     Field,
     Spatial,
     Facets,
+    Geography,
 }
 
 impl Category {
@@ -38,6 +39,7 @@ impl Category {
         Self::Field,
         Self::Spatial,
         Self::Facets,
+        Self::Geography,
     ];
 
     pub fn label(self) -> &'static str {
@@ -52,6 +54,7 @@ impl Category {
             Self::BoxPlot => "Box Plot",
             Self::Violin => "Violin",
             Self::Financial => "Financial",
+            Self::Geography => "Geography",
             Self::Facets => "Small multiples",
             Self::Spatial => "3D",
             Self::Field => "Scientific fields",

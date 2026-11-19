@@ -51,7 +51,7 @@ The library exposes the chart types below to callers supplying their own data. T
 | Matplotlib 3D and volumetric plot types | World-coordinate bars, ruled fills between 3D traces, lines, arrows, scatter, stems, grid and triangulated surfaces, voxels and wireframes. Projection supports camera orbit and perspective. | Triangulated survey surface, 3D quiver, stem and ribbon. [Matplotlib plot types](https://matplotlib.org/stable/plot_types/index.html) |
 | Matplotlib signal analysis | Windowed magnitude and wrapped/unwrapped phase in radians, Welch PSD and cross-spectral magnitude/coherence, spectrogram and discrete lag correlation. | Signal gallery and numerical FFT tests. [Matplotlib signal example](https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.specgram.html) |
 
-Regression and arbitrary-label examples also cover covariance ellipses and boxed text anchored to a coordinate. Each of the 37 named commands in Matplotlib’s plot-types index has a native structural counterpart. All named Recharts chart containers and the Office top-level chart families in the cited chart-type catalog have native entry points. General artist styling, streamlines on arbitrary meshes, arbitrary coordinate reference systems, full ggplot2 grammar extension and automatic Office file round-tripping are independent capabilities. Geographic rendering currently supports Mercator, equirectangular, cylindrical equal-area and Natural Earth projections. Fixed/free facets synchronize finite numeric primary-axis bounds at construction. Facets do not infer a dataset’s grouping variable.
+Regression and arbitrary-label examples also cover covariance ellipses and boxed text anchored to a coordinate. Each of the 37 named commands in Matplotlib’s plot-types index has a native structural counterpart. All named Recharts chart containers and the Office top-level chart families in the cited chart-type catalog have native entry points. General artist styling, streamlines on arbitrary meshes, full ggplot2 grammar extension and Office file round-tripping are independent capabilities. The original native basemap supports Mercator, equirectangular, cylindrical equal-area and Natural Earth. Mixed-feature layers can also use an external CRS definition. Fixed/free facets synchronize finite numeric primary-axis bounds at construction. Facets do not infer a dataset’s grouping variable.
 
 ## Reproduce
 
@@ -60,22 +60,31 @@ From the checkout run `cargo run --locked -p gallery`. The optional `raster` fea
 | Native Rawr evidence | Inspect |
 |---|---|
 | Gallery at desktop and narrow widths | [Before](chart-parity/gallery-before.png), [after](chart-parity/gallery-after.png), [narrow source view](chart-parity/narrow-source.png) |
-| Revenue by Segment, Q6 top label | [Clipped](chart-parity/q6-before.png), [fully visible](chart-parity/q6-after.png) |
+| Revenue by Segment, Q6 top label | [Clipped](chart-parity/q6-before.png), [fully visible](chart-parity/q6-after.png), [compact card in the final build](chart-parity/q6-compact.png) |
 | Independent live panels using one numeric domain | [Fixed facets](chart-parity/fixed-facets.png) |
 | Data-space image and extruded native geometry | [Raster image](chart-parity/native-raster.png), [3D pie](chart-parity/extruded-pie.png) |
+| Projected mixed geometry, polygon hole and anchored labels | [UTM harbor survey](chart-parity/harbor-features.png) |
 | Domain selection changes the detail chart's x-axis | [Initial range](chart-parity/brush-before.png), [adjusted range](chart-parity/brush-after.png) |
 
 ### Microsoft presentation variants
 
 The gallery also exposes an individually exploded flat pie. The gallery includes smooth scatter with optional observation markers, shaded 2D bubbles with a radial highlight, outlined radar with optional vertex markers, clustered bars/columns on one depth plane, and 3D surface colors clipped at numeric value boundaries. The [shaded bubble capture](chart-parity/shaded-bubbles.png) shows the native scatter renderer’s per-point radial gradient. These variants correspond to Microsoft’s scatter/bubble, radar, clustered and surface entries. [Microsoft chart types](https://support.microsoft.com/en-us/excel/available-chart-types-in-office)
 
-### Remaining interoperability differences
+### Mixed geographic features and reference systems
 
-| | A — native geographic layers | **B — accept arbitrary source coordinate systems** |
-|---|---|---|
-| Current coverage | Polygon and multipolygon GeoJSON ingestion, native geographic points and text, four built-in projections | Requires CRS metadata, coordinate transformation and simple-feature dispatch for points, lines, polygons and geometry collections |
-| Relevant comparison | Existing map and bubble-map families | ggplot2’s `geom_sf()`, `geom_sf_text()` and `geom_sf_label()` accept richer source geometry and projection pipelines |
+The optional `simple-features` feature provides native geometry, text and boxed labels for points, lines, polygons, all three multi-geometries and recursive geometry collections. Feature IDs and attributes survive transformation. Polygon holes use native compound geometry and label anchors default to a point on the feature surface. The gallery includes a [mixed harbor survey](../examples/gallery/src/charts/harbor.geojson) rendered in UTM zone 18N. These are the chart-authoring counterparts to `geom_sf()`, `geom_sf_text()`, `geom_sf_label()` and `stat_sf_coordinates()`. [ggplot2 simple features](https://ggplot2.tidyverse.org/reference/ggsf.html)
 
-**Recommend B for a future geographic interoperability change.** The four existing projections cover native map families. Reproducing `sf` behavior requires an explicit CRS-aware import contract and tests for mixed geometry collections. [ggplot2 simple features](https://ggplot2.tidyverse.org/reference/ggsf.html)
+Proj4rs handles its supported EPSG and PROJ definitions in Rust. Enable `native-proj` for upstream PROJ’s coordinate-operation database, WKT definitions and locally available datum grids. The layer also accepts a caller-provided transform. Source ordinates follow visualization XY order, with longitude then latitude in degrees for geographic CRSs. Conversion tests exercise Web Mercator, a UTM central meridian and an authority-free WKT projection. A high-accuracy operation that requires an external datum grid needs that grid installed and discoverable by PROJ. [Proj4rs](https://docs.rs/proj4rs/latest/proj4rs/) [PROJ resources](https://proj.org/en/stable/resource_files.html)
 
-The remaining ggplot2 differences extend beyond chart families. There are no direct declarative equivalents to `stat_summary()`, `stat_summary_bin()`, `stat_summary_2d()`, `stat_manual()`, `stat_connect()`, or `stat_sf_coordinates()`. Callers can supply precomputed data, and the hexbin API accepts an arbitrary reducer. The covariance ellipse uses an ordinary sample covariance matrix. ggplot2 also offers a robust multivariate-t estimator. [ggplot2 statistics](https://ggplot2.tidyverse.org/reference/index.html)
+### Additional chart-generating statistics
+
+| ggplot2 reference | Hyozu chart-authoring API |
+|---|---|
+| `stat_summary()`, `stat_summary_bin()` | `stats::summary::{at,bins}` reduce finite values at exact or binned coordinates. Reducers can return arbitrary values, including interval bounds. `mean_se` draws mean and standard error directly. |
+| `stat_summary_2d()`, `stat_summary_hex()` | `field::{summary2d,hexbin_values}` apply a caller-defined statistic to each occupied cell; missing observations and empty cells remain masked. |
+| `stat_manual()`, `stat_unique()` | `stats::summary::{groups,unique}` apply arbitrary per-group transformations and retain the first observation for each unique key. |
+| `stat_align()` | `stats::aligned_areas` linearly interpolates irregular series onto their common knots, respects missing intervals and stacks positive and negative contributions separately. |
+| `stat_connect()` | `cartesian::{steps,connect}` support horizontal/vertical, vertical/horizontal, midpoint and user-defined normalized transition paths; standard line marks connect linearly. |
+| `stat_ellipse()` | `stats::{ellipse,student_ellipse}` offer ordinary sample covariance and iteratively reweighted multivariate-t scatter at a supplied radius. |
+
+These APIs work on Rust data and native marks. They cover the chart-generating actions without interpreting R formulas or requiring a ggplot2 runtime. [ggplot2 layer statistics](https://ggplot2.tidyverse.org/reference/index.html)

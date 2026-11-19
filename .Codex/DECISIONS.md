@@ -95,3 +95,35 @@ The same charts can appear independently or inside a grid. Each panel retains it
 ### Followups
 
 None.
+
+## D4 — Keep geographic projection engines optional
+
+**Date:** 2026-11-18 · **Context:** mixed geographic feature layers · **Status:** decided
+
+### Issue
+
+Geographic points, lines, polygons and their labels need one projected coordinate space. WKT and datum-grid operations may require the PROJ database. The native gallery and web-compatible chart core also need an installation that can use Rust dependencies alone.
+
+### Investigation
+
+GeoRust provides geometry traversal and interior-point algorithms. GeoJSON converts all seven geometry forms into those native types. Proj4rs resolves EPSG and PROJ strings in Rust. The PROJ bindings can build the upstream C++ library from source and run a WKT-defined coordinate operation.
+
+### Options
+
+| | A — require native PROJ | B — Rust-only transforms | **C — optional projection engines** |
+|---|---|---|---|
+| Deployment | Native build and database for every map | Rust-only | **Rust-only default for feature layers, native PROJ on request** |
+| Coordinates | EPSG, WKT and installed datum grids | Subset implemented by Proj4rs | **Select the required operation through one layer API** |
+| Existing maps | Would introduce a native dependency | Separate native model | **Existing map types and their feature requirements remain available** |
+
+### Decision
+
+Use C. The simple-features feature enables rich geometry, GeoJSON parsing and Proj4rs. The native-proj feature enables PROJ’s CRS resolver. Layer transformations happen ahead of widget layout. A caller can supply its own fallible transform and label-anchor function.
+
+### Why
+
+A geographic feature keeps its properties and identity through projection, drawing, hit testing and label placement. Polygon holes share one even–odd path with picking. Built-in chart families can still compile without either projection backend.
+
+### Followups
+
+None.

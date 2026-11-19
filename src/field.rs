@@ -158,7 +158,7 @@ impl Mesh {
     }
 }
 
-fn axis(values: &[f64]) -> bool {
+pub(crate) fn axis(values: &[f64]) -> bool {
     values.len() >= 2 && values.iter().all(|v| v.is_finite()) && values.windows(2).all(|w| w[0] < w[1])
 }
 
@@ -190,6 +190,36 @@ fn clip_scalar(points: &[Sample], level: f64, above: bool) -> Vec<Sample> {
     out
 }
 
+pub(crate) fn bin(value: f64, edges: &[f64]) -> Option<usize> {
+    if value >= edges[0] && value <= edges[edges.len() - 1] {
+        Some((edges.partition_point(|e| *e <= value) - 1).min(edges.len() - 2))
+    } else {
+        None
+    }
+}
+
+/// Apply a reducer to scalar measurements in each occupied 2D rectangle.
+/// Empty cells and nonfinite observations stay masked.
+pub fn summary2d(x: &[f64], y: &[f64], samples: &[[f64; 3]], reduce: impl Fn(&[f64]) -> f64) -> Option<Diagram> {
+    if !axis(x) || !axis(y) {
+        return None;
+    }
+    let cols = x.len() - 1;
+    let mut cells = vec![Vec::new(); cols.checked_mul(y.len() - 1)?];
+    for &[xx, yy, z] in samples {
+        if z.is_finite()
+            && let (Some(i), Some(j)) = (bin(xx, x), bin(yy, y))
+        {
+            cells[j * cols + i].push(z);
+        }
+    }
+    let values: Vec<_> = cells
+        .iter()
+        .map(|v| if v.is_empty() { f64::NAN } else { reduce(v) })
+        .collect();
+    tiles(x, y, &values)
+}
+
 /// Rectangular 2D histogram with independently chosen finite edges.
 /// Density divides by included population and bin area.
 pub fn histogram2d(x: &[f64], y: &[f64], samples: &[[f64; 2]], density: bool) -> Option<Diagram> {
@@ -198,13 +228,6 @@ pub fn histogram2d(x: &[f64], y: &[f64], samples: &[[f64; 2]], density: bool) ->
     }
     let cols = x.len() - 1;
     let mut counts = vec![0usize; cols.checked_mul(y.len() - 1)?];
-    let bin = |v: f64, edges: &[f64]| {
-        if v >= edges[0] && v <= edges[edges.len() - 1] {
-            Some((edges.partition_point(|&e| e <= v) - 1).min(edges.len() - 2))
-        } else {
-            None
-        }
-    };
     let mut n = 0;
     for &[xx, yy] in samples {
         if let (Some(i), Some(j)) = (bin(xx, x), bin(yy, y)) {
@@ -482,6 +505,19 @@ pub fn scalar_image(
 #[cfg(test)]
 mod mesh_tests {
     use super::*;
+    #[test]
+    fn rectangular_reducers_mask_empty_cells_and_include_the_final_edge() {
+        let d = summary2d(
+            &[0., 1., 2.],
+            &[0., 2., 4.],
+            &[[0., 0., 2.], [0.5, 1., 4.], [2., 4., 10.], [1., 3., f64::NAN]],
+            |v| v.iter().sum::<f64>() / v.len() as f64,
+        )
+        .expect("occupied cells");
+        assert_eq!(d.shapes.len(), 2);
+        assert_eq!(d.entries().iter().map(|e| e.value).collect::<Vec<_>>(), [3., 10.]);
+    }
+
     #[test]
     fn hexagons_reduce_measurements_separately_and_skip_missing_values() {
         let d = hexbin_values(

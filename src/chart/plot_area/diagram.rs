@@ -7,6 +7,7 @@ use crate::widget::canvas::{Frame, Path, Stroke};
 use crate::widget::renderer::geometry;
 
 struct Region {
+    holes: Vec<Vec<Point>>,
     path: Path,
     /// Screen coordinates also serve exact polygon picking.
     vertices: Vec<Point>,
@@ -59,12 +60,16 @@ impl<P: text::Paragraph> State<P> {
                 .fold((f32::INFINITY, f32::NEG_INFINITY), |(a, b), p| (a.min(p.y), b.max(p.y)));
             let y = lo.midpoint(hi);
             let mut cuts = Vec::new();
-            let mut before = region.vertices[region.vertices.len() - 1];
-            for &after in &region.vertices {
-                if (before.y > y) != (after.y > y) {
-                    cuts.push(before.x + (y - before.y) * (after.x - before.x) / (after.y - before.y));
+            for ring in std::iter::once(&region.vertices).chain(&region.holes) {
+                let Some(mut before) = ring.last().copied() else {
+                    continue;
+                };
+                for &after in ring {
+                    if (before.y > y) != (after.y > y) {
+                        cuts.push(before.x + (y - before.y) * (after.x - before.x) / (after.y - before.y));
+                    }
+                    before = after;
                 }
-                before = after;
             }
             cuts.sort_by(f32::total_cmp);
             if let Some(pair) = cuts
@@ -104,15 +109,19 @@ impl<P: text::Paragraph> State<P> {
             if region.vertices.len() < 3 {
                 return None;
             }
-            let mut prev = *region.vertices.last()?;
             let mut inside = false;
-            for &p in &region.vertices {
-                if (prev.y > point.y) != (p.y > point.y)
-                    && point.x < (p.x - prev.x) * (point.y - prev.y) / (p.y - prev.y) + prev.x
-                {
-                    inside = !inside;
+            for ring in std::iter::once(&region.vertices).chain(&region.holes) {
+                let Some(mut previous) = ring.last().copied() else {
+                    continue;
+                };
+                for &p in ring {
+                    if (previous.y > point.y) != (p.y > point.y)
+                        && point.x < (p.x - previous.x) * (point.y - previous.y) / (p.y - previous.y) + previous.x
+                    {
+                        inside = !inside;
+                    }
+                    previous = p;
                 }
-                prev = p;
             }
             inside.then_some(index)
         })
@@ -159,6 +168,11 @@ pub(super) fn layout<R: text::Renderer>(
         let Some((&first, rest)) = vertices.split_first() else {
             continue;
         };
+        let holes: Vec<Vec<_>> = shape
+            .holes
+            .iter()
+            .map(|ring| ring.iter().copied().map(point).collect())
+            .collect();
         let path = Path::new(|builder| {
             builder.move_to(first);
             for &v in rest {
@@ -166,9 +180,19 @@ pub(super) fn layout<R: text::Renderer>(
             }
             if shape.closed {
                 builder.close();
+                for ring in &holes {
+                    if let Some((&first, rest)) = ring.split_first() {
+                        builder.move_to(first);
+                        for &p in rest {
+                            builder.line_to(p);
+                        }
+                        builder.close();
+                    }
+                }
             }
         });
         state.regions.push(Region {
+            holes,
             path,
             vertices,
             entry: shape.entry,
@@ -192,13 +216,7 @@ pub(super) fn layout<R: text::Renderer>(
             size,
             font,
             line_height: text::LineHeight::default(),
-            align_x: if pos[0] < 0.46 {
-                text::Alignment::Right
-            } else if pos[0] > 0.54 {
-                text::Alignment::Left
-            } else {
-                text::Alignment::Center
-            },
+            align_x: text::Alignment::Left,
             align_y: crate::core::alignment::Vertical::Center,
             shaping: text::Shaping::Basic,
             wrapping: text::Wrapping::None,
@@ -209,6 +227,15 @@ pub(super) fn layout<R: text::Renderer>(
             letter_spacing: Default::default(),
             weight: None,
         });
+        let bounds = paragraph.min_bounds();
+        let dx = if d.centered_labels || (0.46..=0.54).contains(&pos[0]) {
+            bounds.width / 2.
+        } else if pos[0] < 0.46 {
+            bounds.width
+        } else {
+            0.
+        };
+        *anchor -= crate::core::Vector::new(dx, bounds.height / 2.);
     }
 }
 
@@ -259,7 +286,11 @@ pub(super) fn draw<'p, R, D: Design + ?Sized>(
         });
         let color = color.mix(crate::core::Color::BLACK, 1. - region.lightness);
         if region.closed {
-            frame.fill(&region.path, color.scale_alpha(region.opacity));
+            let mut fill = crate::widget::canvas::Fill::from(color.scale_alpha(region.opacity));
+            if !region.holes.is_empty() {
+                fill.rule = crate::widget::canvas::fill::Rule::EvenOdd;
+            }
+            frame.fill(&region.path, fill);
             if (!d.cartesian && !d.smooth_faces) || region.opacity < 1. {
                 frame.stroke(
                     &region.path,
@@ -285,13 +316,56 @@ pub(super) fn draw<'p, R, D: Design + ?Sized>(
     let geometry = frame.into_geometry();
     renderer.with_translation(translation, |r| r.draw_geometry(geometry));
     for (anchor, p) in &state.labels {
-        labels.push(p.raw(), *anchor + translation, ink);
+        labels.push_backed(
+            p.raw(),
+            *anchor + translation,
+            d.label_color.unwrap_or(ink),
+            d.label_background,
+        );
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "simple-features")]
+    #[test]
+    fn geographic_holes_are_transparent_to_picking_and_keyboard_targets() {
+        use crate::core::renderer::{Headless, Settings};
+        use crate::geo::features::{Crs, Labels, Layer};
+        type Renderer = crate::widget::Renderer;
+        type Paragraph = <Renderer as text::Renderer>::Paragraph;
+        let l = Layer::from_geojson(
+            r#"{"type":"Polygon","coordinates":[[[0,0],[10,0],[10,10],[0,10],[0,0]],[[3,3],[7,3],[7,7],[3,7],[3,3]]]}"#,
+            Crs::parse("EPSG:4326").expect("WGS 84"),
+        )
+        .expect("polygon with hole");
+        let d = l.diagram(Labels::None, |_| "region".to_owned());
+        let renderer = iced::futures::executor::block_on(Renderer::new(Settings::default(), Some("tiny-skia")))
+            .expect("software renderer");
+        let mut tree = state::<Paragraph>();
+        let size = Size::new(200., 200.);
+        let unit = super::super::Range { min: 0., max: 1. };
+        let domain = super::super::Domain {
+            x: unit,
+            y: unit,
+            y_transform: crate::Transform::default(),
+        };
+        layout(
+            &d,
+            &mut tree,
+            &renderer,
+            size,
+            &domain,
+            crate::core::Rectangle::with_size(size),
+            None,
+        );
+        let state = tree.state.downcast_ref::<State<Paragraph>>();
+        assert_eq!(state.pick(Point::new(100., 100.)), None);
+        assert_eq!(state.pick(Point::new(30., 100.)), Some(0));
+        assert_eq!(state.pick(state.category_targets(1)[0]), Some(0));
+    }
+
     #[test]
     fn keyboard_stops_land_inside_annular_sectors() {
         use crate::core::renderer::{Headless, Settings};

@@ -1,0 +1,10 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {"type":"Feature","id":"shore","properties":{"name":"Harbor district"},"geometry":{"type":"Polygon","coordinates":[[[-74.025,40.700],[-73.995,40.700],[-73.995,40.725],[-74.025,40.725],[-74.025,40.700]],[[-74.019,40.708],[-74.019,40.717],[-74.010,40.717],[-74.010,40.708],[-74.019,40.708]]]}},
+    {"type":"Feature","id":"islands","properties":{"name":"Islands"},"geometry":{"type":"MultiPolygon","coordinates":[[[[-73.990,40.715],[-73.983,40.718],[-73.985,40.722],[-73.992,40.720],[-73.990,40.715]]],[[[-73.988,40.706],[-73.983,40.708],[-73.986,40.711],[-73.988,40.706]]]]}},
+    {"type":"Feature","id":"ferry","properties":{"name":"Ferry route"},"geometry":{"type":"MultiLineString","coordinates":[[[-74.021,40.702],[-74.006,40.705],[-73.997,40.713],[-73.988,40.711]],[[-73.997,40.713],[-73.989,40.717]]]}},
+    {"type":"Feature","id":"stations","properties":{"name":"Terminals"},"geometry":{"type":"GeometryCollection","geometries":[{"type":"MultiPoint","coordinates":[[-74.021,40.702],[-73.988,40.711],[-73.989,40.717]]},{"type":"LineString","coordinates":[[-74.022,40.701],[-74.020,40.703]]}]}},
+    {"type":"Feature","id":"pier","properties":{"name":"North pier"},"geometry":{"type":"Point","coordinates":[-74.005,40.727]}}
+  ]
+}

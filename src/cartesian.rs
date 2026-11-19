@@ -371,6 +371,37 @@ pub fn function(range: [f64; 2], intervals: usize, f: impl Fn(f64) -> f64) -> Op
     Some(d)
 }
 
+/// Apply a normalized connection path independently to every pair of
+/// adjacent finite observations. Coordinates (0,0) and (1,1) denote its
+/// endpoints. Missing data splits the result into separate paths.
+pub fn connect(samples: &[[f64; 2]], pattern: &[[f64; 2]]) -> Option<Diagram> {
+    if pattern.is_empty()
+        || pattern.iter().flatten().any(|v| !v.is_finite())
+        || (pattern.first() != Some(&[0., 0.]) && pattern.last() != Some(&[1., 1.]))
+    {
+        return None;
+    }
+    let mut d = Diagram::cartesian();
+    let id = d.series("Connected observations");
+    for run in samples
+        .split(|p| p.iter().any(|v| !v.is_finite()))
+        .filter(|r| r.len() > 1)
+    {
+        let mut path = vec![run[0]];
+        for w in run.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            for &[u, v] in pattern.iter().filter(|p| **p != [0., 0.]) {
+                path.push([a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * v]);
+            }
+            if path.last() != Some(&b) {
+                path.push(b);
+            }
+        }
+        d.path(id, path, false, 1.);
+    }
+    Some(d)
+}
+
 /// Interpolate a smooth scatter path through the supplied observations in
 /// input order with cubic Catmull–Rom segments. A nonfinite observation
 /// splits the path. Markers, when enabled, stay on the original observations.
@@ -419,6 +450,13 @@ pub fn smooth_scatter(samples: &[[f64; 2]], markers: bool) -> crate::Data {
 #[cfg(test)]
 mod interval_tests {
     use super::*;
+    #[test]
+    fn custom_connection_maps_relative_vertices_to_observations() {
+        let d = connect(&[[2., 3.], [6., 7.]], &[[0.25, 0.75], [1., 1.]]).expect("connection");
+        assert_eq!(d.shapes[0].points, [[2., 3.], [3., 6.], [6., 7.]]);
+        assert!(connect(&[[0., 0.], [1., 1.]], &[[0.4, 0.7]]).is_none());
+    }
+
     #[test]
     fn smooth_scatter_passes_through_samples_and_preserves_gaps() {
         let d = smooth_scatter(

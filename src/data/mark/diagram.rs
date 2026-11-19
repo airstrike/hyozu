@@ -12,6 +12,7 @@ pub struct Entry {
 
 #[derive(Clone, Debug)]
 pub(crate) struct Shape {
+    pub holes: Vec<Vec<[f64; 2]>>,
     pub points: Vec<[f64; 2]>,
     pub entry: Option<usize>,
     pub closed: bool,
@@ -25,6 +26,9 @@ pub struct Diagram {
     pub(crate) entries: Vec<Entry>,
     pub(crate) shapes: Vec<Shape>,
     pub(crate) labels: Vec<([f32; 2], String)>,
+    pub(crate) centered_labels: bool,
+    pub(crate) label_color: Option<crate::core::Color>,
+    pub(crate) label_background: Option<(crate::core::Color, f32)>,
     pub(crate) square: bool,
     pub(crate) cartesian: bool,
     pub(crate) smooth_faces: bool,
@@ -79,6 +83,7 @@ impl Diagram {
                 }
             }
             self.shapes.push(Shape {
+                holes: Vec::new(),
                 points,
                 entry: Some(index),
                 closed,
@@ -118,6 +123,7 @@ impl Diagram {
 
     fn polygon(&mut self, index: usize, points: Vec<[f32; 2]>, opacity: f32) {
         self.shapes.push(Shape {
+            holes: Vec::new(),
             points: points.into_iter().map(|p| p.map(f64::from)).collect(),
             entry: Some(index),
             closed: true,
@@ -128,6 +134,7 @@ impl Diagram {
 
     pub(crate) fn guide(&mut self, points: Vec<[f32; 2]>) {
         self.shapes.push(Shape {
+            holes: Vec::new(),
             points: points.into_iter().map(|p| p.map(f64::from)).collect(),
             entry: None,
             closed: false,

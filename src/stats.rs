@@ -149,6 +149,7 @@ pub fn pareto<S: AsRef<str>>(entries: &[(S, u64)]) -> Data {
 }
 
 pub mod fit;
+pub mod summary;
 
 /// Stacked dots at each bin midpoint, one dot per included observation.
 /// The y value gives its one-based position within the stack.
@@ -332,6 +333,10 @@ pub fn ellipse(samples: &[[f64; 2]], radius: f64) -> Option<Line> {
     }
     let denom = (n - 1) as f64;
     let (a, b, c) = (xx / denom, xy / denom, yy / denom);
+    ellipse_from_covariance([mx, my], [a, b, c], radius)
+}
+
+fn ellipse_from_covariance([mx, my]: [f64; 2], [a, b, c]: [f64; 3], radius: f64) -> Option<Line> {
     let half = (a - c) * 0.5;
     let mid = (a + c) * 0.5;
     let delta = half.hypot(b);
@@ -358,6 +363,130 @@ pub fn ellipse(samples: &[[f64; 2]], radius: f64) -> Option<Line> {
     )
 }
 
+/// Stack irregularly sampled series on a common x domain. Each series is
+/// linearly interpolated only between adjacent finite observations. Crossing
+/// zero splits an interval, so positive and negative stacks remain separate.
+pub fn aligned_areas<S: AsRef<str>, P: AsRef<[[f64; 2]]>>(series: &[(S, P)]) -> Option<crate::Diagram> {
+    let mut knots = Vec::new();
+    for (_, p) in series {
+        let rows = p.as_ref();
+        if rows.iter().any(|p| !p[0].is_finite()) || rows.windows(2).any(|w| w[0][0] >= w[1][0]) {
+            return None;
+        }
+        knots.extend(rows.iter().map(|p| p[0]));
+        for w in rows.windows(2) {
+            let ([a, ya], [b, yb]) = (w[0], w[1]);
+            if ya.is_finite() && yb.is_finite() && ya.signum() != yb.signum() && ya != 0. && yb != 0. {
+                let scale = ya.abs().max(yb.abs());
+                let a_norm = ya.abs() / scale;
+                let fraction = a_norm / (a_norm + yb.abs() / scale);
+                knots.push(a * (1. - fraction) + b * fraction);
+            }
+        }
+    }
+    knots.sort_by(f64::total_cmp);
+    knots.dedup_by(|a, b| *a == *b);
+    let mut result = crate::Diagram::cartesian();
+    for (name, _) in series {
+        result.series(name.as_ref());
+    }
+    for domain in knots.windows(2) {
+        let (lo, hi) = (domain[0], domain[1]);
+        let mut positive = [0.; 2];
+        let mut negative = [0.; 2];
+        for (id, (_, data)) in series.iter().enumerate() {
+            let points = data.as_ref();
+            let end = points.partition_point(|p| p[0] <= lo);
+            if end == 0 || end == points.len() {
+                continue;
+            }
+            let ([a, ya], [b, yb]) = (points[end - 1], points[end]);
+            if hi > b || !ya.is_finite() || !yb.is_finite() {
+                continue;
+            }
+            let estimate = |x| {
+                let t = (x - a) / (b - a);
+                ya * (1. - t) + yb * t
+            };
+            let heights = [estimate(lo), estimate(hi)];
+            let base = if heights[0].midpoint(heights[1]) >= 0. {
+                &mut positive
+            } else {
+                &mut negative
+            };
+            let next = [base[0] + heights[0], base[1] + heights[1]];
+            result.path(
+                id,
+                vec![[lo, base[0]], [hi, base[1]], [hi, next[1]], [lo, next[0]]],
+                true,
+                1.,
+            );
+            *base = next;
+        }
+    }
+    Some(result)
+}
+
+/// Estimate a multivariate-t center and scatter matrix by iteratively
+/// reweighting squared Mahalanobis distances. The radius uses scatter-matrix
+/// units. Degenerate data or a nonconvergent fit returns None.
+pub fn student_ellipse(samples: &[[f64; 2]], degrees: f64, radius: f64) -> Option<Line> {
+    if !degrees.is_finite() || degrees <= 0. || !radius.is_finite() || radius <= 0. {
+        return None;
+    }
+    let points: Vec<_> = samples
+        .iter()
+        .copied()
+        .filter(|p| p.iter().all(|v| v.is_finite()))
+        .collect();
+    if points.len() < 3 {
+        return None;
+    }
+    let n = points.len() as f64;
+    let average = |weights: &[f64]| {
+        let mut w = 0.;
+        let mut mean = [0., 0.];
+        for (&[x, y], &weight) in points.iter().zip(weights) {
+            w += weight;
+            mean[0] += (x - mean[0]) * weight / w;
+            mean[1] += (y - mean[1]) * weight / w;
+        }
+        mean
+    };
+    let scatter = |center: [f64; 2], weights: &[f64]| {
+        let mut cov = [0.; 3];
+        for (&[x, y], &w) in points.iter().zip(weights) {
+            let (dx, dy) = (x - center[0], y - center[1]);
+            cov[0] += w * dx * dx / n;
+            cov[1] += w * dx * dy / n;
+            cov[2] += w * dy * dy / n;
+        }
+        cov
+    };
+    let mut weights = vec![1.; points.len()];
+    for _ in 0..256 {
+        let center = average(&weights);
+        let cov = scatter(center, &weights);
+        let [a, b, c] = cov;
+        let det = a * c - b * b;
+        if !det.is_finite() || det <= 0. {
+            return None;
+        }
+        let mut maximum = 0_f64;
+        for (&[x, y], w) in points.iter().zip(&mut weights) {
+            let (dx, dy) = (x - center[0], y - center[1]);
+            let distance = (c * dx * dx - 2. * b * dx * dy + a * dy * dy) / det;
+            let next = (degrees + 2.) / (degrees + distance);
+            maximum = maximum.max((*w - next).abs());
+            *w = next;
+        }
+        if maximum < 1e-7 {
+            return ellipse_from_covariance(center, cov, radius);
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod transform_tests {
     use super::*;
@@ -370,6 +499,40 @@ mod transform_tests {
         assert!((l.points[0].y - 1.).abs() < 1e-7 && (l.points[1].y - 9.).abs() < 1e-7);
         assert!(fit::quantile(&[[0., 1.], [0., 2.]], 0.5).is_none());
     }
+    #[test]
+    fn area_alignment_interpolates_without_extending_support() {
+        let a = [("base", vec![[0., 1.], [2., 3.]]), ("upper", vec![[1., 2.], [3., 2.]])];
+        let d = aligned_areas(&a).expect("sorted irregular series");
+        assert_eq!(d.shapes.len(), 4);
+        assert!(
+            d.shapes
+                .iter()
+                .any(|s| s.entry == Some(1) && s.points == [[1., 2.], [2., 3.], [2., 5.], [1., 4.]])
+        );
+        assert!(
+            d.shapes
+                .iter()
+                .any(|s| s.entry == Some(1) && s.points == [[2., 0.], [3., 0.], [3., 2.], [2., 2.]])
+        );
+    }
+
+    #[test]
+    fn student_fit_resists_a_distant_contaminant_and_rejects_singular_data() {
+        let mut p: Vec<_> = (0..32)
+            .map(|i| {
+                let t = f64::from(i) * std::f64::consts::TAU / 32.;
+                [t.cos(), t.sin()]
+            })
+            .collect();
+        p.push([25., 25.]);
+        let fit = student_ellipse(&p, 4., 1.).expect("robust scatter");
+        let normal = ellipse(&p, 1.).expect("sample scatter");
+        let extent = |l: &Line| l.points.iter().map(|p| p.x.hypot(p.y)).fold(0., f64::max);
+        assert!(extent(&fit) < 2.);
+        assert!(extent(&normal) > 5.);
+        assert!(student_ellipse(&[[1., 0.], [2., 0.], [3., 0.]], 5., 1.).is_none());
+    }
+
     #[test]
     fn data_ellipse_uses_the_sample_covariance_and_closes() {
         let l = ellipse(&[[-1., 0.], [1., 0.], [0., -1.], [0., 1.]], 1.).expect("normal contour");

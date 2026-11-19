@@ -4,6 +4,9 @@
 //! Users who need `(lat, lon)` order (common in mapping APIs) should
 //! convert at the boundary.
 
+#[cfg(feature = "simple-features")]
+pub mod features;
+
 use std::collections::HashMap;
 
 // ── Core types ─────────────────────────────────────────────────────
