@@ -423,7 +423,10 @@ pub enum CategoryMark {
 }
 #[derive(Clone, Copy, Debug)]
 pub enum Stack {
+    /// Each series occupies a separate depth plane.
     Grouped,
+    /// Place columns or bars side by side in one depth plane.
+    Clustered,
     Sum,
     Percent,
 }
@@ -441,6 +444,9 @@ pub fn categories<S: AsRef<str>, V: AsRef<[f64]>>(
             .iter()
             .any(|s| s.1.as_ref().len() != n || s.1.as_ref().iter().any(|v| !v.is_finite()))
     {
+        return None;
+    }
+    if matches!(stack, Stack::Clustered) && !matches!(mark, CategoryMark::Bar | CategoryMark::Column) {
         return None;
     }
     let mut pos = vec![0.; n];
@@ -461,13 +467,18 @@ pub fn categories<S: AsRef<str>, V: AsRef<[f64]>>(
         let mut lower = Vec::new();
         let mut upper = Vec::new();
         for (i, &value) in values.as_ref().iter().enumerate() {
-            let x = i as f64;
+            let (x, half) = if matches!(stack, Stack::Clustered) {
+                let step = 0.8 / series.len() as f64;
+                (i as f64 - 0.4 + (j as f64 + 0.5) * step, 0.45 * step)
+            } else {
+                (i as f64, 0.32)
+            };
             let value = if matches!(stack, Stack::Percent) {
                 if totals[i] > 0. { value / totals[i] } else { 0. }
             } else {
                 value
             };
-            let base = if matches!(stack, Stack::Grouped) {
+            let base = if matches!(stack, Stack::Grouped | Stack::Clustered) {
                 0.
             } else if value >= 0. {
                 pos[i]
@@ -485,8 +496,8 @@ pub fn categories<S: AsRef<str>, V: AsRef<[f64]>>(
             }
             let (lo, hi) = (base.min(end), base.max(end));
             match mark {
-                CategoryMark::Column => scene.cuboid(id, [x - 0.32, y - 0.3, lo], [x + 0.32, y + 0.3, hi]),
-                CategoryMark::Bar => scene.cuboid(id, [lo, y - 0.3, x - 0.32], [hi, y + 0.3, x + 0.32]),
+                CategoryMark::Column => scene.cuboid(id, [x - half, y - 0.3, lo], [x + half, y + 0.3, hi]),
+                CategoryMark::Bar => scene.cuboid(id, [lo, y - 0.3, x - half], [hi, y + 0.3, x + half]),
                 CategoryMark::Line => {
                     lower.push([x, y - 0.09, end]);
                     upper.push([x, y + 0.09, end]);
@@ -540,6 +551,22 @@ mod category_tests {
             )
             .is_none()
         );
+    }
+    #[test]
+    fn cluster_shares_depth_while_surface_faces_obey_color_bands() {
+        let s = categories(
+            &[("a", [2., 3.]), ("b", [4., 5.])],
+            CategoryMark::Column,
+            Stack::Clustered,
+        )
+        .expect("cluster");
+        assert!(s.shapes.iter().flat_map(|(_, g)| g.points()).all(|p| p[1].abs() <= 0.3));
+        let m = crate::field::Mesh::grid(&[0., 1.], &[0., 1.], &[0., 1., 2., 3.]).expect("field");
+        let bands = [0., 1., 2., 3.];
+        let s = m.banded_surface(&bands).expect("bands");
+        for (id, g) in s.shapes {
+            assert!(g.points().iter().all(|p| p[2] >= bands[id] && p[2] <= bands[id + 1]));
+        }
     }
     #[test]
     fn arrows_ribbons_and_stems_keep_their_endpoints() {

@@ -69,6 +69,7 @@ pub struct Text {
     pub(crate) align: TextAlign,
     pub(crate) size: f32,
     pub(crate) color: Option<crate::core::Color>,
+    pub(crate) background: Option<(crate::core::Color, f32)>,
 }
 
 /// Creates a [`Text`] mark from labeled items.
@@ -92,6 +93,7 @@ pub fn text(items: impl IntoIterator<Item = TextItem>) -> Text {
         align: TextAlign::Center,
         size: 11.0,
         color: None,
+        background: None,
     }
 }
 
@@ -132,6 +134,12 @@ impl Text {
         self
     }
 
+    /// Draw a background around every nonempty label. The padding is measured
+    /// in logical pixels. The label and its background share one placement.
+    pub fn background(mut self, color: impl Into<crate::core::Color>, padding: f32) -> Self {
+        self.background = Some((color.into(), if padding.is_finite() { padding.max(0.) } else { 0. }));
+        self
+    }
     /// Returns the items.
     pub fn items(&self) -> &[TextItem] {
         &self.items

@@ -51,7 +51,7 @@ The library exposes the chart types below to callers supplying their own data. T
 | Matplotlib 3D and volumetric plot types | World-coordinate bars, ruled fills between 3D traces, lines, arrows, scatter, stems, grid and triangulated surfaces, voxels and wireframes. Projection supports camera orbit and perspective. | Triangulated survey surface, 3D quiver, stem and ribbon. [Matplotlib plot types](https://matplotlib.org/stable/plot_types/index.html) |
 | Matplotlib signal analysis | Windowed magnitude and wrapped/unwrapped phase in radians, Welch PSD and cross-spectral magnitude/coherence, spectrogram and discrete lag correlation. | Signal gallery and numerical FFT tests. [Matplotlib signal example](https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.specgram.html) |
 
-The scientific fixtures exercise the reference gallery’s named plot types. General artist styling, streamlines on arbitrary meshes, arbitrary coordinate reference systems, full ggplot2 grammar extension and automatic Office file round-tripping are independent capabilities. Geographic rendering currently supports Mercator, equirectangular, cylindrical equal-area and Natural Earth projections. Fixed/free facets synchronize finite numeric primary-axis bounds at construction. Facets do not infer a dataset’s grouping variable.
+Regression and arbitrary-label examples also cover covariance ellipses and boxed text anchored to a coordinate. Each of the 37 named commands in Matplotlib’s plot-types index has a native structural counterpart. All named Recharts chart containers and the Office top-level chart families in the cited chart-type catalog have native entry points. General artist styling, streamlines on arbitrary meshes, arbitrary coordinate reference systems, full ggplot2 grammar extension and automatic Office file round-tripping are independent capabilities. Geographic rendering currently supports Mercator, equirectangular, cylindrical equal-area and Natural Earth projections. Fixed/free facets synchronize finite numeric primary-axis bounds at construction. Facets do not infer a dataset’s grouping variable.
 
 ## Reproduce
 
@@ -64,3 +64,18 @@ From the checkout run `cargo run --locked -p gallery`. The optional `raster` fea
 | Independent live panels using one numeric domain | [Fixed facets](chart-parity/fixed-facets.png) |
 | Data-space image and extruded native geometry | [Raster image](chart-parity/native-raster.png), [3D pie](chart-parity/extruded-pie.png) |
 | Domain selection changes the detail chart's x-axis | [Initial range](chart-parity/brush-before.png), [adjusted range](chart-parity/brush-after.png) |
+
+### Microsoft presentation variants
+
+The gallery also exposes an individually exploded flat pie. The gallery includes smooth scatter with optional observation markers, shaded 2D bubbles with a radial highlight, outlined radar with optional vertex markers, clustered bars/columns on one depth plane, and 3D surface colors clipped at numeric value boundaries. The [shaded bubble capture](chart-parity/shaded-bubbles.png) shows the native scatter renderer’s per-point radial gradient. These variants correspond to Microsoft’s scatter/bubble, radar, clustered and surface entries. [Microsoft chart types](https://support.microsoft.com/en-us/excel/available-chart-types-in-office)
+
+### Remaining interoperability differences
+
+| | A — native geographic layers | **B — accept arbitrary source coordinate systems** |
+|---|---|---|
+| Current coverage | Polygon and multipolygon GeoJSON ingestion, native geographic points and text, four built-in projections | Requires CRS metadata, coordinate transformation and simple-feature dispatch for points, lines, polygons and geometry collections |
+| Relevant comparison | Existing map and bubble-map families | ggplot2’s `geom_sf()`, `geom_sf_text()` and `geom_sf_label()` accept richer source geometry and projection pipelines |
+
+**Recommend B for a future geographic interoperability change.** The four existing projections cover native map families. Reproducing `sf` behavior requires an explicit CRS-aware import contract and tests for mixed geometry collections. [ggplot2 simple features](https://ggplot2.tidyverse.org/reference/ggsf.html)
+
+The remaining ggplot2 differences extend beyond chart families. There are no direct declarative equivalents to `stat_summary()`, `stat_summary_bin()`, `stat_summary_2d()`, `stat_manual()`, `stat_connect()`, or `stat_sf_coordinates()`. Callers can supply precomputed data, and the hexbin API accepts an arbitrary reducer. The covariance ellipse uses an ordinary sample covariance matrix. ggplot2 also offers a robust multivariate-t estimator. [ggplot2 statistics](https://ggplot2.tidyverse.org/reference/index.html)

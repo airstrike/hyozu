@@ -260,10 +260,11 @@ where
             };
             let anchor_y = point.y - bounds.height / 2.0;
 
-            labels.push(
+            labels.push_backed(
                 paragraph.raw(),
                 crate::core::Point::new(anchor_x, anchor_y) + translation,
                 color,
+                self.data.background,
             );
         }
     }

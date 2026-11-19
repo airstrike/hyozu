@@ -151,3 +151,39 @@ pub fn rug() -> Data {
     marks.push(cartesian::rug(&values, 0., 0.035, true).into());
     data(marks).title("Density and observed values")
 }
+
+pub fn smooth() -> Data {
+    cartesian::smooth_scatter(
+        &[[0.5, 2.], [1., 4.], [2.4, 3.6], [3.1, 6.], [5., 4.], [6.8, 7.2]],
+        true,
+    )
+    .title("Interpolated observations")
+}
+pub fn spherical() -> Data {
+    let values = [8., 22., 14., 34., 18., 42.];
+    let points = hyozu::xy([(1., 3.), (2., 5.), (3., 2.), (4., 6.), (5., 4.), (6., 7.)])
+        .size_by(
+            hyozu::encoding::size_by(move |i, _| values[i])
+                .domain(0.0..=42.)
+                .range(0.0..=43.),
+        )
+        .spherical(true);
+    data(points)
+        .x_axis_bounds(0., 7.)
+        .y_axis_bounds(0., 9.)
+        .title("Sales, margin and order size")
+}
+
+pub fn boxed_labels() -> Data {
+    use hyozu::mark::text::{TextItem, text};
+    let points = [(0., 2.), (1., 3.), (2., 2.7), (3., 4.), (4., 5.)];
+    let labels = text([
+        TextItem::new(hyozu::Datum::new(1., 3.), "Pilot"),
+        TextItem::new(hyozu::Datum::new(3., 4.), "Release"),
+    ])
+    .offset(0., -15.)
+    .color(hyozu::core::Color::WHITE)
+    .background(hyozu::core::Color::from_rgb8(42, 105, 101), 4.);
+    data(vec![hyozu::Mark::Line(hyozu::line(points)), hyozu::Mark::Text(labels)])
+        .title("Milestones and observed growth")
+}

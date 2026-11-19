@@ -200,6 +200,23 @@ pub fn radial_bars<S: AsRef<str>>(rows: &[(S, f64)], maximum: f64) -> Diagram {
 /// Radar axes in input order. All series use the same positive maximum.
 /// Incomplete series and nonfinite values are omitted.
 pub fn radar<S: AsRef<str>, T: AsRef<str>, V: AsRef<[f64]>>(axes: &[S], series: &[(T, V)], maximum: f64) -> Diagram {
+    radar_with_style(axes, series, maximum, RadarStyle::Filled)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RadarStyle {
+    Outline,
+    Markers,
+    Filled,
+}
+
+/// A common radial scale with a closed outline, optional vertex markers or filled series.
+pub fn radar_with_style<S: AsRef<str>, T: AsRef<str>, V: AsRef<[f64]>>(
+    axes: &[S],
+    series: &[(T, V)],
+    maximum: f64,
+    style: RadarStyle,
+) -> Diagram {
     let mut d = Diagram {
         square: true,
         ..Diagram::default()
@@ -225,15 +242,28 @@ pub fn radar<S: AsRef<str>, T: AsRef<str>, V: AsRef<[f64]>>(axes: &[S], series: 
             continue;
         }
         let id = d.series(name.as_ref());
-        d.polygon(
-            id,
-            values
-                .iter()
-                .enumerate()
-                .map(|(i, v)| polar((v / maximum).clamp(0., 1.) * 0.37, angle(i)))
-                .collect(),
-            0.33,
-        );
+        let mut points: Vec<_> = values
+            .iter()
+            .enumerate()
+            .map(|(i, v)| polar((v / maximum).clamp(0., 1.) * 0.37, angle(i)))
+            .collect();
+        if style == RadarStyle::Filled {
+            d.polygon(id, points, 0.33);
+            continue;
+        }
+        if style == RadarStyle::Markers {
+            for &[x, y] in &points {
+                let circle = (0..16)
+                    .map(|i| {
+                        let t = i as f32 * std::f32::consts::TAU / 16.;
+                        [x + 0.009 * t.cos(), y + 0.009 * t.sin()]
+                    })
+                    .collect();
+                d.polygon(id, circle, 1.);
+            }
+        }
+        points.push(points[0]);
+        d.path(id, points.into_iter().map(|p| p.map(f64::from)).collect(), false, 1.);
     }
     d
 }
@@ -506,6 +536,42 @@ pub fn rings<S: AsRef<str>, V: AsRef<[f64]>>(categories: &[S], rows: &[V], hole:
             }
             t = end;
         }
+    }
+    Some(d)
+}
+
+/// A flat pie with an independent radial offset, in radius units, per wedge.
+pub fn exploded_pie<S: AsRef<str>>(items: &[(S, f64, f64)]) -> Option<Diagram> {
+    if items
+        .iter()
+        .any(|(_, v, e)| !v.is_finite() || *v < 0. || !e.is_finite() || *e < 0.)
+    {
+        return None;
+    }
+    let total: f64 = items.iter().map(|i| i.1).sum();
+    if !total.is_finite() || total <= 0. {
+        return None;
+    }
+    let maximum = items.iter().map(|i| i.2).fold(0., f64::max);
+    let r = 0.46 / (1. + maximum);
+    let mut t = 0.;
+    let mut d = Diagram {
+        square: true,
+        ..Diagram::default()
+    };
+    for (name, v, explode) in items {
+        let id = d.entry(name.as_ref(), *v);
+        if *v == 0. {
+            continue;
+        }
+        let end = t + v / total;
+        let [dx, dy] = polar(explode * r, t.midpoint(end));
+        let points = sector(0., r, t, end)
+            .into_iter()
+            .map(|[x, y]| [x + dx - 0.5, y + dy - 0.5])
+            .collect();
+        d.polygon(id, points, 1.);
+        t = end;
     }
     Some(d)
 }

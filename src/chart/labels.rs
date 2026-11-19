@@ -93,6 +93,15 @@ impl<'p, P: text::Paragraph> Layer<'p, P> {
         }
     }
     pub(crate) fn push(&mut self, paragraph: &'p P, anchor: Point, color: Color) {
+        self.push_backed(paragraph, anchor, color, None);
+    }
+    pub(crate) fn push_backed(
+        &mut self,
+        paragraph: &'p P,
+        anchor: Point,
+        color: Color,
+        background: Option<(Color, f32)>,
+    ) {
         let Size { width, height } = paragraph.min_bounds();
         let x = match paragraph.align_x() {
             text::Alignment::Center => width / 2.,
@@ -110,7 +119,11 @@ impl<'p, P: text::Paragraph> Layer<'p, P> {
             width,
             height,
         };
+        let rect = background.map_or(rect, |(_, padding)| rect.expand(padding));
         let placed = self.space.place(rect);
+        if let Some((fill, _)) = background {
+            self.plates.push((placed, fill));
+        }
         self.labels.push((
             paragraph,
             anchor + Vector::new(placed.x - rect.x, placed.y - rect.y),

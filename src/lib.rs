@@ -52,7 +52,10 @@ pub use geo::{GeoData, MapScope, ProjectionKind};
 
 pub use data::axis::{self, Axis, Orientation};
 pub use data::legend;
-pub use data::mark::diagram::{Diagram, funnel, hierarchical_treemap, radar, radial_bars, rings, sankey, sunburst};
+pub use data::mark::diagram::{
+    Diagram, RadarStyle, exploded_pie, funnel, hierarchical_treemap, radar, radar_with_style, radial_bars, rings,
+    sankey, sunburst,
+};
 pub use data::mark::text::text;
 pub use data::mark::{
     self, Area, Band, BandOrientation, Bars, BoxPlot, Choropleth, ChoroplethEntry, Gauge, Heatmap, LegendEntry, Line,

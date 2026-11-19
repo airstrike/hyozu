@@ -46,6 +46,7 @@ pub struct Xy {
     /// opaque). Multiplies the resolved fill color's alpha channel at
     /// draw time; defaults to `1.0` so cartesian scatter is unchanged.
     pub(crate) opacity: f32,
+    pub(crate) spherical: bool,
     /// Optional per-point labels surfaced by the hover tooltip and (in
     /// the future) per-point text overlays. Either empty (no labels) or
     /// aligned 1:1 with [`Self::points`]. Populated by
@@ -88,6 +89,7 @@ pub fn xy(data: impl IntoDatums) -> Xy {
         size_by: None,
         coord_kind: CoordKind::Cartesian,
         opacity: 1.0,
+        spherical: false,
         labels: Vec::new(),
         tooltip_values: Vec::new(),
         feature_ids: Vec::new(),
@@ -95,6 +97,13 @@ pub fn xy(data: impl IntoDatums) -> Xy {
 }
 
 impl Xy {
+    /// Shade circular points as spheres. Data coordinates and encoded diameter
+    /// use the same scales as a flat bubble chart.
+    pub fn spherical(mut self, enabled: bool) -> Self {
+        self.spherical = enabled;
+        self
+    }
+
     /// Sets the color for the scatter points.
     pub fn color(mut self, color: impl Into<Color>) -> Self {
         self.color = Some(color.into());

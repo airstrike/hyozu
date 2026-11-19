@@ -136,3 +136,20 @@ pub fn stack_lines() -> hyozu::Data {
     .expect("aligned categories")
     .title("Cumulative revenue shares")
 }
+
+pub fn ellipse() -> hyozu::Data {
+    let samples: Vec<_> = (0..90)
+        .map(|i| {
+            let t = f64::from(i) * 2.39996;
+            let r = (f64::from(i) / 90.).sqrt();
+            let x = r * t.cos();
+            [x, 0.65 * x + 0.42 * r * t.sin()]
+        })
+        .collect();
+    let points = hyozu::xy(samples.iter().map(|p| (p[0], p[1])).collect::<Vec<_>>());
+    hyozu::data(vec![
+        hyozu::Mark::Xy(points),
+        hyozu::stats::ellipse(&samples, 2.).expect("covariance ellipse").into(),
+    ])
+    .title("Covariance of paired measurements")
+}

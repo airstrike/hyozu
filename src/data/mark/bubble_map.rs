@@ -198,6 +198,7 @@ pub fn bubble_map(points: impl IntoIterator<Item = MapPoint>) -> Xy {
         size_by: Some(size_encoding),
         coord_kind: CoordKind::Geo,
         opacity: 0.7,
+        spherical: false,
         labels,
         tooltip_values,
         feature_ids,

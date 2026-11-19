@@ -686,6 +686,63 @@ pub fn variants() -> Vec<Variant> {
             spatial::trisurf,
             "charts/spatial.rs"
         ),
+        variant!(
+            102,
+            "Radar with markers",
+            Diagram,
+            Flat,
+            diagrams::marker_radar,
+            "charts/diagrams.rs"
+        ),
+        variant!(
+            103,
+            "Smooth scatter",
+            Scatter,
+            Flat,
+            cartesian::smooth,
+            "charts/cartesian.rs"
+        ),
+        variant!(
+            104,
+            "Shaded bubbles",
+            Scatter,
+            Flat,
+            cartesian::spherical,
+            "charts/cartesian.rs"
+        ),
+        variant!(
+            105,
+            "Clustered 3D columns",
+            Spatial,
+            Orbital,
+            spatial::cluster,
+            "charts/spatial.rs"
+        ),
+        variant!(
+            106,
+            "Banded 3D surface",
+            Spatial,
+            Orbital,
+            spatial::banded,
+            "charts/spatial.rs"
+        ),
+        variant!(
+            107,
+            "Data ellipse",
+            Statistical,
+            Flat,
+            crate::distributions::ellipse,
+            "distributions.rs"
+        ),
+        variant!(108, "Exploded pie", Pie, Flat, diagrams::exploded, "charts/diagrams.rs"),
+        variant!(
+            109,
+            "Boxed annotations",
+            Line,
+            Flat,
+            cartesian::boxed_labels,
+            "charts/cartesian.rs"
+        ),
     ]
 }
 

@@ -309,6 +309,55 @@ pub fn stacked_lines<S: AsRef<str>, V: AsRef<[f64]>>(series: &[(S, V)], percent:
     Some(data(marks))
 }
 
+/// Data ellipse at a caller-supplied Mahalanobis radius using the sample
+/// covariance matrix. A 95% bivariate normal probability contour uses
+/// radius `(-2.0 * 0.05_f64.ln()).sqrt()`. A singular covariance collapses
+/// the ellipse onto its principal axis.
+pub fn ellipse(samples: &[[f64; 2]], radius: f64) -> Option<Line> {
+    if !radius.is_finite() || radius <= 0. {
+        return None;
+    }
+    let (mut n, mut mx, mut my, mut xx, mut yy, mut xy) = (0usize, 0., 0., 0., 0., 0.);
+    for &[x, y] in samples.iter().filter(|p| p.iter().all(|v| v.is_finite())) {
+        n += 1;
+        let (dx, dy) = (x - mx, y - my);
+        mx += dx / n as f64;
+        my += dy / n as f64;
+        xx += dx * (x - mx);
+        yy += dy * (y - my);
+        xy += dx * (y - my);
+    }
+    if n < 2 {
+        return None;
+    }
+    let denom = (n - 1) as f64;
+    let (a, b, c) = (xx / denom, xy / denom, yy / denom);
+    let half = (a - c) * 0.5;
+    let mid = (a + c) * 0.5;
+    let delta = half.hypot(b);
+    let major = (mid + delta).max(0.).sqrt() * radius;
+    let minor = (mid - delta).max(0.).sqrt() * radius;
+    if !major.is_finite() || !minor.is_finite() {
+        return None;
+    }
+    let (sin, cos) = (0.5 * (2. * b).atan2(a - c)).sin_cos();
+    Some(
+        line(
+            (0..=128)
+                .map(|i| {
+                    let t = (i % 128) as f64 * std::f64::consts::TAU / 128.;
+                    let (v, u) = t.sin_cos();
+                    (
+                        mx + major * u * cos - minor * v * sin,
+                        my + major * u * sin + minor * v * cos,
+                    )
+                })
+                .collect::<Vec<_>>(),
+        )
+        .with_name("Data ellipse"),
+    )
+}
+
 #[cfg(test)]
 mod transform_tests {
     use super::*;
@@ -320,6 +369,14 @@ mod transform_tests {
         let l = fit::quantile(&p, 0.5).expect("median regression");
         assert!((l.points[0].y - 1.).abs() < 1e-7 && (l.points[1].y - 9.).abs() < 1e-7);
         assert!(fit::quantile(&[[0., 1.], [0., 2.]], 0.5).is_none());
+    }
+    #[test]
+    fn data_ellipse_uses_the_sample_covariance_and_closes() {
+        let l = ellipse(&[[-1., 0.], [1., 0.], [0., -1.], [0., 1.]], 1.).expect("normal contour");
+        for p in &l.points {
+            assert!((p.x * p.x + p.y * p.y - 2. / 3.).abs() < 1e-10);
+        }
+        assert_eq!(l.points.first().map(|p| p.x), l.points.last().map(|p| p.x));
     }
     #[test]
     fn qq_interpolation_count_area_and_normalized_stack() {

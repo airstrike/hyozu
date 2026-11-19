@@ -281,7 +281,23 @@ where
                 ..marker_color
             };
 
-            if marker_config.shape != Shape::X {
+            if self.data.spherical && marker_config.shape == Shape::Circle {
+                use crate::widget::renderer::geometry::{Gradient, gradient};
+                let light = crate::core::Color {
+                    a: fill_color.a,
+                    ..crate::core::Color::WHITE
+                };
+                let dark = crate::core::Color {
+                    a: fill_color.a,
+                    ..crate::core::Color::BLACK
+                };
+                let radial =
+                    gradient::Radial::new(Point::new(center.x - half * 0.32, center.y - half * 0.36), half * 1.36)
+                        .add_stop(0., fill_color.mix(light, 0.8))
+                        .add_stop(0.46, fill_color)
+                        .add_stop(1., fill_color.mix(dark, 0.5));
+                frame.fill(&path, Gradient::Radial(radial));
+            } else if marker_config.shape != Shape::X {
                 frame.fill(&path, fill_color);
             }
 

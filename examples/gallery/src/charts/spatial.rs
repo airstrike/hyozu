@@ -165,3 +165,21 @@ pub fn trisurf(camera: Camera) -> Data {
     s.mesh(id, &pts, &faces, false);
     project(s, camera, "Triangulated survey surface")
 }
+
+pub fn cluster(camera: Camera) -> Data {
+    use hyozu::spatial::{CategoryMark, Stack, categories};
+    project(
+        categories(&REVENUE, CategoryMark::Column, Stack::Clustered).expect("aligned categories"),
+        camera,
+        "Clustered quarterly revenue",
+    )
+}
+pub fn banded(camera: Camera) -> Data {
+    let (points, faces) = super::fields::survey();
+    let mesh = hyozu::field::Mesh::new(points, faces).expect("survey triangles");
+    let scene = mesh
+        .banded_surface(&[-0.3, 0., 0.25, 0.5, 0.75, 1., 1.3])
+        .expect("ordered intervals");
+    project(scene, camera, "Elevation bands")
+        .palette(hyozu::palette::gradient([0x224e57, 0x468980, 0x87b493, 0xe0cf83]))
+}

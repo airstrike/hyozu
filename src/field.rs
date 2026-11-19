@@ -124,19 +124,37 @@ impl Mesh {
         let mut d = Diagram::cartesian();
         for (i, w) in levels.windows(2).enumerate() {
             let id = d.entry(&format!("{}–{}", w[0], w[1]), w[0].midpoint(w[1]));
-            for tri in self.triangles() {
-                if tri.iter().all(|p| p.value == w[1]) && i + 2 < levels.len() {
-                    continue;
-                }
-                let above = clip_scalar(&tri, w[0], true);
-                let band = clip_scalar(&above, w[1], false);
-                if band.len() >= 3 {
-                    d.path(id, band.into_iter().map(Sample::position).collect(), true, 1.);
-                }
+            for band in self.band(w, i + 2 == levels.len()) {
+                d.path(id, band.into_iter().map(Sample::position).collect(), true, 1.);
             }
         }
         d.scalar_colors();
         Some(d)
+    }
+    fn band<'a>(&'a self, w: &'a [f64], last: bool) -> impl Iterator<Item = Vec<Sample>> + 'a {
+        self.triangles()
+            .filter(move |tri| last || !tri.iter().all(|p| p.value == w[1]))
+            .filter_map(move |tri| {
+                let above = clip_scalar(&tri, w[0], true);
+                let band = clip_scalar(&above, w[1], false);
+                (band.len() >= 3).then_some(band)
+            })
+    }
+
+    /// A true 3D surface colored by value intervals. Triangles crossing a
+    /// boundary are split exactly where they cross its z coordinate.
+    pub fn banded_surface(&self, levels: &[f64]) -> Option<crate::spatial::Scene> {
+        if !axis(levels) {
+            return None;
+        }
+        let mut scene = crate::spatial::Scene::default();
+        for (i, w) in levels.windows(2).enumerate() {
+            let id = scene.series(format!("{}–{}", w[0], w[1]));
+            for band in self.band(w, i + 2 == levels.len()) {
+                scene.polygon(id, &band.into_iter().map(|s| [s.x, s.y, s.value]).collect::<Vec<_>>());
+            }
+        }
+        Some(scene)
     }
 }
 

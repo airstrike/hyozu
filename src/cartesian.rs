@@ -371,9 +371,67 @@ pub fn function(range: [f64; 2], intervals: usize, f: impl Fn(f64) -> f64) -> Op
     Some(d)
 }
 
+/// Interpolate a smooth scatter path through the supplied observations in
+/// input order with cubic Catmull–Rom segments. A nonfinite observation
+/// splits the path. Markers, when enabled, stay on the original observations.
+pub fn smooth_scatter(samples: &[[f64; 2]], markers: bool) -> crate::Data {
+    let mut d = Diagram::cartesian();
+    let id = d.series("Trend");
+    for run in samples
+        .split(|p| p.iter().any(|v| !v.is_finite()))
+        .filter(|s| s.len() > 1)
+    {
+        let mut path = vec![run[0]];
+        for i in 0..run.len() - 1 {
+            let a = run[i.saturating_sub(1)];
+            let b = run[i];
+            let c = run[i + 1];
+            let e = run[(i + 2).min(run.len() - 1)];
+            for k in 1..=16 {
+                let t = f64::from(k) / 16.;
+                path.push(std::array::from_fn(|axis| {
+                    let (a, b, c, e) = (a[axis], b[axis], c[axis], e[axis]);
+                    0.5 * (2. * b
+                        + (-a + c) * t
+                        + (2. * a - 5. * b + 4. * c - e) * t * t
+                        + (-a + 3. * b - 3. * c + e) * t * t * t)
+                }));
+            }
+        }
+        d.path(id, path, false, 1.);
+    }
+    let mut marks = vec![crate::Mark::Diagram(d)];
+    if markers {
+        marks.push(
+            crate::xy(
+                samples
+                    .iter()
+                    .filter(|p| p.iter().all(|v| v.is_finite()))
+                    .map(|p| (p[0], p[1]))
+                    .collect::<Vec<_>>(),
+            )
+            .into(),
+        );
+    }
+    crate::data(marks)
+}
+
 #[cfg(test)]
 mod interval_tests {
     use super::*;
+    #[test]
+    fn smooth_scatter_passes_through_samples_and_preserves_gaps() {
+        let d = smooth_scatter(
+            &[[0., 1.], [1., 5.], [2., 2.], [f64::NAN, 0.], [3., 2.], [4., 7.]],
+            true,
+        );
+        let crate::Mark::Diagram(s) = &d.marks()[0] else {
+            panic!("path")
+        };
+        assert_eq!(s.shapes.len(), 2);
+        assert_eq!(s.shapes[0].points[16], [1., 5.]);
+        assert_eq!(s.shapes[1].points.last(), Some(&[4., 7.]));
+    }
     #[test]
     fn stairs_gaps_and_transposition_preserve_data_coordinates() {
         let d = stairs(&[0., 2., 5.], &[3., 4.], Some(0.)).expect("stairs");

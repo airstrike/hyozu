@@ -95,3 +95,22 @@ pub fn rings() -> hyozu::Data {
     )
     .title("Channel mix over three years")
 }
+
+pub fn marker_radar() -> Data {
+    data(hyozu::radar_with_style(
+        &["Design", "Service", "Value", "Support", "Quality"],
+        &[("North", [4., 3., 5., 3., 4.]), ("South", [2., 4., 3., 5., 3.])],
+        5.,
+        hyozu::RadarStyle::Markers,
+    ))
+    .legend(hyozu::legend::Anchor::Right)
+    .title("Customer survey profiles")
+}
+pub fn exploded() -> Data {
+    data(
+        hyozu::exploded_pie(&[("Direct", 52., 0.), ("Retail", 31., 0.), ("Partners", 17., 0.24)])
+            .expect("positive wedges"),
+    )
+    .legend(hyozu::legend::Anchor::Right)
+    .title("Orders by channel")
+}
