@@ -545,6 +545,15 @@ mod interval_tests {
 mod tests {
     use super::*;
     #[test]
+    fn hats_start_at_each_category_reference_in_both_directions() {
+        let chart = hat_graph(&[("reference", [3., 5.]), ("comparison", [4., 2.])]).expect("matched categories");
+        assert_eq!(chart.shapes[0].points[0][1], 3.);
+        assert_eq!(chart.shapes[1].points[0][1], 5.);
+        for (s, (from, to)) in chart.shapes[2..].iter().zip([(3., 4.), (5., 2.)]) {
+            assert_eq!((s.points[0][1], s.points[2][1]), (from, to));
+        }
+    }
+    #[test]
     fn broken_spans_preserve_the_gaps_and_lane_bounds() {
         let d = broken_bars("A", &[[-2., 1.], [1., 3.], [2., f64::NAN]], [4., 2.]).expect("valid lane");
         assert_eq!(d.shapes.len(), 2);
@@ -582,4 +591,31 @@ mod tests {
         assert_eq!(d.shapes.len(), 2);
         assert_eq!(d.shapes[0].points[2], [0.5, 2.]);
     }
+}
+
+/// Compare each series with the first series independently within each
+/// category. Each group starts at its reference value; the reference is a cap.
+pub fn hat_graph<S: AsRef<str>, V: AsRef<[f64]>>(groups: &[(S, V)]) -> Option<Diagram> {
+    let (_, base) = groups.first()?;
+    let base = base.as_ref();
+    if groups.len() < 2 || base.is_empty() || groups.iter().any(|(_, v)| v.as_ref().len() != base.len()) {
+        return None;
+    }
+    let mut d = Diagram::cartesian();
+    let width = 0.8 / groups.len() as f64;
+    for (i, (name, values)) in groups.iter().enumerate() {
+        let id = d.series(name.as_ref());
+        for (j, (&lo, &hi)) in base.iter().zip(values.as_ref()).enumerate() {
+            let x = j as f64 - 0.4 + i as f64 * width;
+            if !(lo.is_finite() && hi.is_finite()) {
+                continue;
+            }
+            if lo == hi {
+                d.path(id, vec![[x, lo], [x + width, hi]], false, 1.);
+            } else {
+                d.path(id, vec![[x, lo], [x + width, lo], [x + width, hi], [x, hi]], true, 1.);
+            }
+        }
+    }
+    Some(d)
 }

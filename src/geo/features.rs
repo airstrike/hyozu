@@ -416,6 +416,25 @@ mod tests {
 
     #[cfg(feature = "native-proj")]
     #[test]
+    fn matplotlib_geographic_projection_catalog_crosses_the_prime_meridian() {
+        let world = Crs::parse("EPSG:4326").expect("geographic coordinates");
+        for name in ["aitoff", "hammer", "moll", "laea"] {
+            let projected = Crs::parse(&format!(
+                "+proj={name} +lon_0=0 +lat_0=0 +datum=WGS84 +units=m +type=crs"
+            ))
+            .expect("projection");
+            let project = |lon, lat| world.convert(&projected, Coord { x: lon, y: lat }).expect("convert");
+            let center = project(0., 0.);
+            let a = project(30., 20.);
+            let b = project(-30., 20.);
+            assert!(center.x.abs() < 1e-4 && center.y.abs() < 1e-4);
+            assert!(a.x > 2e6 && a.y > 2e6);
+            assert!((a.x + b.x).abs() < 1e-3 && (a.y - b.y).abs() < 1e-3);
+        }
+    }
+
+    #[cfg(feature = "native-proj")]
+    #[test]
     fn native_proj_transforms_an_authority_free_wkt_definition() {
         let local=Crs::parse(r#"PROJCS["Example UTM zone 18N",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",-75],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1]]"#).expect("valid WKT");
         let l = Layer::from_geojson(

@@ -23,6 +23,7 @@ mod pie_donut;
 mod scatter_basic;
 mod scatter_multi;
 mod spatial;
+mod specialty;
 mod spectra;
 mod summaries;
 mod violin_basic;
@@ -843,6 +844,103 @@ pub fn variants() -> Vec<Variant> {
             patterns::sparsity,
             "charts/patterns.rs"
         ),
+        variant!(
+            123,
+            "Hinton diagram",
+            Field,
+            Flat,
+            specialty::hinton,
+            "charts/specialty.rs"
+        ),
+        variant!(
+            124,
+            "Ishikawa diagram",
+            Diagram,
+            Flat,
+            specialty::fishbone,
+            "charts/specialty.rs"
+        ),
+        variant!(
+            125,
+            "17-segment bullseye",
+            Diagram,
+            Flat,
+            specialty::bullseye,
+            "charts/specialty.rs"
+        ),
+        variant!(
+            126,
+            "Skew-T log-P",
+            Field,
+            Flat,
+            specialty::skew_t,
+            "charts/specialty.rs"
+        ),
+        variant!(
+            127,
+            "Streamgraph",
+            Area,
+            Flat,
+            specialty::streamgraph,
+            "charts/specialty.rs"
+        ),
+        variant!(
+            128,
+            "Polar bars",
+            Bar,
+            Flat,
+            specialty::polar_bars,
+            "charts/specialty.rs"
+        ),
+        variant!(
+            129,
+            "Polar scatter",
+            Scatter,
+            Flat,
+            specialty::polar_scatter,
+            "charts/specialty.rs"
+        ),
+        variant!(
+            130,
+            "Polar errors",
+            Statistical,
+            Flat,
+            specialty::polar_errors,
+            "charts/specialty.rs"
+        ),
+        variant!(
+            131,
+            "Hillshade",
+            Field,
+            Flat,
+            specialty::hillshade,
+            "charts/specialty.rs"
+        ),
+        variant!(
+            132,
+            "3D contours",
+            Spatial,
+            Orbital,
+            specialty::contour_3d,
+            "charts/specialty.rs"
+        ),
+        variant!(
+            133,
+            "3D contour bands",
+            Spatial,
+            Orbital,
+            specialty::contour_bands_3d,
+            "charts/specialty.rs"
+        ),
+        variant!(
+            134,
+            "Bihistogram",
+            Statistical,
+            Flat,
+            specialty::bihistogram,
+            "charts/specialty.rs"
+        ),
+        variant!(135, "Hat graph", Bar, Flat, specialty::hats, "charts/specialty.rs"),
     ]
 }
 

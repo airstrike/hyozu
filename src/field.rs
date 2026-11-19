@@ -2,6 +2,25 @@
 //! ordinary Cartesian coordinate transform.
 use crate::Diagram;
 
+fn lift(diagram: Diagram, plane: Option<f64>) -> crate::spatial::Scene {
+    let mut scene = crate::spatial::Scene::default();
+    for entry in &diagram.entries {
+        scene.series(&entry.name);
+    }
+    for shape in diagram.shapes {
+        if let Some(i) = shape.entry {
+            let z = plane.unwrap_or(diagram.entries[i].value);
+            let points: Vec<_> = shape.points.into_iter().map(|[x, y]| [x, y, z]).collect();
+            if shape.closed {
+                scene.polygon(i, &points);
+            } else {
+                scene.line(i, &points);
+            }
+        }
+    }
+    scene
+}
+
 /// A measured scalar at an x/y position.
 #[derive(Clone, Copy, Debug)]
 pub struct Sample {
@@ -139,6 +158,54 @@ impl Mesh {
                 let band = clip_scalar(&above, w[1], false);
                 (band.len() >= 3).then_some(band)
             })
+    }
+
+    /// Lift each interpolated contour to its measured level, or project all
+    /// levels onto a caller-specified horizontal plane.
+    pub fn contours_3d(&self, levels: &[f64], plane: Option<f64>) -> crate::spatial::Scene {
+        lift(self.contours(levels), plane)
+    }
+    /// Render each filled band on its midpoint plane, or a shared fixed plane.
+    pub fn contour_bands_3d(&self, levels: &[f64], plane: Option<f64>) -> Option<crate::spatial::Scene> {
+        Some(lift(self.contour_bands(levels)?, plane))
+    }
+
+    /// Directional relief shading with azimuth clockwise from north and
+    /// altitude above the horizon, both in degrees. X points east and Y north.
+    pub fn hillshade(&self, azimuth: f64, altitude: f64) -> Option<Diagram> {
+        if !azimuth.is_finite() || !(0. ..=90.).contains(&altitude) {
+            return None;
+        }
+        let (sa, ca) = azimuth.to_radians().sin_cos();
+        let (sh, ch) = altitude.to_radians().sin_cos();
+        let light = [sa * ch, ca * ch, sh];
+        let mut d = Diagram::cartesian();
+        d.smooth_faces = true;
+        let id = d.series("Terrain");
+        d.set_color(id, 0xf1f1eb);
+        for [a, b, c] in self.triangles() {
+            let (u, v) = ([b.x - a.x, b.y - a.y, b.value - a.value], [
+                c.x - a.x,
+                c.y - a.y,
+                c.value - a.value,
+            ]);
+            let n = [
+                u[1] * v[2] - u[2] * v[1],
+                u[2] * v[0] - u[0] * v[2],
+                u[0] * v[1] - u[1] * v[0],
+            ];
+            let length = n[0].hypot(n[1]).hypot(n[2]);
+            if n[2] == 0. || !length.is_finite() {
+                continue;
+            }
+            let diffuse =
+                ((n[0] * light[0] + n[1] * light[1] + n[2] * light[2]) * n[2].signum() / length).clamp(0., 1.);
+            d.path(id, vec![a.position(), b.position(), c.position()], true, 1.);
+            if let Some(face) = d.shapes.last_mut() {
+                face.lightness = (0.18 + 0.82 * diffuse) as f32;
+            }
+        }
+        Some(d)
     }
 
     /// A true 3D surface colored by value intervals. Triangles crossing a
@@ -550,6 +617,21 @@ pub fn scalar_image(
 #[cfg(test)]
 mod mesh_tests {
     use super::*;
+    #[test]
+    fn terrain_light_direction_changes_brightness_and_contours_lift_to_world_planes() {
+        let m = Mesh::grid(&[0., 1.], &[0., 1.], &[0., 1., 0., 1.]).expect("east-facing gradient");
+        let east = m.hillshade(90., 30.).expect("sun");
+        let west = m.hillshade(270., 30.).expect("sun");
+        assert!(west.shapes[0].lightness > east.shapes[0].lightness);
+        let cam = crate::spatial::Camera::default();
+        assert!(m.contours_3d(&[0.25, 0.75], None).project(cam).is_some());
+        assert!(
+            m.contour_bands_3d(&[0., 0.5, 1.], Some(2.))
+                .expect("bands")
+                .project(cam)
+                .is_some()
+        );
+    }
     #[test]
     fn sparse_cells_keep_matrix_orientation_and_aspect_ratio() {
         let d = sparsity(2, 4, &[[0, 0], [1, 3], [0, 0]]).expect("in-bounds indices");

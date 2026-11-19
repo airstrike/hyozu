@@ -291,7 +291,10 @@ pub(super) fn draw<'p, R, D: Design + ?Sized>(
                 fill.rule = crate::widget::canvas::fill::Rule::EvenOdd;
             }
             frame.fill(&region.path, fill);
-            if (!d.cartesian && !d.smooth_faces) || region.opacity < 1. {
+            if d.cartesian && d.smooth_faces && region.opacity == 1. {
+                // Cover antialiasing seams where two opaque terrain triangles share an edge.
+                frame.stroke(&region.path, Stroke::default().with_color(color).with_width(0.65));
+            } else if (!d.cartesian && !d.smooth_faces) || region.opacity < 1. {
                 frame.stroke(
                     &region.path,
                     Stroke::default()

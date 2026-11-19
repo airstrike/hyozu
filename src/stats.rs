@@ -562,6 +562,12 @@ mod tests {
     use super::*;
 
     #[test]
+    fn paired_histograms_use_same_edges_and_opposite_signed_counts() {
+        let d = bihistogram(&[0., 1., 3.], ("above", &[0., 1., 3.]), ("below", &[1., 3.]), false).expect("bins");
+        assert_eq!(d.shapes[1].points[2], [3., 2.]);
+        assert_eq!(d.shapes[3].points[2], [3., -2.]);
+    }
+    #[test]
     fn irregular_histogram_conserves_mass_and_includes_last_edge() {
         let bins = Bins::new(&[0., 1., 3.], &[-1., 0., 1., 2., 3., f64::NAN, 4.]).expect("valid edges");
         assert_eq!(bins.counts(), &[1, 3]);
@@ -584,4 +590,22 @@ mod tests {
             (4., 1.)
         ]);
     }
+}
+
+/// Compare two distributions on shared bin edges by drawing the second one
+/// below the zero line. Both series use the same count or density convention.
+pub fn bihistogram(
+    edges: &[f64],
+    first: (&str, &[f64]),
+    second: (&str, &[f64]),
+    density: bool,
+) -> Option<crate::Diagram> {
+    let mut diagram = crate::Diagram::cartesian();
+    for ((name, samples), sign) in [(first, 1.), (second, -1.)] {
+        let id = diagram.series(name);
+        for (lo, hi, h) in Bins::new(edges, samples)?.intervals(density) {
+            diagram.path(id, vec![[lo, 0.], [hi, 0.], [hi, sign * h], [lo, sign * h]], true, 1.);
+        }
+    }
+    Some(diagram)
 }

@@ -21,6 +21,7 @@ pub mod props;
 pub mod scale;
 pub mod sparkline;
 pub mod spatial;
+pub mod specialty;
 #[cfg(feature = "spectral")]
 pub mod spectral;
 pub mod stats;
