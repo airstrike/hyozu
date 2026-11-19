@@ -249,6 +249,51 @@ pub fn histogram2d(x: &[f64], y: &[f64], samples: &[[f64; 2]], density: bool) ->
     tiles(x, y, &values)
 }
 
+/// Display the occupied [row, column] positions of a sparse matrix.
+/// Row zero is at the top. Cells stay square and duplicates occupy one cell.
+/// Storage depends on the number of occupied cells, including for huge
+/// matrices. Out-of-bounds indices or empty dimensions return `None`.
+pub fn sparsity(rows: usize, columns: usize, occupied: &[[usize; 2]]) -> Option<Diagram> {
+    if rows == 0 || columns == 0 {
+        return None;
+    }
+    let cell = 1. / rows.max(columns) as f64;
+    let width = columns as f64 * cell;
+    let height = rows as f64 * cell;
+    let left = (1. - width) / 2.;
+    let top = (1. - height) / 2.;
+    let mut d = Diagram {
+        square: true,
+        ..Diagram::default()
+    };
+    let frame = [
+        [left, top],
+        [left + width, top],
+        [left + width, top + height],
+        [left, top + height],
+        [left, top],
+    ];
+    d.guide(frame.map(|p| p.map(|v| v as f32)).to_vec());
+    let index = d.series("Occupied cell");
+    let mut seen = std::collections::HashSet::new();
+    for &[row, col] in occupied {
+        if row >= rows || col >= columns {
+            return None;
+        }
+        if seen.insert((row, col)) {
+            let x = left + col as f64 * cell;
+            let y = top + row as f64 * cell;
+            d.path(
+                index,
+                vec![[x, y], [x + cell, y], [x + cell, y + cell], [x, y + cell]],
+                true,
+                1.,
+            );
+        }
+    }
+    Some(d)
+}
+
 /// Arbitrarily spaced rectangular cells, colored by their scalar value.
 /// Nonfinite measurements are masked. Equal values share one palette slot.
 pub fn tiles(x: &[f64], y: &[f64], values: &[f64]) -> Option<Diagram> {
@@ -505,6 +550,17 @@ pub fn scalar_image(
 #[cfg(test)]
 mod mesh_tests {
     use super::*;
+    #[test]
+    fn sparse_cells_keep_matrix_orientation_and_aspect_ratio() {
+        let d = sparsity(2, 4, &[[0, 0], [1, 3], [0, 0]]).expect("in-bounds indices");
+        let cells: Vec<_> = d.shapes.iter().filter(|s| s.entry.is_some()).collect();
+        assert_eq!(cells.len(), 2);
+        assert_eq!(cells[0].points, [[0., 0.25], [0.25, 0.25], [0.25, 0.5], [0., 0.5]]);
+        assert_eq!(cells[1].points[0], [0.75, 0.5]);
+        assert!(sparsity(2, 4, &[[2, 0]]).is_none());
+        assert!(sparsity(1_000_000, 1_000_000, &[[999_999, 999_999]]).is_some());
+    }
+
     #[test]
     fn rectangular_reducers_mask_empty_cells_and_include_the_final_edge() {
         let d = summary2d(

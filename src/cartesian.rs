@@ -25,6 +25,30 @@ pub fn segments(lines: &[([f64; 2], [f64; 2])]) -> Diagram {
     d
 }
 
+/// Independent horizontal spans sharing a vertical lane. Each span is
+/// [start, width] and the lane is [bottom, height], all in data coordinates.
+pub fn broken_bars(name: &str, spans: &[[f64; 2]], lane: [f64; 2]) -> Option<Diagram> {
+    let [bottom, height] = lane;
+    let top = bottom + height;
+    if !bottom.is_finite() || !top.is_finite() || height <= 0. {
+        return None;
+    }
+    let mut d = Diagram::cartesian();
+    let id = d.series(name);
+    for &[start, width] in spans {
+        let end = start + width;
+        if width > 0. && start.is_finite() && end.is_finite() {
+            d.path(
+                id,
+                vec![[start, bottom], [end, bottom], [end, top], [start, top]],
+                true,
+                1.,
+            );
+        }
+    }
+    Some(d)
+}
+
 /// Vertical ranges with symmetric caps. Set cap width to zero for lineranges.
 pub fn error_bars(intervals: &[Interval], cap_width: f64) -> Diagram {
     let mut d = Diagram::cartesian();
@@ -520,6 +544,15 @@ mod interval_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn broken_spans_preserve_the_gaps_and_lane_bounds() {
+        let d = broken_bars("A", &[[-2., 1.], [1., 3.], [2., f64::NAN]], [4., 2.]).expect("valid lane");
+        assert_eq!(d.shapes.len(), 2);
+        assert_eq!(d.shapes[0].points, [[-2., 4.], [-1., 4.], [-1., 6.], [-2., 6.]]);
+        assert_eq!(d.shapes[1].points[1], [4., 4.]);
+        assert!(broken_bars("A", &[], [0., 0.]).is_none());
+    }
+
     #[test]
     fn financial_domain_covers_valid_wicks_and_half_widths() {
         let valid = Ohlc {

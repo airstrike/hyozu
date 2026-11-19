@@ -88,3 +88,31 @@ Proj4rs handles its supported EPSG and PROJ definitions in Rust. Enable `native-
 | `stat_ellipse()` | `stats::{ellipse,student_ellipse}` offer ordinary sample covariance and iteratively reweighted multivariate-t scatter at a supplied radius. |
 
 These APIs work on Rust data and native marks. They cover the chart-generating actions without interpreting R formulas or requiring a ggplot2 runtime. [ggplot2 layer statistics](https://ggplot2.tidyverse.org/reference/index.html)
+
+### Additional Matplotlib plotting commands
+
+The pyplot drawing reference also lists commands outside its 37-entry plot-types index. The gallery includes these three additional chart constructors.
+
+| Command | Native entry point | Data contract |
+|---|---|---|
+| [Polar](https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.polar.html) | `polar::lines` | Angular observations in radians and nonnegative radii with a common radial scale. An irregular sequence of angles and gaps is supported. |
+| [Broken horizontal bars](https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.broken_barh.html) | `cartesian::broken_bars` | Independent start/width spans in a data-space lane, including idle gaps between activities. |
+| [Matrix sparsity](https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.spy.html) | `field::sparsity` | Sparse row/column coordinates with duplicate positions merged, square cells and the matrix origin at the top left. |
+
+The [123-entry catalog](chart-parity/gallery-catalog.png), [polar line](chart-parity/gallery-polar.png), [interval bars](chart-parity/gallery-intervals.png) and [sparse matrix](chart-parity/gallery-sparsity.png) were drawn offscreen with iced’s software renderer through the gallery’s own browse and detail views at 1200 × 820. The earlier desktop captures above came from Rawr driving the native gallery window.
+
+### ggplot2 index audit
+
+The ggplot2 4.0.4 reference lists 51 geometry names and 30 statistic names, including aliases and no-op layers. Grouped below, the geometry names omit the shared `geom_` prefix and statistic names omit `stat_`. Each row identifies the corresponding chart-authoring operation. [ggplot2 reference](https://ggplot2.tidyverse.org/reference/index.html)
+
+| Operation | Geometry names | Statistic names | Native counterpart |
+|---|---|---|---|
+| Reference lines and layer scaffolding | abline, hline, vline, blank | identity | Rules, data-space segments, unchanged marks and empty data |
+| Categorical and accumulated values | bar, col, area, ribbon | count, align | Native bars, grouped counts, aligned stacked areas and bounded ribbons |
+| Curves, guides and observations | path, line, step, segment, curve, spoke, point, count, jitter, rug, function | sum, connect, function | Native lines/points, count-sized points, reproducible jitter, Cartesian geometry and function sampling |
+| Quantitative ranges | crossbar, errorbar, errorbarh, linerange, pointrange | summary, summary_bin | Cartesian ranges and point/binned reducers |
+| Univariate distributions | histogram, freqpoly, dotplot, density, violin, boxplot, qq, qq_line | bin, density, ydensity, boxplot, qq, qq_line, ecdf | Histogram counts or densities, Gaussian KDE, order statistics, quartiles and empirical distribution steps |
+| Conditional and multivariate estimates | smooth, quantile | smooth, quantile, ellipse | Linear and local smooths, conditional quantile regression and data ellipses |
+| Gridded and irregular fields | bin2d, bin_2d, hex, contour, contour_filled, density_2d, density_2d_filled, rect, tile, raster | bin_2d, bin_hex, contour, contour_filled, density_2d, density_2d_filled, summary_2d, summary_hex | Rectangular/hexagonal aggregation, scalar meshes, isolines, isobands, 2D Gaussian KDE and native textures |
+| Polygons, text and geography | polygon, text, label, map, sf, sf_text, sf_label | sf, sf_coordinates | Cartesian paths, text plates, maps, projected mixed geometry and point-on-surface labels |
+| Caller-defined tabular transforms | | manual, unique | Per-group transforms and key-based deduplication |

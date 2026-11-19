@@ -16,6 +16,7 @@ pub mod item;
 pub mod map;
 pub mod palette;
 pub mod parts;
+pub mod polar;
 pub mod props;
 pub mod scale;
 pub mod sparkline;

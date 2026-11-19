@@ -17,6 +17,7 @@ mod heatmap_basic;
 mod heatmap_warm;
 mod line_basic;
 mod line_multi;
+mod patterns;
 mod pie_basic;
 mod pie_donut;
 mod scatter_basic;
@@ -824,6 +825,23 @@ pub fn variants() -> Vec<Variant> {
             Flat,
             summaries::aligned,
             "charts/summaries.rs"
+        ),
+        variant!(120, "Polar line", Line, Flat, patterns::polar, "charts/patterns.rs"),
+        variant!(
+            121,
+            "Broken horizontal bars",
+            Bar,
+            Flat,
+            patterns::broken_bars,
+            "charts/patterns.rs"
+        ),
+        variant!(
+            122,
+            "Matrix sparsity",
+            Field,
+            Flat,
+            patterns::sparsity,
+            "charts/patterns.rs"
         ),
     ]
 }
