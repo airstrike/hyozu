@@ -1,5 +1,8 @@
 //! Indexed geometry for coordinate layouts and Cartesian marks.
+pub(crate) mod label;
+
 use crate::color::Color;
+use label::Label;
 use std::f64::consts::{FRAC_PI_2, TAU};
 
 #[derive(Clone, Debug)]
@@ -10,14 +13,39 @@ pub struct Entry {
     pub(crate) quantitative: bool,
 }
 
+/// An observed vertex of an open path. Hover snaps to these, never to the
+/// interpolated or corner vertices drawn between them.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Sample {
+    /// An observation in data coordinates.
+    Cartesian { x: f64, y: f64 },
+    /// A data angle in radians and a radius in data units.
+    Polar { angle: f64, radius: f64 },
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct Shape {
     pub holes: Vec<Vec<[f64; 2]>>,
     pub points: Vec<[f64; 2]>,
+    /// Observations along an open path, each at its position in the same
+    /// space as `points`.
+    pub samples: Vec<([f64; 2], Sample)>,
     pub entry: Option<usize>,
     pub closed: bool,
     pub opacity: f32,
     pub lightness: f32,
+}
+
+/// How entry geometry appears when the chart mounts. Guides never move.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Entrance {
+    /// Revealed left to right, like a line sweep.
+    #[default]
+    Rightward,
+    /// Revealed top to bottom, following a funnel's stage order.
+    Downward,
+    /// Grown outward from the center of the square.
+    Radial,
 }
 
 /// Native plot mark shared by hierarchical, flow and polar layouts.
@@ -25,8 +53,9 @@ pub(crate) struct Shape {
 pub struct Diagram {
     pub(crate) entries: Vec<Entry>,
     pub(crate) shapes: Vec<Shape>,
-    pub(crate) labels: Vec<([f32; 2], String)>,
+    pub(crate) labels: Vec<Label>,
     pub(crate) centered_labels: bool,
+    pub(crate) entrance: Entrance,
     pub(crate) label_color: Option<crate::core::Color>,
     pub(crate) label_background: Option<(crate::core::Color, f32)>,
     pub(crate) square: bool,
@@ -47,8 +76,16 @@ impl Diagram {
     }
 
     pub(crate) fn transpose(&mut self) {
-        for p in self.shapes.iter_mut().flat_map(|s| &mut s.points) {
-            p.swap(0, 1);
+        for shape in &mut self.shapes {
+            for p in &mut shape.points {
+                p.swap(0, 1);
+            }
+            for (p, sample) in &mut shape.samples {
+                p.swap(0, 1);
+                if let Sample::Cartesian { x, y } = sample {
+                    std::mem::swap(x, y);
+                }
+            }
         }
         if let Some(b) = self.range.as_mut() {
             std::mem::swap(&mut b.x_min, &mut b.y_min);
@@ -67,7 +104,27 @@ impl Diagram {
     }
 
     pub(crate) fn path(&mut self, index: usize, points: Vec<[f64; 2]>, closed: bool, opacity: f32) {
-        if points.len() >= 2 && points.iter().flatten().all(|v| v.is_finite()) {
+        self.push_path(index, points, closed, opacity);
+    }
+
+    /// An open path whose hover snaps to `samples`, the observations it
+    /// passes through. Samples share the coordinate space of `points`.
+    pub(crate) fn trace(&mut self, index: usize, points: Vec<[f64; 2]>, samples: Vec<([f64; 2], Sample)>) {
+        if self.push_path(index, points, false, 1.)
+            && let Some(shape) = self.shapes.last_mut()
+        {
+            shape.samples = samples;
+        }
+    }
+
+    /// A guide label aligned by its horizontal position.
+    pub(crate) fn label(&mut self, anchor: [f32; 2], text: impl Into<String>) {
+        self.labels.push(Label::free(anchor, text));
+    }
+
+    fn push_path(&mut self, index: usize, points: Vec<[f64; 2]>, closed: bool, opacity: f32) -> bool {
+        let valid = points.len() >= 2 && points.iter().flatten().all(|v| v.is_finite());
+        if valid {
             if self.cartesian {
                 for &[x, y] in &points {
                     let b = self.range.get_or_insert(crate::data::area::Bounds {
@@ -85,12 +142,14 @@ impl Diagram {
             self.shapes.push(Shape {
                 holes: Vec::new(),
                 points,
+                samples: Vec::new(),
                 entry: Some(index),
                 closed,
                 opacity,
                 lightness: 1.,
             });
         }
+        valid
     }
 
     pub fn entries(&self) -> &[Entry] {
@@ -125,6 +184,7 @@ impl Diagram {
         self.shapes.push(Shape {
             holes: Vec::new(),
             points: points.into_iter().map(|p| p.map(f64::from)).collect(),
+            samples: Vec::new(),
             entry: Some(index),
             closed: true,
             opacity,
@@ -136,6 +196,7 @@ impl Diagram {
         self.shapes.push(Shape {
             holes: Vec::new(),
             points: points.into_iter().map(|p| p.map(f64::from)).collect(),
+            samples: Vec::new(),
             entry: None,
             closed: false,
             opacity: 0.35,
@@ -159,8 +220,13 @@ fn sector(inner: f64, outer: f64, start: f64, end: f64) -> Vec<[f32; 2]> {
 
 /// Stage widths encode values relative to the widest stage. The last stage
 /// terminates at its own width. Invalid or negative values are omitted.
+/// Each stage carries its name and value, inside the stage when the text
+/// fits and beside its right edge otherwise.
 pub fn funnel<S: AsRef<str>>(stages: &[(S, f64)]) -> Diagram {
-    let mut d = Diagram::default();
+    let mut d = Diagram {
+        entrance: Entrance::Downward,
+        ..Diagram::default()
+    };
     let stages: Vec<_> = stages.iter().filter(|(_, v)| v.is_finite() && *v >= 0.).collect();
     let max = stages.iter().map(|s| s.1).fold(0., f64::max);
     if max <= 0. {
@@ -172,36 +238,30 @@ pub fn funnel<S: AsRef<str>>(stages: &[(S, f64)]) -> Diagram {
         let y = i as f32 / stages.len() as f32;
         let end = (i + 1) as f32 / stages.len() as f32;
         let id = d.entry(name.as_ref(), *v);
-        d.polygon(id, vec![[0.5 - a, y], [0.5 + a, y], [0.5 + b, end], [0.5 - b, end]], 1.);
+        let stage = vec![[0.5 - a, y], [0.5 + a, y], [0.5 + b, end], [0.5 - b, end]];
+        let region = label::Region::Convex(stage.clone());
+        d.polygon(id, stage, 1.);
+        let middle = y.midpoint(end);
+        let text = format!("{} · {}", name.as_ref(), crate::scale::default_f64_format(*v));
+        d.labels.push(
+            Label::inside(id, [0.5, middle], region, text).or_beside([0.5 + a.midpoint(b) + 0.012, middle], [1., 0.]),
+        );
     }
     d
 }
 
 /// One concentric bar per observation. Its swept angle encodes the fraction
-/// of a common maximum starting at twelve o'clock.
+/// of a common maximum starting at twelve o'clock and growing clockwise.
+/// See [`crate::polar::Axes::radial_bars`] to configure the value ticks,
+/// start angle and direction.
 pub fn radial_bars<S: AsRef<str>>(rows: &[(S, f64)], maximum: f64) -> Diagram {
-    let mut d = Diagram {
-        square: true,
-        ..Diagram::default()
-    };
     if !maximum.is_finite() || maximum <= 0. {
-        return d;
+        return Diagram {
+            square: true,
+            ..Diagram::default()
+        };
     }
-    let rows: Vec<_> = rows.iter().filter(|(_, v)| v.is_finite() && *v >= 0.).collect();
-    let thickness = 0.40 / rows.len().max(1) as f64;
-    for (i, (name, v)) in rows.into_iter().enumerate() {
-        let id = d.entry(name.as_ref(), *v);
-        if *v == 0. {
-            continue;
-        }
-        let inner = 0.08 + i as f64 * thickness;
-        d.polygon(
-            id,
-            sector(inner, inner + 0.9 * thickness, 0., (v / maximum).min(1.)),
-            1.,
-        );
-    }
-    d
+    crate::polar::Axes::compass().maximum(maximum).radial_bars(rows)
 }
 
 /// Radar axes in input order. All series use the same positive maximum.
@@ -217,62 +277,24 @@ pub enum RadarStyle {
     Filled,
 }
 
-/// A common radial scale with a closed outline, optional vertex markers or filled series.
+/// A common radial scale with a closed outline, optional vertex markers or
+/// filled series. See [`crate::polar::Axes::radar`] to configure the radial
+/// ticks, their format, the start angle and the direction.
 pub fn radar_with_style<S: AsRef<str>, T: AsRef<str>, V: AsRef<[f64]>>(
     axes: &[S],
     series: &[(T, V)],
     maximum: f64,
     style: RadarStyle,
 ) -> Diagram {
-    let mut d = Diagram {
-        square: true,
-        ..Diagram::default()
-    };
-    if axes.len() < 3 || !maximum.is_finite() || maximum <= 0. {
-        return d;
+    if !maximum.is_finite() || maximum <= 0. {
+        return Diagram {
+            square: true,
+            ..Diagram::default()
+        };
     }
-    let angle = |i| i as f64 / axes.len() as f64;
-    for ring in 1..=4 {
-        d.guide(
-            (0..=axes.len())
-                .map(|i| polar(0.37 * ring as f64 / 4., angle(i)))
-                .collect(),
-        );
-    }
-    for (i, axis) in axes.iter().enumerate() {
-        d.guide(vec![polar(0., 0.), polar(0.37, angle(i))]);
-        d.labels.push((polar(0.44, angle(i)), axis.as_ref().to_owned()));
-    }
-    for (name, values) in series {
-        let values = values.as_ref();
-        if values.len() != axes.len() || values.iter().any(|v| !v.is_finite()) {
-            continue;
-        }
-        let id = d.series(name.as_ref());
-        let mut points: Vec<_> = values
-            .iter()
-            .enumerate()
-            .map(|(i, v)| polar((v / maximum).clamp(0., 1.) * 0.37, angle(i)))
-            .collect();
-        if style == RadarStyle::Filled {
-            d.polygon(id, points, 0.33);
-            continue;
-        }
-        if style == RadarStyle::Markers {
-            for &[x, y] in &points {
-                let circle = (0..16)
-                    .map(|i| {
-                        let t = i as f32 * std::f32::consts::TAU / 16.;
-                        [x + 0.009 * t.cos(), y + 0.009 * t.sin()]
-                    })
-                    .collect();
-                d.polygon(id, circle, 1.);
-            }
-        }
-        points.push(points[0]);
-        d.path(id, points.into_iter().map(|p| p.map(f64::from)).collect(), false, 1.);
-    }
-    d
+    crate::polar::Axes::compass()
+        .maximum(maximum)
+        .radar(axes, series, style)
 }
 
 /// A hierarchy whose branch weights are calculated from their descendant leaves.
@@ -309,7 +331,8 @@ impl Node {
     }
 }
 
-/// Concentric partition. Children divide exactly the angular extent of their parent.
+/// Concentric partition. Children divide exactly the angular extent of their
+/// parent. Each sector is labelled with its name when the text fits inside it.
 pub fn sunburst(roots: &[Node]) -> Diagram {
     fn walk(d: &mut Diagram, nodes: &[Node], depth: usize, thick: f64, start: f64, end: f64) {
         let total: f64 = nodes.iter().map(Node::weight).sum();
@@ -324,16 +347,17 @@ pub fn sunburst(roots: &[Node]) -> Diagram {
             }
             let next = angle + (end - start) * (value / total);
             let id = d.entry(node.name(), value);
-            d.polygon(
-                id,
-                sector(
-                    0.035 + thick * depth as f64,
-                    0.035 + thick * (depth + 1) as f64,
-                    angle,
-                    next,
-                ),
-                1.,
-            );
+            let inner = 0.035 + thick * depth as f64;
+            let outer = 0.035 + thick * (depth + 1) as f64;
+            d.polygon(id, sector(inner, outer, angle, next), 1.);
+            let region = label::Region::Sector {
+                inner: inner as f32,
+                outer: outer as f32,
+                start: (angle * TAU - FRAC_PI_2) as f32,
+                span: ((next - angle) * TAU) as f32,
+            };
+            let anchor = polar(inner.midpoint(outer), angle.midpoint(next));
+            d.labels.push(Label::inside(id, anchor, region, node.name()));
             if let Node::Branch(_, children) = node {
                 walk(d, children, depth + 1, thick, angle, next);
             }
@@ -344,6 +368,7 @@ pub fn sunburst(roots: &[Node]) -> Diagram {
         square: true,
         ..Diagram::default()
     };
+    d.entrance = Entrance::Radial;
     let levels = roots.iter().map(Node::depth).max().unwrap_or(1);
     walk(&mut d, roots, 0, 0.45 / levels as f64, 0., 1.);
     d
@@ -351,7 +376,8 @@ pub fn sunburst(roots: &[Node]) -> Diagram {
 
 /// Recursively squarifies children inside their parent, using the same
 /// rectangle-packing implementation as the flat treemap. Parent gutters
-/// expose the hierarchy. Entry indices follow depth-first order.
+/// expose the hierarchy. Entry indices follow depth-first order. Leaves are
+/// labelled with their names when the text fits inside them.
 pub fn hierarchical_treemap(roots: &[Node]) -> Diagram {
     use crate::core::Rectangle;
     fn walk(d: &mut Diagram, nodes: &[Node], bounds: Rectangle) {
@@ -375,6 +401,14 @@ pub fn hierarchical_treemap(roots: &[Node]) -> Diagram {
             let right = (x + rect.width).min(bounds.x + bounds.width);
             let bottom = (y + rect.height).min(bounds.y + bounds.height);
             d.polygon(id, vec![[x, y], [right, y], [right, bottom], [x, bottom]], 1.);
+            if let Node::Leaf(name, _) = node {
+                let region = label::Region::Rect {
+                    min: [x, y],
+                    max: [right, bottom],
+                };
+                d.labels
+                    .push(Label::inside(id, [x.midpoint(right), y.midpoint(bottom)], region, name));
+            }
             if let Node::Branch(_, children) = node {
                 let pad = 0.008_f32.min(rect.width * 0.08).min(rect.height * 0.08);
                 walk(d, children, Rectangle {
@@ -407,7 +441,8 @@ pub struct Flow {
 /// One left-to-right column per dependency level. All nodes and links share a
 /// single value-to-height scale, including flows that skip columns. Node value
 /// equals the larger of its incoming and outgoing totals. A cycle, unknown
-/// endpoint, invalid value or nonfinite total returns `None`.
+/// endpoint, invalid value or nonfinite total returns `None`. Node names sit
+/// beside their nodes: right of every column but the last, left of the last.
 pub fn sankey<S: AsRef<str>>(names: &[S], flows: &[Flow]) -> Option<Diagram> {
     let count = names.len();
     let mut incoming = vec![0.; count];
@@ -469,6 +504,7 @@ pub fn sankey<S: AsRef<str>>(names: &[S], flows: &[Flow]) -> Option<Diagram> {
     let width = 0.035_f64.min(0.4 / columns.len() as f64);
     let mut pos = vec![(0., 0.); count];
     let mut node_shapes = Vec::new();
+    let last = columns.len() - 1;
     for (level, col) in columns.iter().enumerate() {
         let x = 0.01 + level as f64 / columns.len().saturating_sub(1).max(1) as f64 * (0.98 - width);
         let height =
@@ -477,6 +513,13 @@ pub fn sankey<S: AsRef<str>>(names: &[S], flows: &[Flow]) -> Option<Diagram> {
         for &i in col {
             let h = d.entries[i].value * scale;
             pos[i] = (x, y);
+            let middle = (y + h / 2.) as f32;
+            let name = names[i].as_ref();
+            d.labels.push(if level == last && last > 0 {
+                Label::toward([(x - 0.006) as f32, middle], [-1., 0.], name).of(i)
+            } else {
+                Label::toward([(x + width + 0.006) as f32, middle], [1., 0.], name).of(i)
+            });
             node_shapes.push((i, vec![
                 [x as f32, y as f32],
                 [(x + width) as f32, y as f32],
@@ -522,6 +565,7 @@ pub fn rings<S: AsRef<str>, V: AsRef<[f64]>>(categories: &[S], rows: &[V], hole:
     }
     let mut d = Diagram {
         square: true,
+        entrance: Entrance::Radial,
         ..Diagram::default()
     };
     for name in categories {
@@ -564,6 +608,7 @@ pub fn exploded_pie<S: AsRef<str>>(items: &[(S, f64, f64)]) -> Option<Diagram> {
     let mut t = 0.;
     let mut d = Diagram {
         square: true,
+        entrance: Entrance::Radial,
         ..Diagram::default()
     };
     for (name, v, explode) in items {
