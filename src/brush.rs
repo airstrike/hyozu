@@ -1,4 +1,6 @@
-//! Interactive x-domain selection. Applications can share a selection across charts.
+//! Interactive selection: an x-domain [`Selection`] that applications can
+//! share across charts, and the 2D [`Region`] a chart reports after a
+//! rectangle drag.
 use crate::core::{Color, Event, Length, Point, Rectangle, Size, mouse, touch};
 use crate::widget::canvas::{Frame, Geometry, Path, Stroke};
 use crate::widget::{self, canvas};
@@ -48,6 +50,48 @@ impl Selection {
             }
         };
         Self { bounds, ..self }
+    }
+}
+
+/// A finished 2D rectangle selection: the dragged region in data values on
+/// the primary axes and the entries inside it.
+///
+/// Charts with [`Chart::select_region`] report it as
+/// [`crate::Action::Selected`].
+///
+/// [`Chart::select_region`]: crate::chart::Chart::select_region
+#[derive(Clone, Debug, PartialEq)]
+pub struct Region {
+    x: [f64; 2],
+    y: [f64; 2],
+    targets: Vec<crate::Target>,
+}
+
+impl Region {
+    /// Orders each range so `min <= max`, whatever the drag direction.
+    pub(crate) fn new(x: [f64; 2], y: [f64; 2], targets: Vec<crate::Target>) -> Self {
+        let ordered = |[a, b]: [f64; 2]| [a.min(b), a.max(b)];
+        Self {
+            x: ordered(x),
+            y: ordered(y),
+            targets,
+        }
+    }
+
+    /// The selected `[min, max]` along the horizontal axis.
+    pub fn x(&self) -> [f64; 2] {
+        self.x
+    }
+
+    /// The selected `[min, max]` along the vertical axis.
+    pub fn y(&self) -> [f64; 2] {
+        self.y
+    }
+
+    /// The entries inside the region, as [`crate::Target::Entry`] in mark,
+    /// series and index order.
+    pub fn targets(&self) -> &[crate::Target] {
+        &self.targets
     }
 }
 

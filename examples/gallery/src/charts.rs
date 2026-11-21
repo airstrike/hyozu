@@ -17,6 +17,7 @@ mod gauge_basic;
 mod gauge_zones;
 mod heatmap_basic;
 mod heatmap_warm;
+pub(super) mod interaction;
 mod line_basic;
 mod line_multi;
 mod patterns;
@@ -54,11 +55,15 @@ pub enum Builder {
     Brush(fn() -> brush::Example),
     Facets(fn() -> hyozu::facet::Grid),
     Orbital(fn(hyozu::spatial::Camera) -> Data),
+    Linked(fn() -> interaction::Linked),
+    Zoom(fn() -> interaction::Zoomable),
 }
 pub enum Preview {
     Brush(Box<brush::Example>),
     Single(Box<Data>),
     Facets(hyozu::facet::Grid),
+    Linked(Box<interaction::Linked>),
+    Zoom(Box<interaction::Zoomable>),
 }
 
 impl Variant {
@@ -68,6 +73,14 @@ impl Variant {
             Builder::Flat(build) => build(),
             Builder::Orbital(build) => build(camera),
             Builder::Facets(build) => return Preview::Facets(build()),
+            Builder::Linked(build) => {
+                let mut linked = build();
+                for chart in &mut linked.charts {
+                    *chart = chart.clone().palette(super::chart_colors(self.category));
+                }
+                return Preview::Linked(Box::new(linked));
+            }
+            Builder::Zoom(build) => return Preview::Zoom(Box::new(build())),
         };
         let chart = if chart.get_palette().is_some() {
             chart
@@ -84,6 +97,8 @@ impl Preview {
             Self::Brush(ex) => ex.chart.get_title(),
             Self::Single(chart) => chart.get_title(),
             Self::Facets(_) => None,
+            Self::Linked(linked) => linked.charts.first().and_then(Data::get_title),
+            Self::Zoom(zoom) => zoom.chart.get_title(),
         }
     }
     pub fn perform(&mut self, panel: usize, action: hyozu::Action) {
@@ -95,6 +110,8 @@ impl Preview {
                     chart.perform(action);
                 }
             }
+            Self::Linked(linked) => linked.perform(&action),
+            Self::Zoom(zoom) => zoom.perform(&action),
         }
     }
 }
@@ -1034,6 +1051,48 @@ pub fn variants() -> Vec<Variant> {
             Flat,
             series_styles::bullet_chart,
             "charts/series_styles.rs"
+        ),
+        variant!(
+            150,
+            "Wind rose",
+            Diagram,
+            Flat,
+            diagrams::wind_rose,
+            "charts/diagrams.rs"
+        ),
+        variant!(
+            151,
+            "Radar scale",
+            Diagram,
+            Flat,
+            diagrams::radar_scale,
+            "charts/diagrams.rs"
+        ),
+        variant!(
+            152,
+            "Polar categories",
+            Line,
+            Flat,
+            diagrams::polar_months,
+            "charts/diagrams.rs"
+        ),
+        variant!(
+            153,
+            "Linked hover",
+            Line,
+            Linked,
+            interaction::linked,
+            "charts/interaction.rs"
+        ),
+        variant!(154, "Facet wrap", Facets, Facets, facets::wrap, "charts/facets.rs"),
+        variant!(155, "Facet grid", Facets, Facets, facets::grid, "charts/facets.rs"),
+        variant!(
+            156,
+            "Zoom and pan",
+            Scatter,
+            Zoom,
+            interaction::zoomable,
+            "charts/interaction.rs"
         ),
         variant!(
             157,

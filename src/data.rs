@@ -890,6 +890,22 @@ pub enum Action {
     Set(crate::item::Item),
     /// A chart element was clicked.
     Clicked(crate::target::Target),
+    /// Wheel zoom, drag pan or a double-click reset changed the visible
+    /// region of a chart with [`Chart::zoom`]. The chart already shows it;
+    /// apply it to other charts with [`Viewport::apply`] to link them.
+    ///
+    /// [`Chart::zoom`]: crate::chart::Chart::zoom
+    /// [`Viewport::apply`]: crate::chart::zoom::Viewport::apply
+    Viewport(crate::chart::zoom::Viewport),
+    /// A rectangle drag finished on a chart with [`Chart::select_region`].
+    ///
+    /// [`Chart::select_region`]: crate::chart::Chart::select_region
+    Selected(crate::brush::Region),
+    /// The hovered x changed on a chart with [`Chart::sync`]. Store it with
+    /// [`crate::sync::Cursor::update`] to link the other charts.
+    ///
+    /// [`Chart::sync`]: crate::chart::Chart::sync
+    Hovered(crate::sync::Cursor),
 }
 
 impl Data {
@@ -976,9 +992,11 @@ impl Data {
                     self.selection = target;
                 }
             },
-            Action::Clicked(_) => {
-                // Clicked actions are reported to the application via on_action.
-                // The application decides how to handle them (e.g., update selection).
+            Action::Clicked(_) | Action::Viewport(_) | Action::Selected(_) | Action::Hovered(_) => {
+                // Interaction reports go to the application via on_action.
+                // The application decides how to handle them (e.g., update
+                // selection or a shared cursor). The source chart already
+                // shows its own viewport, so applying it here would zoom twice.
             }
         }
     }

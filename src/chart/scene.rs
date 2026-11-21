@@ -128,6 +128,9 @@ where
     /// `geo_basemap` fields. Threaded into `PlotArea::layout` for
     /// geo-aware marks (Choropleth, geo-Xy).
     geo_config: crate::chart::plot_area::GeoConfig,
+    /// Whether a zoom window narrows any axis. Marks then clip to the data
+    /// rectangle, since the window cuts through them.
+    zoomed: bool,
 }
 
 impl<'a, Message, Renderer> Scene<'a, Message, Renderer>
@@ -453,7 +456,42 @@ where
                 projection: data.geo_projection,
                 basemap: data.geo_basemap,
             },
+            zoomed: false,
         }
+    }
+
+    /// Shows the zoom windows on the axes: x on the bottom and top guides,
+    /// y on the left and right ones. Call before [`Self::layout`].
+    pub(crate) fn zoom(&mut self, zoom: &crate::chart::zoom::State) {
+        for guide in [&mut self.bottom_axis, &mut self.top_axis].into_iter().flatten() {
+            guide.zoom(zoom.x);
+        }
+        for guide in [&mut self.left_axis, &mut self.right_axis].into_iter().flatten() {
+            guide.zoom(zoom.y);
+        }
+        self.zoomed = zoom.is_zoomed();
+    }
+
+    /// The primary axes that can zoom, with their full domains as of the
+    /// last layout: `(bottom, left)`.
+    pub(crate) fn zoom_axes(
+        &self,
+        tree: &Tree,
+    ) -> (Option<crate::chart::zoom::Axis>, Option<crate::chart::zoom::Axis>) {
+        let axis = |guide: &Option<Guide<'a, Message, Renderer>>, index: usize| {
+            let guide = guide.as_ref().filter(|guide| guide.zoomable())?;
+            let state = tree
+                .children
+                .get(index)
+                .filter(|child| child.tag == tree::Tag::of::<guide::State<Renderer::Paragraph>>())?
+                .state
+                .downcast_ref::<guide::State<Renderer::Paragraph>>();
+            Some(crate::chart::zoom::Axis {
+                home: [state.home.min(), state.home.max()],
+                mapping: guide.mapping(),
+            })
+        };
+        (axis(&self.bottom_axis, 4), axis(&self.left_axis, 5))
     }
 
     /// Returns the resolved value-format closure for the given primary
@@ -1238,27 +1276,41 @@ where
         let left_axis_line = self.left_axis.as_ref().map(|g| g.axis().shows_line()).unwrap_or(false);
 
         let mut labels = crate::chart::labels::Layer::new(self.label_space(tree, layout));
-        self.plot_area.draw_with_labels(
-            &tree.children[6],
-            renderer,
-            design,
-            style,
-            plot_layout,
-            cursor,
-            viewport,
-            &resolved,
-            self.user_palette.as_ref(),
-            self.selection,
-            hidden_series,
-            corners,
-            track,
-            bottom_axis_line,
-            left_axis_line,
-            &mut labels,
-        );
-        labels.draw(renderer, viewport);
-        self.plot_area
-            .draw_annotations(&tree.children[6], renderer, design, plot_layout, viewport);
+        let draw_marks = |renderer: &mut Renderer| {
+            self.plot_area.draw_with_labels(
+                &tree.children[6],
+                renderer,
+                design,
+                style,
+                plot_layout,
+                cursor,
+                viewport,
+                &resolved,
+                self.user_palette.as_ref(),
+                self.selection,
+                hidden_series,
+                corners,
+                track,
+                bottom_axis_line,
+                left_axis_line,
+                &mut labels,
+            );
+            labels.draw(renderer, viewport);
+            self.plot_area
+                .draw_annotations(&tree.children[6], renderer, design, plot_layout, viewport);
+        };
+        if self.zoomed {
+            let content = tree.children[6]
+                .state
+                .downcast_ref::<crate::chart::plot_area::State>()
+                .content_rect;
+            let clip = content + (plot_layout.bounds().position() - crate::core::Point::ORIGIN);
+            if let Some(clip) = clip.intersection(viewport) {
+                renderer.with_layer(clip, draw_marks);
+            }
+        } else {
+            draw_marks(renderer);
+        }
 
         // Scale legends. Overlaid panels float inside the plot area;
         // inset strips live outside the plot area in rectangles the scene

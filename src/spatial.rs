@@ -232,7 +232,7 @@ impl Scene {
                 let a = screen(transform(min));
                 let b = screen(transform(end));
                 d.guide(vec![a.map(|v| v as f32), b.map(|v| v as f32)]);
-                d.labels.push((b.map(|v| v as f32), ["X", "Y", "Z"][i].to_owned()));
+                d.label(b.map(|v| v as f32), ["X", "Y", "Z"][i]);
             }
         }
         let mut order: Vec<_> = self

@@ -55,7 +55,7 @@ pub fn fishbone<S: AsRef<str>, T: AsRef<str>, V: AsRef<[T]>>(effect: &str, group
     let effect_id = d.series(effect);
     d.path(effect_id, vec![[0.045, 0.50], [0.88, 0.50]], false, 1.);
     d.path(effect_id, vec![[0.862, 0.478], [0.88, 0.50], [0.862, 0.522]], false, 1.);
-    d.labels.push(([0.90, 0.57], effect.into()));
+    d.label([0.90, 0.57], effect);
     let pairs = groups.len().div_ceil(2).max(1) as f64;
     let slot = 0.77 / pairs;
     for (i, (name, causes)) in groups.iter().enumerate() {
@@ -64,18 +64,14 @@ pub fn fishbone<S: AsRef<str>, T: AsRef<str>, V: AsRef<[T]>>(effect: &str, group
         let end = [x - slot * 0.65, 0.50 + dir * 0.33];
         let id = d.series(name.as_ref());
         d.path(id, vec![[x, 0.5], end], false, 1.);
-        d.labels
-            .push(([end[0] as f32, (end[1] + dir * 0.055) as f32], name.as_ref().into()));
+        d.label([end[0] as f32, (end[1] + dir * 0.055) as f32], name.as_ref());
         let causes = causes.as_ref();
         for (j, cause) in causes.iter().enumerate() {
             let t = (j + 1) as f64 / (causes.len() + 1) as f64;
             let a = [x - slot * 0.65 * t, 0.5 + dir * 0.33 * t];
             let b = [a[0] - slot * 0.28, a[1]];
             d.path(id, vec![a, b], false, 1.);
-            d.labels.push((
-                [(b[0] - slot * 0.04) as f32, (b[1] - 0.03) as f32],
-                cause.as_ref().into(),
-            ));
+            d.label([(b[0] - slot * 0.04) as f32, (b[1] - 0.03) as f32], cause.as_ref());
         }
     }
     d

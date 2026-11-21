@@ -303,7 +303,7 @@ impl Layer {
                 && !name.is_empty()
                 && let Some(pt) = anchor(feature).filter(|p| p.x().is_finite() && p.y().is_finite())
             {
-                diagram.labels.push((position(pt.0).map(|v| v as f32), name));
+                diagram.label(position(pt.0).map(|v| v as f32), name);
             }
         }
         diagram
