@@ -76,3 +76,28 @@ pub fn origin_axes() -> hyozu::Data {
         .y_axis(|axis| axis.crosses_at(0.0).show_grid(false))
         .title("Origin axes")
 }
+
+/// A cycling ride with a title on every axis: distance against seconds
+/// on the bottom and left, speed against minutes on the top and right.
+pub fn axis_titles() -> hyozu::Data {
+    let speed: Vec<(f64, f64)> = (0..=60)
+        .map(|minute| {
+            let t = f64::from(minute);
+            (t, 24.0 + 6.0 * (t / 10.0).sin() - 4.0 * (t / 25.0).cos())
+        })
+        .collect();
+    let distance: Vec<(f64, f64)> = speed
+        .iter()
+        .scan(0.0, |km, &(minute, kmh)| {
+            *km += kmh / 60.0;
+            Some((minute * 60.0, *km))
+        })
+        .collect();
+    hyozu::data(line(distance).with_name("Distance"))
+        .secondary(vec![line(speed).with_name("Speed").into()])
+        .x_axis(|axis| axis.with_bounds(0.0, 3600.0).title("Elapsed time (s)"))
+        .y_axis(|axis| axis.title("Distance (km)"))
+        .right_axis(|axis| axis.title("Speed (km/h)").show_grid(false))
+        .top_axis(|axis| axis.with_bounds(0.0, 60.0).title("Elapsed time (min)").show_grid(false))
+        .title("Axis titles")
+}

@@ -1118,6 +1118,7 @@ pub fn variants() -> Vec<Variant> {
             heatmap_warm::log_scale,
             "charts/heatmap_warm.rs"
         ),
+        variant!(160, "Axis titles", Line, Flat, axes::axis_titles, "charts/axes.rs"),
     ]
 }
 

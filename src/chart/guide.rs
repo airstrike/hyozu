@@ -4,6 +4,8 @@ use crate::core::text::{self, paragraph};
 use crate::core::widget::{Tree, tree};
 use crate::core::{Point, Rectangle, Size, Vector};
 
+pub mod title;
+
 /// Wrapper for f64 to make it orderable (NaN compares as less than everything)
 #[derive(Debug, Clone, Copy)]
 struct OrderedFloat(f64);
@@ -543,6 +545,19 @@ where
     pub label_font: crate::core::Font,
     /// Resolved tick-label size, cached alongside [`State::label_font`].
     pub label_size: crate::core::Pixels,
+    /// The axis title fitted to the axis length, when the axis has one.
+    /// Its band sits on the guide's outer edge, beyond the tick labels.
+    pub title: Option<title::Fitted>,
+}
+
+impl<P> State<P>
+where
+    P: text::Paragraph,
+{
+    /// Thickness the title takes from the guide across the axis.
+    fn title_band(&self) -> f32 {
+        self.title.as_ref().map_or(0.0, title::Fitted::band)
+    }
 }
 
 /// A Guide wraps an Axis and handles UI layout with proper text measurement.
@@ -1225,6 +1240,7 @@ where
                 label_offset: 0.0,
                 label_font: crate::core::Font::DEFAULT,
                 label_size: crate::core::Pixels(12.0),
+                title: None,
             }),
             children,
             ..Tree::empty()
@@ -1281,6 +1297,9 @@ where
         state.bounds = bounds;
         state.home = home;
 
+        state.title = self.fit_title(renderer, axis_length, overflow, design);
+        let band = state.title_band();
+
         let labels = &state.label_info;
         let (min_value, max_value) = (state.bounds.min(), state.bounds.max());
 
@@ -1291,8 +1310,15 @@ where
             // plot area top, etc. — reach the plot area. Without this the
             // scene reads `(0, 0)` from `state.label_insets` and lays the
             // plot area flush against the chart edge, clipping the labels.
+            //
+            // A title still shows on an axis without labels, since it was
+            // asked for by name.
             state.label_insets = min_inset;
-            tree.size = Size::ZERO;
+            tree.size = match self.axis.orientation() {
+                _ if band == 0.0 => Size::ZERO,
+                Orientation::Left | Orientation::Right => Size::new(band, axis_length),
+                Orientation::Bottom | Orientation::Top => Size::new(axis_length, band),
+            };
             tree.children.clear();
             return;
         }
@@ -1338,12 +1364,58 @@ where
             ),
         };
 
-        tree.size = size;
+        tree.size = match self.axis.orientation() {
+            Orientation::Left | Orientation::Right => Size::new(size.width + band, size.height),
+            Orientation::Bottom | Orientation::Top => Size::new(size.width, size.height + band),
+        };
         tree.children.resize_with(labels.len(), Tree::empty);
         for (child, label) in tree.children.iter_mut().zip(labels) {
             child.size = label.size();
             child.translation = Vector::new(label.x, label.y);
         }
+    }
+
+    /// Shapes the axis title in its resolved font and fits it to the axis
+    /// length. Like edge tick labels, the title may run into the empty
+    /// corners the `overflow` budget names.
+    fn fit_title(
+        &self,
+        renderer: &Renderer,
+        axis_length: f32,
+        overflow: (f32, f32),
+        design: Option<&dyn crate::design::Design>,
+    ) -> Option<title::Fitted> {
+        use text::Paragraph;
+
+        let content = self.axis.get_title()?;
+        let base_font = design
+            .map(|d| d.axis_text().resolved_font(renderer.font()))
+            .unwrap_or_else(|| renderer.font());
+        let base_size = design.and_then(|d| d.axis_text().size).map(|p| p.0).unwrap_or(12.0);
+        let style = self.axis.resolved_title_style();
+        let font = style.resolved_font(base_font);
+        let size: crate::core::Pixels = style.resolved_size(base_size).into();
+        let hint_factor = renderer.hint_factor();
+        title::Fitted::new(content, font, size, axis_length, overflow, |candidate| {
+            Renderer::Paragraph::with_text(text::Text {
+                content: candidate,
+                bounds: Size::INFINITE,
+                size,
+                line_height: text::LineHeight::default(),
+                font,
+                align_x: text::Alignment::Left,
+                align_y: crate::core::alignment::Vertical::Top,
+                shaping: text::Shaping::Basic,
+                wrapping: text::Wrapping::None,
+                ellipsis: text::Ellipsis::None,
+                hint_factor,
+                font_features: Vec::new(),
+                font_variations: Vec::new(),
+                letter_spacing: Default::default(),
+                weight: None,
+            })
+            .min_bounds()
+        })
     }
 
     /// Indices of the labels nearest the start (unit `0`) and end (unit
@@ -1875,17 +1947,19 @@ where
                         Point::new(x, bounds.y + tick_space + label_offset)
                     }
                     Orientation::Left => {
-                        let col_w = bounds.width - tick_space - label_offset;
+                        // The title band sits on the outer (left) edge.
+                        let col_start = bounds.x + state.title_band();
+                        let col_w = bounds.width - tick_space - label_offset - state.title_band();
                         let x = match text_align {
-                            TextAlign::Left => bounds.x,
-                            TextAlign::Center => bounds.x + (col_w - w) / 2.0,
-                            TextAlign::Right => bounds.x + col_w - w,
+                            TextAlign::Left => col_start,
+                            TextAlign::Center => col_start + (col_w - w) / 2.0,
+                            TextAlign::Right => col_start + col_w - w,
                         };
                         Point::new(x, child_bounds.y - paragraph_bounds.height / 2.0)
                     }
                     Orientation::Right => {
                         let col_start = bounds.x + tick_space + label_offset;
-                        let col_w = bounds.width - tick_space - label_offset;
+                        let col_w = bounds.width - tick_space - label_offset - state.title_band();
                         let x = match text_align {
                             TextAlign::Left => col_start,
                             TextAlign::Center => col_start + (col_w - w) / 2.0,
@@ -1909,6 +1983,77 @@ where
                 renderer.fill_paragraph(paragraph.raw(), anchor, label_color, *viewport);
             }
         }
+    }
+
+    /// Draws the axis title on the guide's outer edge.
+    ///
+    /// Unlike [`Guide::draw`], the title stays in the gutter when the axis
+    /// crosses the plot at a value, so call this without the crossing
+    /// offset.
+    pub fn draw_title<D>(
+        &self,
+        tree: &crate::core::widget::Tree,
+        renderer: &mut Renderer,
+        design: &D,
+        layout: crate::core::Layout,
+    ) where
+        D: crate::design::Design + ?Sized,
+        Renderer: crate::widget::renderer::geometry::Renderer,
+    {
+        use crate::widget::canvas::{Frame, Text};
+
+        let state = tree.state.downcast_ref::<State<Renderer::Paragraph>>();
+        let Some(title) = state.title.as_ref().filter(|title| !title.content().is_empty()) else {
+            return;
+        };
+        let bounds = layout.bounds();
+        let color = self
+            .axis
+            .label_color()
+            .unwrap_or_else(|| design.axis_label_color())
+            .resolve(design.background_color(), design.text_pair(), &design.seed(), None);
+        let (start, end) = state.label_insets;
+        let length = match self.axis.orientation() {
+            Orientation::Bottom | Orientation::Top => bounds.width,
+            Orientation::Left | Orientation::Right => bounds.height,
+        };
+        let placement = title.place(self.axis.orientation(), bounds.size(), (start, length - end));
+
+        // Widen the frame along the axis over the corners the title may
+        // reach into, since a frame clips to its own size.
+        let (before, after) = title.reach();
+        let (origin, size) = match self.axis.orientation() {
+            Orientation::Bottom | Orientation::Top => (
+                Vector::new(bounds.x - before, bounds.y),
+                Size::new(bounds.width + before + after, bounds.height),
+            ),
+            Orientation::Left | Orientation::Right => (
+                Vector::new(bounds.x, bounds.y - before),
+                Size::new(bounds.width, bounds.height + before + after),
+            ),
+        };
+        let center = placement.center - (origin - Vector::new(bounds.x, bounds.y));
+        let mut frame = Frame::new(renderer, size);
+        frame.with_save(|frame| {
+            frame.translate(Vector::new(center.x, center.y));
+            frame.rotate(placement.rotation);
+            frame.fill_text(Text {
+                content: title.content().to_owned(),
+                position: Point::ORIGIN,
+                color,
+                size: title.size(),
+                line_height: text::LineHeight::default(),
+                font: title.font(),
+                align_x: text::Alignment::Center,
+                align_y: crate::core::alignment::Vertical::Center,
+                shaping: text::Shaping::Basic,
+                ..Text::default()
+            });
+        });
+        let geometry = frame.into_geometry();
+        renderer.with_translation(origin, |renderer| {
+            renderer.draw_geometry(geometry);
+        });
     }
 
     /// Draws rotated tick labels on a horizontal axis.

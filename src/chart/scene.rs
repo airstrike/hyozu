@@ -1232,6 +1232,7 @@ where
                     viewport,
                 );
             });
+            guide.draw_title(&tree.children[index], renderer, design, children_layouts[index]);
         };
 
         // Top axis (secondary X)
@@ -1506,6 +1507,40 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn axis_titles_reserve_a_band_on_every_side() {
+        let size = crate::core::Size::new(640.0, 420.0);
+        let base = || {
+            crate::data(crate::line([(0.0, 1.0), (1.0, 3.0), (2.0, 2.0)]))
+                .right_axis(|axis| axis)
+                .top_axis(|axis| axis)
+        };
+        let (plain, _, _) = laid_out(&base(), size);
+        let (titled, _, _) = laid_out(
+            &base()
+                .x_axis(|axis| axis.title("Month"))
+                .y_axis(|axis| axis.title("Revenue"))
+                .right_axis(|axis| axis.title("Margin"))
+                .top_axis(|axis| axis.title("Quarter")),
+            size,
+        );
+        // The test renderer shapes text to nothing, so each band is the gap.
+        let band = 6.0;
+        assert!((plain.width - titled.width - 2.0 * band).abs() < 0.01);
+        assert!((plain.height - titled.height - 2.0 * band).abs() < 0.01);
+        assert!((titled.x - plain.x - band).abs() < 0.01);
+        assert!((titled.y - plain.y - band).abs() < 0.01);
+    }
+
+    #[test]
+    fn titled_axis_without_labels_keeps_its_title_band() {
+        let size = crate::core::Size::new(640.0, 420.0);
+        let base = || crate::data(crate::line([(0.0, 1.0), (1.0, 3.0)])).y_axis(|axis| axis.none());
+        let (plain, _, _) = laid_out(&base(), size);
+        let (titled, _, _) = laid_out(&base().y_axis(|axis| axis.title("Revenue")), size);
+        assert!((titled.x - plain.x - 6.0).abs() < 0.01);
     }
 
     #[test]

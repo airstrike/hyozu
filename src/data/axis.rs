@@ -231,6 +231,9 @@ pub struct Axis {
 
     // Display options
     title: Option<String>,
+    /// Typography for the title. Unset fields fall back to the tick-label
+    /// style, then to [`crate::Design::axis_text`].
+    title_style: text::Style,
     show_line: bool,
     /// Tick-mark visibility. `None` follows `show_line` (ticks belong to the
     /// spine, so hiding the line hides them); `Some(_)` overrides for the
@@ -280,6 +283,7 @@ impl Axis {
             order: Order::Forward,
             crossing: Crossing::Edge,
             title: None,
+            title_style: text::Style::new(),
             show_line: true,
             show_ticks: None,
             show_labels: true,
@@ -535,10 +539,32 @@ impl Axis {
         self
     }
 
-    /// Set the axis title.
+    /// Sets the axis title, drawn beyond the tick labels on the axis's
+    /// outer edge. Left and right titles turn to read bottom to top. The
+    /// guide reserves room for the title, and a title longer than its axis
+    /// is shortened with an ellipsis.
     pub fn title(mut self, title: impl Into<String>) -> Self {
         self.title = Some(title.into());
         self
+    }
+
+    /// Overrides the title's typography. Fields left unset fall back to the
+    /// tick-label style (see [`with_text`](Self::with_text)), then to
+    /// [`crate::Design::axis_text`].
+    pub fn title_style(mut self, style: text::Style) -> Self {
+        self.title_style = style;
+        self
+    }
+
+    /// Returns the axis title, if one is set.
+    pub fn get_title(&self) -> Option<&str> {
+        self.title.as_deref()
+    }
+
+    /// Returns the title's resolved style overrides: its own, then the
+    /// tick labels'.
+    pub(crate) fn resolved_title_style(&self) -> text::Style {
+        self.title_style.or(&self.labels.text.or(&self.text))
     }
 
     /// Check if tick marks are enabled.
