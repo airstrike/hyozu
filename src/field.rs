@@ -148,6 +148,7 @@ impl Mesh {
             }
         }
         d.scalar_colors();
+        d.bins = Some(levels.to_vec());
         Some(d)
     }
     fn band<'a>(&'a self, w: &'a [f64], last: bool) -> impl Iterator<Item = Vec<Sample>> + 'a {

@@ -1110,6 +1110,14 @@ pub fn variants() -> Vec<Variant> {
             annotations::log_callouts,
             "charts/annotations.rs"
         ),
+        variant!(
+            159,
+            "Log color scale",
+            Heatmap,
+            Flat,
+            heatmap_warm::log_scale,
+            "charts/heatmap_warm.rs"
+        ),
     ]
 }
 

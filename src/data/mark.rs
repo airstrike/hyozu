@@ -52,6 +52,16 @@ pub enum LegendSwatch {
         style: line::LineStyle,
         marker: Option<line::marker::Marker>,
     },
+    /// Square filled with the series' hatch, for hatched bars, areas and
+    /// pie slices.
+    Pattern(crate::pattern::Pattern),
+}
+
+impl LegendSwatch {
+    /// A square, hatched when the series has a pattern.
+    fn fill(pattern: Option<&crate::pattern::Pattern>) -> Self {
+        pattern.cloned().map_or(Self::Square, Self::Pattern)
+    }
 }
 
 /// A single entry in the chart legend.
@@ -108,9 +118,12 @@ impl Mark {
                     s.name.as_ref().map(|name| LegendEntry {
                         name: name.clone(),
                         color: s.color,
-                        swatch: LegendSwatch::Line {
-                            style: s.style.clone(),
-                            marker: s.marker.clone(),
+                        swatch: match &s.pattern {
+                            Some(pattern) => LegendSwatch::Pattern(pattern.clone()),
+                            None => LegendSwatch::Line {
+                                style: s.style.clone(),
+                                marker: s.marker.clone(),
+                            },
                         },
                         value: None,
                     })
@@ -123,7 +136,7 @@ impl Mark {
                     s.name.as_ref().map(|name| LegendEntry {
                         name: name.clone(),
                         color: s.color,
-                        swatch: LegendSwatch::Square,
+                        swatch: LegendSwatch::fill(s.pattern.as_ref()),
                         value: None,
                     })
                 })
@@ -150,7 +163,7 @@ impl Mark {
                     s.name.as_ref().map(|name| LegendEntry {
                         name: name.clone(),
                         color: s.color,
-                        swatch: LegendSwatch::Square,
+                        swatch: LegendSwatch::fill(s.pattern.as_ref()),
                         value: Some(s.value()),
                     })
                 })
@@ -191,6 +204,9 @@ impl Mark {
                     })
                 })
                 .collect(),
+            // A scale legend explains a diagram colored by value, so its
+            // per-value entries stay out of the series legend.
+            Mark::Diagram(d) if d.scale_legend.is_some() && d.color_domain.is_some() => Vec::new(),
             Mark::Diagram(d) => d
                 .entries
                 .iter()
@@ -227,13 +243,32 @@ impl Mark {
         }
     }
 
-    /// Returns this mark's color-scale legend config plus title, when it
-    /// owns one. Currently only [`Choropleth`] carries a scale legend; other
-    /// marks return `None`. The scene uses this to decide whether to
-    /// reserve edge space for an inset scale legend.
-    pub fn scale_legend_config(&self) -> Option<(&crate::data::legend::Config, Option<&str>)> {
+    /// Returns this mark's scale-legend request, when it owns one: a color
+    /// bar for [`Choropleth`], [`Heatmap`] and scalar [`Diagram`]s, color
+    /// steps for banded diagrams such as filled contours, and a size key
+    /// for an [`Xy`] with a size encoding. The scene uses this to reserve
+    /// edge space for inset scale legends and to draw them.
+    pub fn scale_legend_config(&self) -> Option<crate::data::legend::Scale<'_>> {
+        use crate::data::legend::{Key, Scale};
         match self {
-            Mark::Choropleth(c) => c.legend_config().map(|l| (l, c.legend_title_value())),
+            Mark::Choropleth(c) => c
+                .legend_config()
+                .map(|l| Scale::new(l, c.legend_title_value(), Key::Gradient)),
+            Mark::Heatmap(h) => h
+                .legend_config()
+                .map(|l| Scale::new(l, h.legend_title_value(), Key::Gradient)),
+            Mark::Diagram(d) => {
+                d.color_domain?;
+                let key = if d.bins.is_some() { Key::Steps } else { Key::Gradient };
+                d.scale_legend
+                    .as_ref()
+                    .map(|l| Scale::new(l, d.legend_title.as_deref(), key))
+            }
+            Mark::Xy(xy) => {
+                let largest = xy.largest_diameter()?;
+                xy.size_legend_config()
+                    .map(|l| Scale::new(l, xy.size_legend_title_value(), Key::Sizes { largest }))
+            }
             // Every other mark contributes nothing to the scale-legend
             // surface. Listed explicitly so adding a future variant
             // forces a deliberate decision rather than silently
@@ -244,17 +279,14 @@ impl Mark {
             | Mark::Bars(_)
             | Mark::BoxPlot(_)
             | Mark::Gauge(_)
-            | Mark::Heatmap(_)
             | Mark::Line(_)
             | Mark::Pie(_)
             | Mark::Rule(_)
             | Mark::Text(_)
             | Mark::Tick(_)
-            | Mark::Diagram(_)
             | Mark::Treemap(_)
             | Mark::Violin(_)
-            | Mark::Waterfall(_)
-            | Mark::Xy(_) => None,
+            | Mark::Waterfall(_) => None,
         }
     }
 }

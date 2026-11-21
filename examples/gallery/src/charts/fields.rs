@@ -1,5 +1,5 @@
 use hyozu::field::{self, Mesh};
-use hyozu::{Data, data, palette};
+use hyozu::{Data, data, legend, palette};
 
 fn terrain() -> Mesh {
     let axis: Vec<_> = (-8..=8).map(|i| f64::from(i) / 4.).collect();
@@ -27,15 +27,22 @@ fn ramp() -> hyozu::Palette {
     palette::gradient([0xddeee9, 0x87beb6, 0x3c887e, 0x174f58])
 }
 pub fn contour() -> Data {
-    data(terrain().contours(&[0.25, 0.5, 0.75, 1., 1.25, 1.5, 1.75]))
-        .palette(ramp())
-        .title("Elevation contours")
+    data(
+        terrain()
+            .contours(&[0.25, 0.5, 0.75, 1., 1.25, 1.5, 1.75])
+            .scale_legend(legend::Config::right())
+            .legend_title("Elevation (km)"),
+    )
+    .palette(ramp())
+    .title("Elevation contours")
 }
 pub fn filled() -> Data {
     data(
         terrain()
             .contour_bands(&[0., 0.25, 0.5, 0.75, 1., 1.25, 1.5, 1.75, 2.5])
-            .expect("increasing levels"),
+            .expect("increasing levels")
+            .scale_legend(legend::Config::right())
+            .legend_title("Elevation (km)"),
     )
     .palette(ramp())
     .title("Elevation bands")
@@ -50,9 +57,14 @@ pub fn histogram() -> Data {
         .title("Observations per cell")
 }
 pub fn hexbin() -> Data {
-    data(field::hexbin(&observations(), 0.10).expect("positive radius"))
-        .palette(ramp())
-        .title("Observation density")
+    data(
+        field::hexbin(&observations(), 0.10)
+            .expect("positive radius")
+            .scale_legend(legend::Config::below())
+            .legend_title("Observations per cell"),
+    )
+    .palette(ramp())
+    .title("Observation density")
 }
 pub fn tiles() -> Data {
     data(field::tiles(&[0., 1., 3., 4.], &[0., 2., 3.], &[2., 4., 6., 7., 5., 2.]).expect("cell values match grid"))

@@ -167,7 +167,9 @@ pub fn spherical() -> Data {
                 .domain(0.0..=42.)
                 .range(0.0..=43.),
         )
-        .spherical(true);
+        .spherical(true)
+        .size_legend(hyozu::legend::Config::right())
+        .size_legend_title("Orders (K)");
     data(points)
         .x_axis_bounds(0., 7.)
         .y_axis_bounds(0., 9.)

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::data::axis::{self, Axis, Kind, Orientation, Placement};
+use crate::data::legend;
 use crate::palette::Palette;
 use crate::scale::ColorScale;
 
@@ -25,6 +26,10 @@ pub struct Heatmap {
     /// formatter. Default is [`ColorScale::default()`] — linear, no
     /// domain override, falling back to [`sequential_stops`].
     pub(crate) color: ColorScale<f64>,
+    /// Color-bar legend placement. `None` (the default) draws no bar.
+    pub(crate) legend: Option<legend::Config>,
+    /// Title shown above the color bar.
+    pub(crate) legend_title: Option<String>,
 }
 
 impl std::fmt::Debug for Heatmap {
@@ -38,6 +43,8 @@ impl std::fmt::Debug for Heatmap {
             .field("show_labels", &self.show_labels)
             .field("label_format", &"<function>")
             .field("color", &self.color)
+            .field("legend", &self.legend)
+            .field("legend_title", &self.legend_title)
             .finish()
     }
 }
@@ -85,6 +92,24 @@ fn palette_from_stops(stops: Vec<IcedColor>) -> Palette {
     Palette::Gradient(stops.into_iter().map(Into::into).collect())
 }
 
+/// The data-derived `(min, max)` of the finite values. All-nonfinite data
+/// maps to `(0, 1)`, and a collapsed range widens to `(min, min + 1)` so
+/// the mapping always has a nonzero span.
+fn finite_range(values: &[f64]) -> (f64, f64) {
+    let (lo, hi) = values
+        .iter()
+        .copied()
+        .filter(|v| v.is_finite())
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| (lo.min(v), hi.max(v)));
+    let lo = if lo.is_finite() { lo } else { 0.0 };
+    let hi = if hi.is_finite() { hi } else { 1.0 };
+    if (hi - lo).abs() < f64::EPSILON {
+        (lo, lo + 1.0)
+    } else {
+        (lo, hi)
+    }
+}
+
 /// Creates a heatmap from row-major values with given dimensions.
 ///
 /// Defaults to a sequential (blue) color scale. Use `.divergent()` for data
@@ -99,6 +124,8 @@ pub fn heatmap(values: impl Into<Vec<f64>>, rows: usize, cols: usize) -> Heatmap
         show_labels: false,
         label_format: Arc::new(|v| format!("{v:.1}")),
         color: ColorScale::default(),
+        legend: None,
+        legend_title: None,
     }
 }
 
@@ -203,6 +230,53 @@ impl Heatmap {
     pub fn log(mut self) -> Self {
         self.color.transform = crate::scale::Transform::Log;
         self
+    }
+
+    /// Configures the color-bar legend for the value scale.
+    ///
+    /// Pass a [`legend::Config`] to place it (for example
+    /// [`legend::Config::right`] reserves a strip beside the plot), or
+    /// `None` to remove it. Heatmaps draw no color bar by default. Ticks
+    /// follow the color scale's transform, so a [`Self::log`] heatmap
+    /// labels decades at their logarithmic positions.
+    pub fn scale_legend(mut self, legend: impl Into<Option<legend::Config>>) -> Self {
+        self.legend = legend.into();
+        self
+    }
+
+    /// Alias for [`Self::scale_legend`].
+    pub fn legend(self, legend: impl Into<Option<legend::Config>>) -> Self {
+        self.scale_legend(legend)
+    }
+
+    /// Sets the title shown above the color bar.
+    pub fn legend_title(mut self, title: impl Into<String>) -> Self {
+        self.legend_title = Some(title.into());
+        self
+    }
+
+    /// Returns the color-bar legend configuration, if any.
+    pub fn legend_config(&self) -> Option<&legend::Config> {
+        self.legend.as_ref()
+    }
+
+    /// Returns the color-bar legend title, if any.
+    pub fn legend_title_value(&self) -> Option<&str> {
+        self.legend_title.as_deref()
+    }
+
+    /// The `(lo, hi)` value range the cells map onto the palette: the
+    /// explicit [`Self::color_domain`], else the finite data range. The
+    /// renderer and the color bar both read it, so the bar's ends are the
+    /// colors of the extreme cells.
+    pub(crate) fn value_range(&self) -> (f64, f64) {
+        self.color.resolved_domain(|| finite_range(&self.values))
+    }
+
+    /// The palette the cells sample: the explicit one, else the
+    /// sequential blue default.
+    pub(crate) fn resolved_palette(&self) -> Palette {
+        self.color.resolved_palette(|| palette_from_stops(sequential_stops()))
     }
 
     /// Get value at (row, col).

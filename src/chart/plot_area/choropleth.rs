@@ -2,7 +2,6 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use crate::animation;
-use crate::chart::scale_legend;
 use crate::core::layout::Limits;
 use crate::core::widget::{Tree, tree};
 use crate::widget::canvas::{Frame, Path, Stroke};
@@ -28,15 +27,15 @@ pub enum FeatureState {
 
 /// State for Choropleth -- stores the entry-derived per-frame view of the
 /// chart-level [`super::geo::Plane`]: feature display states, value range,
-/// legend plan, and the resolved-fill snapshot pipeline used by the
+/// and the resolved-fill snapshot pipeline used by the
 /// data-change animation.
 ///
 /// Geometry (projected polygons, filtered ids, feature bboxes) lives on
 /// the shared `geo::Plane` reachable from [`super::State::geo_plane`] —
 /// not duplicated here.
 ///
-/// The per-feature `feature_state` values, the scale legend plan, and the
-/// data value range are all theme-independent and computed in `layout` so
+/// The per-feature `feature_state` values and the data value range are
+/// theme-independent and computed in `layout` so
 /// `draw` doesn't re-walk `self.data.entries` or rebuild the value lookup
 /// HashMap on every repaint. See the `iced layout-vs-draw discipline` note
 /// for the broader principle.
@@ -44,11 +43,9 @@ pub struct State {
     /// Per-filtered-feature display state, in
     /// `geo::Plane::filtered_ids` order.
     pub feature_state: Vec<FeatureState>,
-    /// Min/max of the entry values. Cached so the scale legend doesn't
-    /// need to re-walk entries each draw.
+    /// The color domain from [`color_domain`]. Cached so `draw` doesn't
+    /// need to re-walk entries.
     pub value_range: (f64, f64),
-    /// Theme-free plan for the scale legend (pre-formatted min/max labels).
-    pub legend_plan: scale_legend::Plan,
     /// Per-filtered-feature resolved fill colors, written by
     /// [`Choropleth::draw`] at the start of each repaint and read by
     /// [`crate::chart::Chart::diff`] to seed `previous_fill_colors`
@@ -82,52 +79,6 @@ where
     /// `draw` snap to the laid-out fill colors.
     pub(crate) animate: bool,
     _marker: std::marker::PhantomData<(Message, Renderer)>,
-}
-
-/// Build the legend's tick list across `[lo, hi]`. Endpoints are
-/// always present at `t = 0.0` / `t = 1.0`; interior ticks sit at
-/// nice round values picked by the same Heckbert step the axis tick
-/// generator uses (target ~5 ticks across the span). Ticks too close
-/// to an endpoint are dropped so labels don't overprint.
-fn build_legend_ticks(lo: f64, hi: f64, target: usize, format: &dyn Fn(f64) -> String) -> Vec<scale_legend::Tick> {
-    // Degenerate span: collapse to a single tick at lo.
-    if !(lo.is_finite() && hi.is_finite()) || hi <= lo {
-        return vec![scale_legend::Tick {
-            t: 0.0,
-            label: format(lo),
-        }];
-    }
-    let span = hi - lo;
-    let step = crate::scale::transform::nice_step(span, target);
-    let mut ticks = Vec::with_capacity(target + 2);
-
-    // Always include the endpoints — the user reads min/max off them
-    // and the bar's gradient runs from one to the other.
-    ticks.push(scale_legend::Tick {
-        t: 0.0,
-        label: format(lo),
-    });
-
-    // Interior ticks at multiples of `step` strictly inside (lo, hi).
-    // Start from the first multiple `> lo` and stop at the last one
-    // `< hi`. The 0.0001-of-span guard rejects ticks within a fifth
-    // of a percent of an endpoint so their labels don't overprint
-    // the endpoint label.
-    let edge_guard = span * 0.05;
-    let mut v = (lo / step).ceil() * step;
-    while v < hi - edge_guard {
-        if v > lo + edge_guard {
-            let t = ((v - lo) / span) as f32;
-            ticks.push(scale_legend::Tick { t, label: format(v) });
-        }
-        v += step;
-    }
-
-    ticks.push(scale_legend::Tick {
-        t: 1.0,
-        label: format(hi),
-    });
-    ticks
 }
 
 /// Format a legend value with human-friendly abbreviations. Used as
@@ -184,7 +135,7 @@ fn normalize(value: f64, v_min: f64, v_max: f64, transform: crate::scale::Transf
 /// signal) and skips non-finite values so the gradient sampler never
 /// sees NaN or Inf. When all entries are filtered out, returns
 /// `(0.0, 1.0)` so the legend has a printable degenerate range.
-pub(super) fn compute_value_range(entries: &[crate::mark::choropleth::ChoroplethEntry]) -> (f64, f64) {
+fn compute_value_range(entries: &[crate::mark::choropleth::ChoroplethEntry]) -> (f64, f64) {
     let mut lo = f64::INFINITY;
     let mut hi = f64::NEG_INFINITY;
     for entry in entries {
@@ -222,7 +173,7 @@ pub(super) fn compute_value_range(entries: &[crate::mark::choropleth::Choropleth
 ///
 /// Shared with [`super::heatmap`] (Heatmap's layout step needs the same
 /// Palette → Vec<core::Color> bridge to feed `sample_gradient`).
-pub(super) fn palette_to_continuous_stops(
+pub(crate) fn palette_to_continuous_stops(
     palette: &crate::palette::Palette,
     seed: &crate::palette::Seed,
 ) -> Vec<crate::core::Color> {
@@ -252,12 +203,31 @@ fn default_choropleth_palette() -> crate::palette::Palette {
     crate::palette::Palette::SEQUENTIAL
 }
 
+/// The `(lo, hi)` domain a choropleth's fills map onto its palette: the
+/// explicit color domain, else the entry range niced outward. The renderer
+/// and the scale legend both read it, so the bar's ends are the colors of
+/// the extreme features.
+pub(crate) fn color_domain(data: &crate::mark::choropleth::Choropleth) -> (f64, f64) {
+    // Color legends target ~5 ticks; the niceing step in
+    // `resolved_numeric_domain` snaps the data-derived range to clean
+    // round endpoints (matches D3's `.nice()` default). Explicit
+    // `.domain(lo, hi)` on the color scale bypasses nicing — the user's
+    // number always wins.
+    const COLOR_LEGEND_TICK_TARGET: usize = 5;
+    data.color
+        .resolved_numeric_domain(|| compute_value_range(&data.entries), COLOR_LEGEND_TICK_TARGET)
+}
+
+/// The palette a choropleth samples: the explicit one, else the default.
+pub(crate) fn resolved_palette(scale: &crate::scale::ColorScale<f64>) -> crate::palette::Palette {
+    scale.resolved_palette(default_choropleth_palette)
+}
+
 fn color_stops_for_scale(
     scale: &crate::scale::ColorScale<f64>,
     seed: &crate::palette::Seed,
 ) -> Vec<crate::core::Color> {
-    let palette = scale.resolved_palette(default_choropleth_palette);
-    let mut stops = palette_to_continuous_stops(&palette, seed);
+    let mut stops = palette_to_continuous_stops(&resolved_palette(scale), seed);
     if scale.reverse {
         stops.reverse();
     }
@@ -345,7 +315,6 @@ where
             state: tree::State::new(State {
                 feature_state: Vec::new(),
                 value_range: (0.0, 1.0),
-                legend_plan: scale_legend::Plan::default(),
                 fill_colors: RefCell::new(Vec::new()),
                 previous_fill_colors: Vec::new(),
                 tick: animation::Tick::new(),
@@ -368,23 +337,14 @@ where
     ) {
         let state = tree.state.downcast_mut::<State>();
 
-        // Entry-derived state recomputed every layout. value_range,
-        // feature_state, and legend strings depend on `self.data.entries`
-        // and the color scale's transform, neither of which is covered by
-        // the geo plane's projection dirty check. The work is O(n) on
-        // entries (typically dozens, not millions), so unconditional
-        // recompute is fine. Moves the per-frame walk out of `draw`.
-        // Color legends target ~5 ticks; the niceing step in
-        // `resolved_numeric_domain` snaps the data-derived range to clean
-        // round endpoints (matches D3's `.nice()` default). Explicit
-        // `.domain(lo, hi)` on the color scale bypasses nicing — the
-        // user's number always wins.
-        const COLOR_LEGEND_TICK_TARGET: usize = 5;
+        // Entry-derived state recomputed every layout. value_range and
+        // feature_state depend on `self.data.entries` and the color
+        // scale's transform, neither of which is covered by the geo
+        // plane's projection dirty check. The work is O(n) on entries
+        // (typically dozens, not millions), so unconditional recompute is
+        // fine. Moves the per-frame walk out of `draw`.
         let entries = &self.data.entries;
-        let (lo, hi) = self
-            .data
-            .color
-            .resolved_numeric_domain(|| compute_value_range(entries), COLOR_LEGEND_TICK_TARGET);
+        let (lo, hi) = color_domain(self.data);
         state.value_range = (lo, hi);
 
         // 3-way state per filtered feature:
@@ -400,35 +360,6 @@ where
             None => &[],
         };
         state.feature_state = compute_feature_states(entries, filtered_ids, lo, hi, self.data.color.transform);
-
-        // Legend value-format chain: a guide-level override on
-        // `legend::Config.value_format` wins, then the mark-level
-        // `ColorScale.format`, then the built-in `format_legend_value`
-        // abbreviation. Data-level `Data::value_format` is not reachable
-        // from this renderer today (no thread-through from scene); a
-        // caller wanting it applied to the legend can pass the same
-        // closure via `legend::Config::value_format`.
-        let legend_format = self
-            .data
-            .legend
-            .as_ref()
-            .and_then(|l| l.value_format_ref().cloned())
-            .or_else(|| self.data.color.format.clone());
-        let format = |v: f64| -> String {
-            match &legend_format {
-                Some(f) => f(&v),
-                None => format_legend_value(v),
-            }
-        };
-        // Pick 3-7 nice tick values across [lo, hi] using the same
-        // Heckbert step the axis ticks use, so the gradient gets the
-        // same reading anchors a D3 / Vega-Lite continuous legend
-        // shows. Endpoints are always present; interior ticks sit at
-        // multiples of the step that fall inside `(lo, hi)`.
-        const LEGEND_TICK_TARGET: usize = 5;
-        state.legend_plan = scale_legend::Plan {
-            ticks: build_legend_ticks(lo, hi, LEGEND_TICK_TARGET, &format),
-        };
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -595,96 +526,6 @@ where
 
         // ── Composite ────────────────────────────────────────────
         let translation = crate::core::Vector::new(layout_bounds.x, layout_bounds.y);
-        renderer.with_translation(translation, |renderer| {
-            renderer.draw_geometry(frame.into_geometry());
-        });
-    }
-
-    /// Draws this choropleth's color-scale legend into its own frame.
-    ///
-    /// When `strip_rect` is `Some`, the legend renders inside that
-    /// scene-local rectangle — the reserved strip carved out by
-    /// [`crate::Data::scale_legend_reservations`]. When `None`, it falls
-    /// through to overlay placement inside the plot area's own bounds.
-    ///
-    /// Called from [`super::PlotArea::draw_scale_legends`] after the plot
-    /// area's own `draw` pass so the legend composites on top of the map
-    /// geometry.
-    #[allow(clippy::too_many_arguments)]
-    pub fn draw_scale_legend<Theme>(
-        &self,
-        tree: &crate::core::widget::Tree,
-        renderer: &mut Renderer,
-        theme: &Theme,
-        plot_layout_bounds: crate::core::Rectangle,
-        strip_rect: Option<crate::core::Rectangle>,
-    ) where
-        Theme: crate::design::Design + ?Sized,
-    {
-        let Some(legend_config) = &self.data.legend else {
-            return;
-        };
-
-        let state = tree.state.downcast_ref::<State>();
-
-        let background = theme.background_color();
-        let text_pair = theme.text_pair();
-        let seed = theme.seed();
-
-        let color_stops = color_stops_for_scale(&self.data.color, &seed);
-        let border_color = theme.divider_color().resolve(background, text_pair, &seed, None);
-        let label_color = {
-            let resolved = text_pair.resolve(background, None);
-            crate::core::Color { a: 0.7, ..resolved }
-        };
-
-        // Frame coordinate system depends on whether we're drawing in the
-        // strip (scene-local) or inside the plot area (plot-local).
-        let (frame_size, translation, plot_bounds, strip_local) = match strip_rect {
-            Some(strip) => (
-                strip.size(),
-                crate::core::Vector::new(strip.x, strip.y),
-                crate::core::Rectangle {
-                    x: 0.0,
-                    y: 0.0,
-                    width: plot_layout_bounds.width,
-                    height: plot_layout_bounds.height,
-                },
-                Some(crate::core::Rectangle {
-                    x: 0.0,
-                    y: 0.0,
-                    width: strip.width,
-                    height: strip.height,
-                }),
-            ),
-            None => (
-                plot_layout_bounds.size(),
-                crate::core::Vector::new(plot_layout_bounds.x, plot_layout_bounds.y),
-                crate::core::Rectangle {
-                    x: 0.0,
-                    y: 0.0,
-                    width: plot_layout_bounds.width,
-                    height: plot_layout_bounds.height,
-                },
-                None,
-            ),
-        };
-
-        let mut frame = Frame::new(renderer, frame_size);
-        scale_legend::draw(
-            &mut frame,
-            &state.legend_plan,
-            legend_config,
-            self.data.legend_title.as_deref(),
-            plot_bounds,
-            strip_local,
-            &color_stops,
-            background,
-            border_color,
-            label_color,
-            theme,
-        );
-
         renderer.with_translation(translation, |renderer| {
             renderer.draw_geometry(frame.into_geometry());
         });

@@ -17,7 +17,9 @@ pub fn data() -> hyozu::Data {
             .row_names(["W1", "W2", "W3", "W4", "W5", "W6"])
             .show_labels(true)
             .label_format(|v| if v < 0.5 { String::new() } else { format!("{v:.0}") })
-            .warm(),
+            .warm()
+            .scale_legend(hyozu::legend::Config::right())
+            .legend_title("Sessions"),
     )
     .title("Weekly Activity")
 }

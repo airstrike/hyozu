@@ -25,6 +25,12 @@ const SWATCH_SCALE: f32 = 0.85;
 /// Line swatch width as a proportion of font size — wider than a square so the
 /// stroke actually reads as a line rather than a dash.
 const LINE_SWATCH_SCALE: f32 = 2.0;
+/// Hatched swatch size as a proportion of font size — larger than a solid
+/// square so a few hatch lines fit inside it.
+const PATTERN_SWATCH_SCALE: f32 = 1.2;
+/// Most a hatch's line spacing may span of its swatch, so at least a few
+/// lines show however sparse the series' hatch is.
+const PATTERN_SWATCH_SPACING: f32 = 0.4;
 /// Default font size for legend text (2px smaller than default 12.0 label size).
 const DEFAULT_FONT_SIZE: f32 = 10.0;
 
@@ -502,6 +508,19 @@ where
                             swatch_color,
                         );
                     }
+                    LegendSwatch::Pattern(pattern) => {
+                        draw_pattern_swatch(
+                            renderer,
+                            Point::new(x, row_y + (font_size - sw) / 2.0),
+                            sw,
+                            pattern,
+                            raw_swatch,
+                            background,
+                            text_pair,
+                            &seed,
+                            &dim,
+                        );
+                    }
                     LegendSwatch::Line { style, marker } => {
                         draw_line_swatch(
                             renderer,
@@ -589,7 +608,43 @@ fn swatch_width(swatch: &LegendSwatch, font_size: f32) -> f32 {
     match swatch {
         LegendSwatch::Square => font_size * SWATCH_SCALE,
         LegendSwatch::Line { .. } => font_size * LINE_SWATCH_SCALE,
+        LegendSwatch::Pattern(_) => font_size * PATTERN_SWATCH_SCALE,
     }
+}
+
+/// Draws a square swatch filled with the series' hatch, in the colors the
+/// series paints with, outlined in the hatch color so a light background
+/// tint still reads as a swatch.
+#[allow(clippy::too_many_arguments)]
+fn draw_pattern_swatch<Renderer>(
+    renderer: &mut Renderer,
+    origin: Point,
+    size: f32,
+    pattern: &crate::pattern::Pattern,
+    series: crate::core::Color,
+    background: crate::core::Color,
+    text_pair: crate::color::Pair,
+    seed: &crate::palette::Seed,
+    dim: &dyn Fn(crate::core::Color) -> crate::core::Color,
+) where
+    Renderer: geometry::Renderer,
+{
+    let mut frame = Frame::new(renderer, Size::new(size, size));
+    let outline = Path::rounded_rectangle(Point::ORIGIN, Size::new(size, size), 2.0.into());
+    let swatch = pattern
+        .clone()
+        .spacing(pattern.spacing_value().min(size * PATTERN_SWATCH_SPACING));
+    let ink = crate::pattern::Ink::resolve(pattern, series, background, text_pair, seed);
+    let ink = crate::pattern::Ink {
+        foreground: dim(ink.foreground),
+        background: dim(ink.background),
+    };
+    swatch.fill(&mut frame, &outline, ink);
+    frame.stroke(&outline, Stroke::default().with_width(1.0).with_color(ink.foreground));
+    let geometry = frame.into_geometry();
+    renderer.with_translation(origin - Point::ORIGIN, |renderer| {
+        renderer.draw_geometry(geometry);
+    });
 }
 
 /// Draws a horizontal line swatch with an optional marker overlay.

@@ -103,6 +103,12 @@ where
     /// keyed by the mark's index inside `plot_area.series`. Populated in
     /// `layout` and consumed by `draw` to position each mark's legend.
     scale_legend_strips: std::collections::HashMap<usize, crate::core::Rectangle>,
+    /// Every mark carrying a scale legend (inset or overlaid), as (index in
+    /// `plot_area.series`, mark, first palette slot it paints with).
+    scale_legend_marks: Vec<(usize, &'a crate::Mark, usize)>,
+    /// Scale legends planned in `layout` from `scale_legend_marks`, drawn
+    /// after the marks.
+    scale_legends: Vec<crate::chart::scale_legend::Legend>,
     /// Current selection (borrowed from Data).
     selection: &'a Option<crate::target::Target>,
     /// Optional tooltip configuration (borrowed from Data).
@@ -331,6 +337,22 @@ where
             }
         });
 
+        // Marks with a scale legend, in `plot_area.series` order (primary
+        // then secondary) with the palette slot each starts at, which is
+        // how the plot area hands out color offsets.
+        let scale_legend_marks: Vec<(usize, &'a crate::Mark, usize)> = primary_marks
+            .iter()
+            .chain(secondary_marks)
+            .scan(0, |offset, mark| {
+                let start = *offset;
+                *offset += palette::color_slots(mark);
+                Some((mark, start))
+            })
+            .enumerate()
+            .filter(|(_, (mark, _))| mark.scale_legend_config().is_some())
+            .map(|(i, (mark, offset))| (i, mark, offset))
+            .collect();
+
         let y_transform = data.y_scale().transform;
         let y_nice = data.y_scale().nice;
         let secondary_y_transform = data.secondary_y_scale_ref().transform;
@@ -416,30 +438,17 @@ where
             legend_bounds: None,
             legend_edge,
             scale_legend_budgets: data.scale_legend_reservations(),
-            scale_legend_entries: {
-                // Walk primary then secondary marks in the same order as
-                // `plot_area.series`. Only inset scale legends produce
-                // entries; overlaid and absent legends are skipped so the
-                // draw loop doesn't pay a match per mark per frame.
-                let mut entries = Vec::new();
-                let primary_len = data.primary.marks().len();
-                for (i, mark) in data.primary.marks().iter().enumerate() {
-                    if let Some((cfg, title)) = mark.scale_legend_config()
-                        && let Some((edge, budget)) = crate::chart::scale_legend::reservation(cfg, title)
-                    {
-                        entries.push((i, edge, budget));
-                    }
-                }
-                for (j, mark) in data.secondary.marks().iter().enumerate() {
-                    if let Some((cfg, title)) = mark.scale_legend_config()
-                        && let Some((edge, budget)) = crate::chart::scale_legend::reservation(cfg, title)
-                    {
-                        entries.push((primary_len + j, edge, budget));
-                    }
-                }
-                entries
-            },
+            scale_legend_entries: scale_legend_marks
+                .iter()
+                .filter_map(|&(i, mark, _)| {
+                    let scale = mark.scale_legend_config()?;
+                    let (edge, budget) = crate::chart::scale_legend::reservation(&scale)?;
+                    Some((i, edge, budget))
+                })
+                .collect(),
             scale_legend_strips: std::collections::HashMap::new(),
+            scale_legend_marks,
+            scale_legends: Vec::new(),
             selection: &data.selection,
             tooltip: data.tooltip.as_ref(),
             primary_mark_value_format: data
@@ -1052,6 +1061,19 @@ where
             self.scale_legend_strips.insert(series_idx, rect);
         }
 
+        // Scale-legend plans: tick labels, color steps and circle sizes are
+        // theme-free, so they're computed here, fitted to the strips and
+        // plot just laid out, and `draw` only resolves colors.
+        self.scale_legends = self
+            .scale_legend_marks
+            .iter()
+            .filter_map(|&(i, mark, offset)| {
+                let mut legend = crate::chart::scale_legend::Legend::of(i, mark, offset)?;
+                legend.fit(self.plot_area_size, self.scale_legend_strips.get(&i).map(|r| r.size()));
+                Some(legend)
+            })
+            .collect();
+
         tree.size = available;
     }
 
@@ -1315,28 +1337,21 @@ where
         // Scale legends. Overlaid panels float inside the plot area;
         // inset strips live outside the plot area in rectangles the scene
         // reserved during layout. Drawing here (after the plot area, before
-        // axis borders) puts legends on top of the map but below axes
+        // axis borders) puts legends on top of the marks but below axes
         // framing.
         //
         // Strip rects were computed in scene-local coordinates; promote them
         // to absolute coordinates here using the scene's own absolute
-        // position so the choropleth's `with_translation` lands the bar in
-        // the right place when the chart widget isn't at the screen origin.
-        let scene_origin = layout.bounds();
-        let absolute_strips: std::collections::HashMap<usize, crate::core::Rectangle> = self
-            .scale_legend_strips
-            .iter()
-            .map(|(&idx, rect)| {
-                (idx, crate::core::Rectangle {
-                    x: rect.x + scene_origin.x,
-                    y: rect.y + scene_origin.y,
-                    width: rect.width,
-                    height: rect.height,
-                })
-            })
-            .collect();
-        self.plot_area
-            .draw_scale_legends(&tree.children[6], renderer, design, plot_layout, &absolute_strips);
+        // position so the legend lands in the right place when the chart
+        // widget isn't at the screen origin.
+        let scene_origin = layout.bounds().position() - crate::core::Point::ORIGIN;
+        for legend in &self.scale_legends {
+            let strip = self
+                .scale_legend_strips
+                .get(&legend.series())
+                .map(|rect| *rect + scene_origin);
+            legend.draw(renderer, design, &resolved, plot_layout.bounds(), strip);
+        }
 
         // Bottom axis (labels and ticks)
         if let Some(guide) = &self.bottom_axis {
@@ -1384,5 +1399,130 @@ mod tests {
 
         assert_eq!(names, vec!["Prior year", "Current year", "Operating Profit Margin %"],);
         assert_eq!(formats.len(), entries.len());
+    }
+
+    /// Lays a scene out at `size` and returns the plot rectangle, the
+    /// reserved scale-legend strips and the series-legend bounds.
+    fn laid_out(
+        data: &crate::Data,
+        size: crate::core::Size,
+    ) -> (
+        crate::core::Rectangle,
+        Vec<crate::core::Rectangle>,
+        Option<crate::core::Rectangle>,
+    ) {
+        let mut scene = super::Scene::<(), ()>::new(data);
+        let mut tree = scene.state();
+        scene.layout(
+            &mut tree,
+            &(),
+            &crate::core::layout::Limits::new(crate::core::Size::ZERO, size),
+            None,
+        );
+        let plot = crate::core::Rectangle::new(scene.plot_area_offset, scene.plot_area_size);
+        let mut strips: Vec<_> = scene.scale_legend_strips.values().copied().collect();
+        strips.sort_by(|a, b| a.x.total_cmp(&b.x).then(a.y.total_cmp(&b.y)));
+        assert_eq!(
+            scene.scale_legends.len(),
+            scene.scale_legend_marks.len(),
+            "every legend plans"
+        );
+        (plot, strips, scene.legend_bounds)
+    }
+
+    fn overlaps(a: crate::core::Rectangle, b: crate::core::Rectangle) -> bool {
+        a.intersection(&b).is_some_and(|r| r.width * r.height > 1e-3)
+    }
+
+    #[test]
+    fn inset_scale_legend_strips_never_overlap_the_plot() {
+        use crate::legend::Config;
+        use crate::{Mark, encoding};
+
+        let size = crate::core::Size::new(640.0, 420.0);
+        let scene = crate::core::Rectangle::with_size(size);
+        let heatmap = || {
+            crate::heatmap(vec![1.0, 5.0, 9.0, 3.0, 7.0, 2.0], 2, 3)
+                .col_names(["a", "b", "c"])
+                .row_names(["x", "y"])
+        };
+        let bands = || {
+            let axis: Vec<f64> = (0..=4).map(f64::from).collect();
+            let heights: Vec<f64> = axis.iter().flat_map(|&y| axis.iter().map(move |&x| x + y)).collect();
+            crate::field::Mesh::grid(&axis, &axis, &heights)
+                .expect("grid")
+                .contour_bands(&[0.0, 2.0, 4.0, 6.0, 8.0])
+                .expect("levels")
+        };
+        let bubbles = || {
+            crate::xy([(1.0, 2.0), (2.0, 4.0), (3.0, 3.0)])
+                .with_name("Accounts")
+                .size_by(encoding::size_by(|_, d| d.y).range(4.0..=36.0))
+        };
+        let cases = [
+            (
+                "heatmap right",
+                crate::data(heatmap().scale_legend(Config::right()).legend_title("Count")),
+                1,
+            ),
+            ("heatmap above", crate::data(heatmap().scale_legend(Config::above())), 1),
+            ("bands left", crate::data(bands().scale_legend(Config::left())), 1),
+            (
+                "bubbles below with a series legend below",
+                crate::data(bubbles().size_legend(Config::below()).size_legend_title("Orders")).legend(Config::below()),
+                1,
+            ),
+            (
+                "two legends stacked on the right",
+                crate::data(vec![
+                    Mark::Diagram(bands().scale_legend(Config::right())),
+                    Mark::Xy(bubbles().size_legend(Config::right())),
+                ])
+                .legend(Config::right()),
+                2,
+            ),
+        ];
+        for (name, data, expected) in cases {
+            let (plot, strips, legend) = laid_out(&data, size);
+            assert_eq!(strips.len(), expected, "{name}: one strip per inset legend");
+            assert!(plot.width > 0.0 && plot.height > 0.0, "{name}: plot keeps room");
+            for (i, strip) in strips.iter().enumerate() {
+                assert!(
+                    !overlaps(*strip, plot),
+                    "{name}: strip {strip:?} overlaps plot {plot:?}"
+                );
+                assert!(
+                    strip.x >= -0.01
+                        && strip.y >= -0.01
+                        && strip.x + strip.width <= scene.width + 0.01
+                        && strip.y + strip.height <= scene.height + 0.01,
+                    "{name}: strip {strip:?} leaves the scene"
+                );
+                for other in &strips[i + 1..] {
+                    assert!(!overlaps(*strip, *other), "{name}: stacked strips overlap");
+                }
+                if let Some(legend) = legend {
+                    assert!(!overlaps(*strip, legend), "{name}: strip overlaps the series legend");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn inset_scale_legend_shrinks_the_plot_by_its_budget() {
+        use crate::legend::Config;
+        let size = crate::core::Size::new(640.0, 420.0);
+        let base = crate::heatmap(vec![1.0, 5.0, 9.0, 3.0], 2, 2);
+        let (plain, _, _) = laid_out(&crate::data(base.clone()), size);
+        let (inset, strips, _) = laid_out(&crate::data(base.clone().scale_legend(Config::right())), size);
+        let (overlay, overlay_strips, _) = laid_out(
+            &crate::data(base.scale_legend(Config::overlay(crate::legend::Anchor::TopRight))),
+            size,
+        );
+        let strip = strips[0];
+        assert!((plain.width - inset.width - strip.width).abs() < 0.01);
+        assert_eq!(plain.height, inset.height);
+        assert!(overlay_strips.is_empty(), "overlays reserve nothing");
+        assert_eq!(plain, overlay);
     }
 }

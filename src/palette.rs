@@ -285,32 +285,34 @@ impl Palette {
 
 /// Count how many color slots a set of marks needs.
 pub fn count_color_slots(marks: &[Mark]) -> usize {
-    marks
-        .iter()
-        .map(|mark| match mark {
-            Mark::Area(area) => area.series.len(),
-            Mark::Bars(bars) => bars.series.len(),
-            Mark::BoxPlot(bp) => bp.entries.len(),
-            Mark::Line(_) => 1,
-            Mark::Xy(_) => 1,
-            Mark::Pie(pie) => pie.slices.len(),
-            Mark::Gauge(_) => 1,
-            Mark::Diagram(d) => d.entries.len(),
-            Mark::Treemap(tm) => tm.items.len(),
-            Mark::Waterfall(_) => 3,
-            Mark::Heatmap(_) => 0, // heatmap uses its own ColorScale
-            Mark::Choropleth(_) => 0,
-            Mark::Violin(v) => v.entries.len(),
-            Mark::Tick(_) => 0,
-            Mark::Rule(_) => 0,
-            Mark::Band(_) => 0,
-            // Text uses its own resolved color (or the design's text
-            // color), so it never claims a palette slot.
-            Mark::Text(_) => 0,
-            Mark::Annotation(_) => 0,
-        })
-        .sum::<usize>()
-        .max(1)
+    marks.iter().map(color_slots).sum::<usize>().max(1)
+}
+
+/// The palette slots one mark claims, in the order the plot area assigns
+/// them. Marks with their own color scale claim none.
+pub(crate) fn color_slots(mark: &Mark) -> usize {
+    match mark {
+        Mark::Area(area) => area.series.len(),
+        Mark::Bars(bars) => bars.series.len(),
+        Mark::BoxPlot(bp) => bp.entries.len(),
+        Mark::Line(_) => 1,
+        Mark::Xy(_) => 1,
+        Mark::Pie(pie) => pie.slices.len(),
+        Mark::Gauge(_) => 1,
+        Mark::Diagram(d) => d.entries.len(),
+        Mark::Treemap(tm) => tm.items.len(),
+        Mark::Waterfall(_) => 3,
+        Mark::Heatmap(_) => 0, // heatmap uses its own ColorScale
+        Mark::Choropleth(_) => 0,
+        Mark::Violin(v) => v.entries.len(),
+        Mark::Tick(_) => 0,
+        Mark::Rule(_) => 0,
+        Mark::Band(_) => 0,
+        // Text uses its own resolved color (or the design's text
+        // color), so it never claims a palette slot.
+        Mark::Text(_) => 0,
+        Mark::Annotation(_) => 0,
+    }
 }
 
 // === OKLch color space utilities ===
