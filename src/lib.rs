@@ -27,6 +27,7 @@ pub mod specialty;
 #[cfg(feature = "spectral")]
 pub mod spectral;
 pub mod stats;
+pub mod sync;
 pub mod target;
 #[cfg(feature = "tatami")]
 pub mod tatami;

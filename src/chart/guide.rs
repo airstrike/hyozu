@@ -121,8 +121,10 @@ fn target_tick_count(axis_length: Option<f32>, kind: Kind, orientation: Orientat
 /// the total span exceeds that — wider domains stay readable instead of
 /// crowding labels.
 ///
-/// The result always contains at least one entry — when the domain
-/// spans less than a full decade the function falls back to
+/// The result always contains at least one entry. When fewer than three
+/// powers of 10 fall inside the domain, as in a zoomed window, ticks also
+/// step through 3 times each power (two powers inside) or 2 and 5 times
+/// (fewer); a domain too narrow for two of those falls back to
 /// `[min, max]` so the axis still renders labelled endpoints.
 fn log_ticks(min: f64, max: f64) -> Vec<f64> {
     if !(min.is_finite() && max.is_finite()) || min >= max {
@@ -132,8 +134,16 @@ fn log_ticks(min: f64, max: f64) -> Vec<f64> {
     let lo = if min > 0.0 { min } else { hi / 1e4 };
     let lo_exp = lo.log10().ceil() as i32;
     let hi_exp = hi.log10().floor() as i32;
-    if lo_exp > hi_exp {
-        return vec![min, max];
+    if hi_exp - lo_exp < 2 {
+        // Fewer than three powers of 10 fall inside, as in a zoomed window:
+        // step through 1-3 times each power when two do, 1-2-5 times when
+        // fewer do, falling back to the endpoints.
+        let multiples: &[f64] = if lo_exp < hi_exp { &[1.0, 3.0] } else { &[1.0, 2.0, 5.0] };
+        let steps: Vec<f64> = (lo.log10().floor() as i32..=hi.log10().ceil() as i32)
+            .flat_map(|k| multiples.iter().map(move |m| m * 10_f64.powi(k)))
+            .filter(|v| *v >= lo * (1.0 - 1e-9) && *v <= hi * (1.0 + 1e-9))
+            .collect();
+        return if steps.len() >= 2 { steps } else { vec![min, max] };
     }
     const MAX_TICKS: usize = 8;
     let count = (hi_exp - lo_exp + 1) as usize;
@@ -520,6 +530,9 @@ where
     pub tick_positions: Vec<f64>,
     /// Cached bounds from tick marks - for coordinate system
     pub bounds: Bounds,
+    /// The axis's full domain before any zoom window. Equal to
+    /// [`State::bounds`] when the chart isn't zoomed.
+    pub home: Bounds,
     /// Edge label insets to prevent overhang at axis boundaries.
     /// For horizontal axes: (left, right). For vertical axes: (top, bottom).
     pub label_insets: (f32, f32),
@@ -554,6 +567,9 @@ where
     /// raw data range so the user's reading lines up byte-for-byte with
     /// the numbers they passed in.
     nice: bool,
+    /// Visible window over the full domain while the chart is zoomed.
+    /// Categorical axes ignore it.
+    window: Option<crate::chart::zoom::Window>,
     _renderer: std::marker::PhantomData<(Message, Renderer)>,
 }
 
@@ -571,6 +587,7 @@ where
             marks,
             mapping: crate::scale::Mapping::new(crate::scale::Transform::default(), axis.order()),
             nice: true,
+            window: None,
             _renderer: std::marker::PhantomData,
         }
     }
@@ -595,6 +612,17 @@ where
     pub fn with_nice(mut self, nice: bool) -> Self {
         self.nice = nice;
         self
+    }
+
+    /// Shows `window` of the full domain, or the whole domain when the
+    /// window is full or the axis is categorical.
+    pub(crate) fn zoom(&mut self, window: crate::chart::zoom::Window) {
+        self.window = (!window.is_full() && !self.axis.is_categorical()).then_some(window);
+    }
+
+    /// Whether this axis can zoom: continuous axes can, categorical can't.
+    pub(crate) fn zoomable(&self) -> bool {
+        !self.axis.is_categorical()
     }
 
     /// Returns a reference to the underlying axis.
@@ -1189,6 +1217,7 @@ where
                 label_info: Vec::new(),
                 tick_positions: Vec::new(),
                 bounds: Bounds::exact(0.0, 1.0),
+                home: Bounds::exact(0.0, 1.0),
                 label_insets: (0.0, 0.0),
                 tick_space: 0.0,
                 label_offset: 0.0,
@@ -1229,7 +1258,14 @@ where
         // Compute bounds first, then generate ticks within those bounds.
         // The target tick count scales with the axis's pixel extent along
         // its major direction (height for left/right, width for top/bottom).
-        let bounds = self.compute_axis_bounds();
+        let home = self.compute_axis_bounds();
+        let bounds = match self.window {
+            Some(window) => {
+                let [lo, hi] = window.bounds([home.min(), home.max()], self.mapping);
+                Bounds::exact(lo, hi)
+            }
+            None => home,
+        };
         let axis_length = match self.axis.orientation() {
             Orientation::Left | Orientation::Right => limits.bounds().height,
             Orientation::Bottom | Orientation::Top => limits.bounds().width,
@@ -1241,6 +1277,7 @@ where
         state.label_info = label_info.clone();
         state.tick_positions = tick_positions;
         state.bounds = bounds;
+        state.home = home;
 
         let labels = &state.label_info;
         let (min_value, max_value) = (state.bounds.min(), state.bounds.max());
@@ -1949,6 +1986,18 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn zoomed_log_windows_keep_readable_ticks() {
+        // Four decades keep their powers of ten.
+        assert_eq!(log_ticks(1.0, 10_000.0), [1.0, 10.0, 100.0, 1000.0, 10_000.0]);
+        // Two powers inside add the 3x steps.
+        assert_eq!(log_ticks(18.0, 5688.0), [30.0, 100.0, 300.0, 1000.0, 3000.0]);
+        // Within one decade, 1-2-5 steps.
+        assert_eq!(log_ticks(15.0, 90.0), [20.0, 50.0]);
+        // Too narrow for two steps: the endpoints.
+        assert_eq!(log_ticks(21.0, 29.0), [21.0, 29.0]);
+    }
 
     type TestGuide<'a> = Guide<'a, (), crate::widget::Renderer>;
 
