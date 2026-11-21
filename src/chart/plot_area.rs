@@ -88,7 +88,7 @@ impl Domain {
 }
 
 /// The x and y [`crate::scale::Mapping`]s of one axis pair.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Mappings {
     /// Mapping of the horizontal axis.
     pub x: crate::scale::Mapping,
@@ -1325,6 +1325,25 @@ where
         });
     }
 
+    /// The gaps broken axes leave across the plot. Empty before the first
+    /// layout.
+    pub(crate) fn gaps(&self, tree: &Tree) -> Gaps {
+        let state = tree.state.downcast_ref::<State>();
+        let Some(domain) = state.domain.as_ref() else {
+            return Gaps::default();
+        };
+        let rect = state.content_rect;
+        let x = domain
+            .x_mapping
+            .gap_units(domain.x.min, domain.x.max)
+            .map(|(a, b)| (rect.x + a as f32 * rect.width, rect.x + b as f32 * rect.width));
+        let y = domain.y_mapping.gap_units(domain.y.min, domain.y.max).map(|(a, b)| {
+            let bottom = rect.y + rect.height;
+            (bottom - b as f32 * rect.height, bottom - a as f32 * rect.height)
+        });
+        Gaps { x, y }
+    }
+
     /// Draws the plot area's axis border lines (all four sides).
     ///
     /// The borders are drawn *inside* the plot area frame using the same
@@ -1424,39 +1443,53 @@ where
         let spine_top = snap_v(top + shift(top_axis).y);
         let spine_bottom = snap_v(bottom + shift(bottom_axis).y);
 
+        // A broken axis splits its spine, and the parallel one, at the gap
+        // and marks each edge with a slash.
+        let Gaps { x: x_gap, y: y_gap } = self.gaps(tree);
+        let stroke = |frame: &mut Frame<Renderer>, axis, from, to, gap| {
+            let path = Path::new(|builder| spine(builder, from, to, gap));
+            frame.stroke(&path, Stroke::default().with_width(1.0).with_color(resolve(axis)));
+        };
+        use crate::core::Point;
+
         if draws_left {
-            let path = Path::line(
-                crate::core::Point::new(spine_left, y_top),
-                crate::core::Point::new(spine_left, y_bottom),
+            stroke(
+                &mut frame,
+                left_axis,
+                Point::new(spine_left, y_top),
+                Point::new(spine_left, y_bottom),
+                y_gap,
             );
-            frame.stroke(&path, Stroke::default().with_width(1.0).with_color(resolve(left_axis)));
         }
 
         if draws_bottom {
-            let path = Path::line(
-                crate::core::Point::new(x_left, spine_bottom),
-                crate::core::Point::new(x_right, spine_bottom),
-            );
-            frame.stroke(
-                &path,
-                Stroke::default().with_width(1.0).with_color(resolve(bottom_axis)),
+            stroke(
+                &mut frame,
+                bottom_axis,
+                Point::new(x_left, spine_bottom),
+                Point::new(x_right, spine_bottom),
+                x_gap,
             );
         }
 
         if draws_top {
-            let path = Path::line(
-                crate::core::Point::new(x_left, spine_top),
-                crate::core::Point::new(x_right, spine_top),
+            stroke(
+                &mut frame,
+                top_axis,
+                Point::new(x_left, spine_top),
+                Point::new(x_right, spine_top),
+                x_gap,
             );
-            frame.stroke(&path, Stroke::default().with_width(1.0).with_color(resolve(top_axis)));
         }
 
         if draws_right {
-            let path = Path::line(
-                crate::core::Point::new(spine_right, y_top),
-                crate::core::Point::new(spine_right, y_bottom),
+            stroke(
+                &mut frame,
+                right_axis,
+                Point::new(spine_right, y_top),
+                Point::new(spine_right, y_bottom),
+                y_gap,
             );
-            frame.stroke(&path, Stroke::default().with_width(1.0).with_color(resolve(right_axis)));
         }
 
         let geometry = frame.into_geometry();
@@ -1798,10 +1831,105 @@ where
     }
 }
 
+/// The gaps broken axes leave across the plot, in plot-local pixels.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct Gaps {
+    /// The x range a bottom-axis break covers.
+    pub(crate) x: Option<(f32, f32)>,
+    /// The y range a left-axis break covers.
+    pub(crate) y: Option<(f32, f32)>,
+}
+
+/// Half the length of a break slash along each direction, in pixels.
+const SLASH: f32 = 4.0;
+
+/// Traces a spine from `from` to `to`, leaving out `gap` (a range along
+/// the spine) and marking its edges with slashes.
+fn spine(
+    builder: &mut crate::widget::canvas::path::Builder,
+    from: crate::core::Point,
+    to: crate::core::Point,
+    gap: Option<(f32, f32)>,
+) {
+    use crate::core::Point;
+
+    let horizontal = (to.y - from.y).abs() < (to.x - from.x).abs();
+    let along = |at: f32| {
+        if horizontal {
+            Point::new(at, from.y)
+        } else {
+            Point::new(from.x, at)
+        }
+    };
+    let (start, end) = if horizontal { (from.x, to.x) } else { (from.y, to.y) };
+    let Some((gap_start, gap_end)) = gap.filter(|(a, b)| a < b && *a > start.min(end) && *b < start.max(end)) else {
+        builder.move_to(from);
+        builder.line_to(to);
+        return;
+    };
+    let (low, high) = (start.min(end), start.max(end));
+    builder.move_to(along(low));
+    builder.line_to(along(gap_start));
+    builder.move_to(along(gap_end));
+    builder.line_to(along(high));
+    for edge in [gap_start, gap_end] {
+        let center = along(edge);
+        let (dx, dy) = if horizontal {
+            (SLASH * 0.6, SLASH * 1.2)
+        } else {
+            (SLASH * 1.2, SLASH * 0.6)
+        };
+        builder.move_to(Point::new(center.x - dx, center.y + dy));
+        builder.line_to(Point::new(center.x + dx, center.y - dy));
+    }
+}
+
+/// Cuts `base` into the pieces left on either side of the `x` and `y`
+/// gaps, so marks drawn clipped to each piece break at the gaps.
+pub(crate) fn unbroken(base: Rectangle, x: Option<(f32, f32)>, y: Option<(f32, f32)>) -> Vec<Rectangle> {
+    let columns: Vec<(f32, f32)> = match x {
+        Some((a, b)) => vec![(base.x, a), (b, base.x + base.width)],
+        None => vec![(base.x, base.x + base.width)],
+    };
+    let rows: Vec<(f32, f32)> = match y {
+        Some((a, b)) => vec![(base.y, a), (b, base.y + base.height)],
+        None => vec![(base.y, base.y + base.height)],
+    };
+    columns
+        .iter()
+        .flat_map(|&(left, right)| {
+            rows.iter().filter_map(move |&(top, bottom)| {
+                let (left, right) = (left.max(base.x), right.min(base.x + base.width));
+                let (top, bottom) = (top.max(base.y), bottom.min(base.y + base.height));
+                (right > left && bottom > top).then(|| {
+                    Rectangle::new(
+                        crate::core::Point::new(left, top),
+                        crate::core::Size::new(right - left, bottom - top),
+                    )
+                })
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::core::Size;
+
+    #[test]
+    fn unbroken_pieces_skip_the_gaps() {
+        let base = Rectangle::new(crate::core::Point::new(0.0, 0.0), Size::new(100.0, 50.0));
+        assert_eq!(unbroken(base, None, None), vec![base]);
+        let columns = unbroken(base, Some((40.0, 44.0)), None);
+        assert_eq!(columns.len(), 2);
+        assert_eq!((columns[0].x, columns[0].width), (0.0, 40.0));
+        assert_eq!((columns[1].x, columns[1].width), (44.0, 56.0));
+        let cells = unbroken(base, Some((40.0, 44.0)), Some((20.0, 22.0)));
+        assert_eq!(cells.len(), 4);
+        let area: f32 = cells.iter().map(|r| r.width * r.height).sum();
+        assert!((area - (100.0 - 4.0) * (50.0 - 2.0)).abs() < 1e-3);
+    }
 
     fn insets(left: f32, right: f32, top: f32, bottom: f32) -> Insets {
         Insets {

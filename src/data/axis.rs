@@ -2,9 +2,11 @@ use crate::color::Color;
 use crate::core::{Font, Pixels, font};
 use crate::text;
 
+pub mod breaks;
 pub mod label;
 pub mod tick;
 
+pub use breaks::Break;
 pub use label::{Angle, Labels, Placement, TextAlign};
 pub use tick::{Alignment, Ticks};
 
@@ -228,6 +230,8 @@ pub struct Axis {
     order: Order,
     /// Where the axis line crosses the perpendicular axis.
     crossing: Crossing,
+    /// A range of values the axis leaves out.
+    gap: Option<Break>,
 
     // Display options
     title: Option<String>,
@@ -285,6 +289,7 @@ impl Axis {
             upper_bound: None,
             order: Order::Forward,
             crossing: Crossing::Edge,
+            gap: None,
             title: None,
             title_style: text::Style::new(),
             show_line: true,
@@ -411,6 +416,22 @@ impl Axis {
     /// Returns where the axis crosses the perpendicular axis.
     pub fn crossing(&self) -> Crossing {
         self.crossing
+    }
+
+    /// Breaks the axis to leave out the values between `from` and `to`:
+    /// both sides keep one scale and the range closes up into a narrow
+    /// gap, marked with slashes on the spine. Marks are cut at the gap.
+    /// An empty or non-finite range leaves the axis whole. Numeric axes on
+    /// the bottom and left honor it; see [`Break`].
+    pub fn broken(mut self, from: f64, to: f64) -> Self {
+        self.gap = Break::new(from, to);
+        self
+    }
+
+    /// Returns the range the axis leaves out, if it's broken. Categorical
+    /// axes have nothing to leave out.
+    pub fn get_break(&self) -> Option<Break> {
+        self.gap.filter(|_| self.kind != Kind::Categorical)
     }
 
     /// Set label format function (deprecated - use labels() instead).

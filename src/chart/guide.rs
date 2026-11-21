@@ -645,7 +645,11 @@ where
         Self {
             axis,
             marks,
-            mapping: crate::scale::Mapping::new(crate::scale::Transform::default(), axis.order()),
+            mapping: crate::scale::Mapping::new(crate::scale::Transform::default(), axis.order()).with_gap(
+                matches!(axis.orientation(), Orientation::Bottom | Orientation::Left)
+                    .then(|| axis.get_break())
+                    .flatten(),
+            ),
             nice: true,
             window: None,
             origin: None,
@@ -846,7 +850,11 @@ where
             // Continuous: generate nice ticks WITHIN the bounds
             // Use time-aligned ticks for time-based axes
             let alignment = self.axis.ticks.alignment;
-            let target = target_tick_count(axis_length, self.axis.kind(), self.axis.orientation());
+            // A break closes part of the domain up, so the kept values
+            // spread over the whole axis: ask for ticks as if it were longer.
+            let kept = 1.0 - self.mapping.gap_share(axis_min, axis_max);
+            let target = (target_tick_count(axis_length, self.axis.kind(), self.axis.orientation()) as f64 / kept)
+                .round() as usize;
             if self.axis.kind() == Kind::Time {
                 (
                     {
@@ -871,6 +879,8 @@ where
                 (ticks, Some(step))
             }
         };
+
+        let data_positions = self.outside_gap(data_positions, axis_min, axis_max, axis_length);
 
         // Derive format precision from the tick step (D3-style)
         let step_precision = nice_step.map(precision_for_step);
@@ -970,6 +980,27 @@ where
         }
 
         (label_info, tick_positions)
+    }
+
+    /// Drops the positions a break leaves out, and those close enough to
+    /// its gap that their labels would crowd the ones across it.
+    fn outside_gap(&self, positions: Vec<f64>, min: f64, max: f64, axis_length: Option<f32>) -> Vec<f64> {
+        let Some((start, end)) = self.mapping.gap_units(min, max) else {
+            return positions;
+        };
+        let margin = match axis_length {
+            Some(length) if length > 0.0 => {
+                f64::from(min_label_spacing(self.axis.kind(), self.axis.orientation()) / length) / 2.0
+            }
+            _ => 0.05,
+        };
+        positions
+            .into_iter()
+            .filter(|&position| {
+                let unit = self.mapping.map_to_unit(position, min, max);
+                unit <= start - margin || unit >= end + margin
+            })
+            .collect()
     }
 
     /// Find the extent of the values this axis dimension must show.
@@ -2335,6 +2366,32 @@ mod tests {
         let guide = Guide::<(), ()>::new(&axis, &marks).crossed_by(Some(&edge));
         let (labels, _) = guide.ticks_and_labels(Bounds::exact(-6.0, 6.0), Some(400.0));
         assert!(labels.iter().any(|(at, _)| *at == 0.0));
+    }
+
+    #[test]
+    fn broken_axis_skips_the_gap_and_keeps_one_step() {
+        let marks = scatter(&[(0.0, 5.0), (1.0, 40.0), (2.0, 960.0), (3.0, 1000.0)]);
+        let axis = Axis::new(Orientation::Left).broken(60.0, 940.0);
+        let guide = Guide::<(), ()>::new(&axis, &marks);
+        let (labels, ticks) = guide.ticks_and_labels(Bounds::exact(0.0, 1000.0), Some(400.0));
+        assert!(!ticks.is_empty());
+        assert!(ticks.iter().all(|t| *t < 60.0 || *t > 940.0), "{ticks:?}");
+        assert!(ticks.iter().any(|t| *t < 60.0) && ticks.iter().any(|t| *t > 940.0));
+        let below: Vec<f64> = ticks.iter().copied().filter(|t| *t < 60.0).collect();
+        let above: Vec<f64> = ticks.iter().copied().filter(|t| *t > 940.0).collect();
+        if let ([a, b, ..], [c, d, ..]) = (below.as_slice(), above.as_slice()) {
+            assert_eq!(b - a, d - c, "one step on both sides");
+        }
+        assert_eq!(labels.len(), ticks.len());
+    }
+
+    #[test]
+    fn breaks_only_bend_bottom_and_left_guides() {
+        let marks = scatter(&[(0.0, 0.0), (1.0, 1000.0)]);
+        let left = Axis::new(Orientation::Left).broken(100.0, 900.0);
+        let right = Axis::new(Orientation::Right).broken(100.0, 900.0);
+        assert!(Guide::<(), ()>::new(&left, &marks).mapping().gap.is_some());
+        assert!(Guide::<(), ()>::new(&right, &marks).mapping().gap.is_none());
     }
 
     #[test]

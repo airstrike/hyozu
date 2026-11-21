@@ -1127,6 +1127,7 @@ pub fn variants() -> Vec<Variant> {
             bar_horizontal::log_values,
             "charts/bar_horizontal.rs"
         ),
+        variant!(162, "Broken axis", Bar, Flat, axes::broken_axis, "charts/axes.rs"),
     ]
 }
 

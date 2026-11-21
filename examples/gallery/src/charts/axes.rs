@@ -102,3 +102,14 @@ pub fn axis_titles() -> hyozu::Data {
         .top_axis(|axis| axis.with_bounds(0.0, 60.0).title("Elapsed time (min)").show_grid(false))
         .title("Axis titles")
 }
+
+/// One channel dwarfs the rest: a break in the value axis leaves out the
+/// empty stretch so the small bars stay readable.
+pub fn broken_axis() -> hyozu::Data {
+    hyozu::data(bars([
+        bar([4_180.0, 410.0, 365.0, 290.0, 240.0, 175.0]).with_name("Visits")
+    ]))
+    .x_axis_labels(["Search", "Email", "Social", "Referral", "Direct", "Ads"])
+    .y_axis(|axis| axis.broken(450.0, 3_950.0).with_bounds(0.0, 4_400.0))
+    .title("Broken axis")
+}

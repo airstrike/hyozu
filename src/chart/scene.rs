@@ -374,8 +374,11 @@ where
         let mapping = |transform, axis: Option<&crate::Axis>| {
             crate::scale::Mapping::new(transform, axis.map(crate::Axis::order).unwrap_or_default())
         };
-        let primary_x = mapping(x_transform, data.primary.x_axis.as_ref());
-        let primary_y = mapping(y_transform, data.primary.y_axis.as_ref());
+        // Breaks bend the bottom and left axes, the primary plane. A
+        // secondary plane without a top axis shares the bottom's mapping.
+        let gap = |axis: Option<&crate::Axis>| axis.and_then(crate::Axis::get_break);
+        let primary_x = mapping(x_transform, data.primary.x_axis.as_ref()).with_gap(gap(data.primary.x_axis.as_ref()));
+        let primary_y = mapping(y_transform, data.primary.y_axis.as_ref()).with_gap(gap(data.primary.y_axis.as_ref()));
         let mappings = crate::chart::plot_area::Mappings {
             x: primary_x,
             y: primary_y,
@@ -1310,8 +1313,8 @@ where
             .unwrap_or(false);
         let left_axis_line = self.left_axis.as_ref().map(|g| g.axis().shows_line()).unwrap_or(false);
 
-        let mut labels = crate::chart::labels::Layer::new(self.label_space(tree, layout));
         let draw_marks = |renderer: &mut Renderer| {
+            let mut labels = crate::chart::labels::Layer::new(self.label_space(tree, layout));
             self.plot_area.draw_with_labels(
                 &tree.children[6],
                 renderer,
@@ -1334,14 +1337,27 @@ where
             self.plot_area
                 .draw_annotations(&tree.children[6], renderer, design, plot_layout, viewport);
         };
-        if self.zoomed {
-            let content = tree.children[6]
-                .state
-                .downcast_ref::<crate::chart::plot_area::State>()
-                .content_rect;
-            let clip = content + (plot_layout.bounds().position() - crate::core::Point::ORIGIN);
-            if let Some(clip) = clip.intersection(viewport) {
-                renderer.with_layer(clip, draw_marks);
+        // A zoom window cuts through the marks, so they clip to the data
+        // rectangle; a broken axis cuts them at its gap, so they draw once
+        // per piece on either side of it.
+        let origin = plot_layout.bounds().position() - crate::core::Point::ORIGIN;
+        let crate::chart::plot_area::Gaps { x: x_gap, y: y_gap } = self.plot_area.gaps(&tree.children[6]);
+        if self.zoomed || x_gap.is_some() || y_gap.is_some() {
+            let base = if self.zoomed {
+                tree.children[6]
+                    .state
+                    .downcast_ref::<crate::chart::plot_area::State>()
+                    .content_rect
+                    + origin
+            } else {
+                plot_layout.bounds()
+            };
+            let shift = |gap: Option<(f32, f32)>, by: f32| gap.map(|(a, b)| (a + by, b + by));
+            let pieces = crate::chart::plot_area::unbroken(base, shift(x_gap, origin.x), shift(y_gap, origin.y));
+            for piece in pieces {
+                if let Some(clip) = piece.intersection(viewport) {
+                    renderer.with_layer(clip, draw_marks);
+                }
             }
         } else {
             draw_marks(renderer);
