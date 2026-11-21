@@ -148,16 +148,13 @@ fn observed(run: &[[f64; 2]]) -> Vec<([f64; 2], crate::mark::diagram::Sample)> {
         .collect()
 }
 
-/// Where each jump occurs between two observation positions.
-#[derive(Clone, Copy, Debug)]
-pub enum Step {
-    Before,
-    After,
-    Midpoint,
-}
-
 /// Piecewise constant signal. A nonfinite observation splits the path.
-pub fn steps(samples: &[[f64; 2]], placement: Step) -> Diagram {
+///
+/// `placement` says where each jump sits between two observations, the
+/// same [`Step`](crate::line::Step) a stepped line takes.
+pub fn steps(samples: &[[f64; 2]], placement: crate::line::Step) -> Diagram {
+    use crate::line::Step;
+
     let mut d = Diagram::cartesian();
     let id = d.series("Step");
     for run in samples
@@ -170,7 +167,7 @@ pub fn steps(samples: &[[f64; 2]], placement: Step) -> Diagram {
             let x = match placement {
                 Step::Before => a[0],
                 Step::After => b[0],
-                Step::Midpoint => a[0].midpoint(b[0]),
+                Step::Mid => a[0].midpoint(b[0]),
             };
             p.extend([[x, a[1]], [x, b[1]], b]);
         }
@@ -599,7 +596,7 @@ mod tests {
     fn step_gaps_and_extents() {
         let d = steps(
             &[[0., 1.], [1., 2.], [f64::NAN, 0.], [3., 2.], [4., 1.]],
-            Step::Midpoint,
+            crate::line::Step::Mid,
         );
         assert_eq!(d.shapes.len(), 2);
         assert_eq!(d.shapes[0].points[2], [0.5, 2.]);

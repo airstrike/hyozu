@@ -794,7 +794,7 @@ mod tests {
 
     #[test]
     fn step_hover_snaps_to_observations_not_corners() {
-        let d = crate::cartesian::steps(&[[0., 2.], [5., 8.], [10., 4.]], crate::cartesian::Step::After);
+        let d = crate::cartesian::steps(&[[0., 2.], [5., 8.], [10., 4.]], crate::line::Step::After);
         let st = traced(&d);
         // The run up to the corner at (5, 2) belongs to the first
         // observation, and the riser's top to the second. The corner itself

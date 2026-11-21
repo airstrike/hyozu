@@ -64,7 +64,7 @@ pub fn error_bars() -> Data {
 pub fn step() -> Data {
     data(cartesian::steps(
         &[[0., 2.], [1., 4.], [2., 3.], [3., 6.], [4., 4.]],
-        cartesian::Step::After,
+        hyozu::line::Step::After,
     ))
     .title("Inventory on hand")
 }
