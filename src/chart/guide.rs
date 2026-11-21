@@ -519,6 +519,36 @@ fn nice_time_ticks(min: f64, max: f64, target_count: usize, alignment: Alignment
     (ticks, interval)
 }
 
+/// Nice tick positions within `[min, max]`, with the step they're spaced by.
+///
+/// [`Alignment::Auto`] puts ticks on multiples of the step, so an axis over
+/// `[-6, 9]` stepping by 5 reads `-5, 0, 5` rather than `-6, -1, 4`.
+/// [`Alignment::SnapToStart`] and [`Alignment::SnapToEnd`] count from the
+/// range's start or end instead. Positions multiply out from an integer
+/// index (`k * step`) rather than accumulate, so floating-point error
+/// doesn't drift along the axis.
+fn nice_ticks(min: f64, max: f64, target_count: usize, alignment: Alignment) -> (Vec<f64>, f64) {
+    if min >= max {
+        return (vec![min], 0.0);
+    }
+
+    let step = crate::scale::transform::nice_step(max - min, target_count);
+    // A tick within a thousandth of a step of either end still counts.
+    let slack = 0.001;
+    let count = ((max - min) / step + slack).floor() as usize + 1;
+    let ticks = match alignment {
+        Alignment::Auto => {
+            let first = (min / step - slack).ceil() as i64;
+            let last = (max / step + slack).floor() as i64;
+            let ticks: Vec<f64> = (first..=last).map(|k| k as f64 * step).collect();
+            if ticks.is_empty() { vec![min] } else { ticks }
+        }
+        Alignment::SnapToStart => (0..count).map(|i| min + i as f64 * step).collect(),
+        Alignment::SnapToEnd => (0..count).rev().map(|i| max - i as f64 * step).collect(),
+    };
+    (ticks, step)
+}
+
 /// State for a Guide - stores paragraphs for text measurement
 pub struct State<P>
 where
@@ -805,7 +835,7 @@ where
                 // as a clean integer (10, 100, 1000…).
                 (log_ticks(axis_min, axis_max), None)
             } else {
-                let (ticks, step) = self.nice_ticks(axis_min, axis_max, target, alignment);
+                let (ticks, step) = nice_ticks(axis_min, axis_max, target, alignment);
                 (ticks, Some(step))
             }
         };
@@ -1180,42 +1210,6 @@ where
         }
 
         extent
-    }
-
-    /// Generate nice tick positions within [min, max].
-    ///
-    /// Returns (ticks, step) so callers can derive format precision from the step.
-    /// Uses multiplication-based positioning (`start + i * step`) instead of
-    /// repeated addition to avoid floating-point error accumulation.
-    fn nice_ticks(&self, min: f64, max: f64, target_count: usize, alignment: Alignment) -> (Vec<f64>, f64) {
-        if min >= max {
-            return (vec![min], 0.0);
-        }
-
-        let range = max - min;
-        let nice_step = crate::scale::transform::nice_step(range, target_count);
-
-        let mut ticks = Vec::new();
-
-        match alignment {
-            Alignment::Auto | Alignment::SnapToStart => {
-                // Use multiplication from the starting value to avoid
-                // floating-point drift: start + i * step
-                let n = ((max - min) / nice_step + 0.001).floor() as usize + 1;
-                for i in 0..n {
-                    ticks.push(min + i as f64 * nice_step);
-                }
-            }
-            Alignment::SnapToEnd => {
-                // Work backward from max using multiplication
-                let n = ((max - min) / nice_step + 0.001).floor() as usize + 1;
-                for i in (0..n).rev() {
-                    ticks.push(max - i as f64 * nice_step);
-                }
-            }
-        }
-
-        (ticks, nice_step)
     }
 
     /// Returns the initial tree state for this Guide
@@ -2231,6 +2225,35 @@ mod tests {
             // The pivot (on the tick) always lies inside the box.
             assert!(fp.before() >= -1e-3 && fp.after() >= -1e-3, "{degrees}°: {fp:?}");
         }
+    }
+
+    #[test]
+    fn auto_ticks_land_on_multiples_of_the_step() {
+        let (ticks, step) = nice_ticks(-6.0, 9.0, 4, Alignment::Auto);
+        assert_eq!(step, 5.0);
+        assert_eq!(ticks, vec![-5.0, 0.0, 5.0]);
+        let (ticks, _) = nice_ticks(-3.0, 3.0, 4, Alignment::Auto);
+        assert_eq!(ticks, vec![-2.0, 0.0, 2.0]);
+        let (ticks, _) = nice_ticks(18.0, 28.0, 3, Alignment::Auto);
+        assert_eq!(ticks, vec![20.0, 25.0]);
+    }
+
+    #[test]
+    fn auto_ticks_keep_ends_that_sit_on_a_multiple() {
+        let (ticks, _) = nice_ticks(0.0, 1.0, 5, Alignment::Auto);
+        assert_eq!(ticks.len(), 6);
+        assert_eq!(ticks.first(), Some(&0.0));
+        assert!((ticks[5] - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn snapped_ticks_count_from_their_end() {
+        let (start, _) = nice_ticks(-6.0, 9.0, 4, Alignment::SnapToStart);
+        assert_eq!(start, vec![-6.0, -1.0, 4.0, 9.0]);
+        let (end, _) = nice_ticks(-6.0, 9.0, 4, Alignment::SnapToEnd);
+        assert_eq!(end, vec![-6.0, -1.0, 4.0, 9.0]);
+        let (end, _) = nice_ticks(-7.0, 9.0, 4, Alignment::SnapToEnd);
+        assert_eq!(end, vec![-6.0, -1.0, 4.0, 9.0]);
     }
 
     #[test]
