@@ -1,8 +1,10 @@
 //! Cartesian geometry for interval, financial and discrete signal charts.
+pub mod error;
+
 use crate::Diagram;
 
 /// Lower and upper values at a scalar x coordinate.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Interval {
     pub x: f64,
     pub low: f64,
@@ -51,8 +53,12 @@ pub fn broken_bars(name: &str, spans: &[[f64; 2]], lane: [f64; 2]) -> Option<Dia
 
 /// Vertical ranges with symmetric caps. Set cap width to zero for lineranges.
 pub fn error_bars(intervals: &[Interval], cap_width: f64) -> Diagram {
+    capped("Interval", intervals, cap_width)
+}
+
+fn capped(name: &str, intervals: &[Interval], cap_width: f64) -> Diagram {
     let mut d = Diagram::cartesian();
-    let id = d.series("Interval");
+    let id = d.series(name);
     let half = if cap_width.is_finite() {
         cap_width.max(0.) / 2.
     } else {

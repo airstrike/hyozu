@@ -92,3 +92,84 @@ pub fn aligned() -> Data {
     )
     .title("Nonuniform observation periods")
 }
+
+pub fn trendlines() -> Data {
+    use hyozu::stats::trend;
+    let bookings: Vec<_> = [2.1, 2.9, 3.6, 5.2, 6.1, 8.3, 10.2, 13.9, 17.1, 23.]
+        .iter()
+        .enumerate()
+        .map(|(i, &y)| [i as f64 + 1., y])
+        .collect();
+    let forecast = trend::Forecast::new(0.5, 2.).expect("nonnegative periods");
+    let fits = [
+        (trend::linear(&bookings, None), 0x2563eb),
+        (trend::exponential(&bookings, None), 0xdc2626),
+        (trend::logarithmic(&bookings), 0x059669),
+        (trend::polynomial(&bookings, trend::Order::Three, None), 0xd97706),
+        (trend::power(&bookings), 0x7c3aed),
+    ];
+    let mut marks = vec![hyozu::Mark::Xy(
+        hyozu::xy(bookings.iter().map(|p| (p[0], p[1])).collect::<Vec<_>>())
+            .color(0x1f2937)
+            .with_name("Bookings"),
+    )];
+    for (fit, color) in fits {
+        let fit = fit.expect("positive, varying observations");
+        let line = fit.line(forecast).expect("finite forecast");
+        let name = format!(
+            "{}: {}, R² = {:.4}",
+            line.name().unwrap_or_default(),
+            fit.equation(),
+            fit.r_squared()
+        );
+        marks.push(hyozu::Mark::Line(
+            line.with_name(name).color(color).style(hyozu::LineStyle::Dashed),
+        ));
+    }
+    let period = trend::Period::new(3).expect("at least two points");
+    marks.push(hyozu::Mark::Line(
+        trend::moving_average(&bookings, period)
+            .expect("more points than the period")
+            .color(0x6b7280),
+    ));
+    data(marks)
+        .x_axis(|a| a.with_kind(hyozu::axis::Kind::Scalar))
+        .y_axis_bounds(-10., 40.)
+        .legend(hyozu::legend::Anchor::Bottom)
+        .title("Trendlines with a two-period forecast")
+}
+
+pub fn error_amounts() -> Data {
+    use hyozu::cartesian::error;
+    let amount = |v| error::Magnitude::new(v).expect("nonnegative amount");
+    let custom = error::Custom::new(&[0.3, 0.6, 0.4, 0.9, 0.5, 1.2], &[0.2, 0.3, 0.6, 0.4, 0.8, 0.5])
+        .expect("one pair per point");
+    let kinds = [
+        ("Fixed ±0.5", error::Amount::Fixed(amount(0.5)), 0x2563eb),
+        ("Percent ±10%", error::Amount::Percent(amount(10.)), 0xd97706),
+        ("1 standard deviation", error::Amount::StdDev(amount(1.)), 0x059669),
+        ("Standard error", error::Amount::StdErr, 0xdc2626),
+        ("Custom", error::Amount::Custom(custom), 0x7c3aed),
+    ];
+    let values = [4.2, 5.1, 4.6, 6.3, 5.8, 7.];
+    let mut marks = Vec::new();
+    for (k, (name, amount, color)) in kinds.into_iter().enumerate() {
+        let offset = (k as f64 - 2.) * 0.14;
+        let series: Vec<_> = values
+            .iter()
+            .enumerate()
+            .map(|(i, &y)| [i as f64 + 1. + offset, y])
+            .collect();
+        let intervals = amount.vertical(&series, error::Direction::Both).expect("finite series");
+        let mut bars = error::bars(name, &intervals, 0.08);
+        bars.set_color(0, color);
+        marks.push(hyozu::Mark::Diagram(bars));
+        marks.push(hyozu::Mark::Xy(
+            hyozu::xy(series.iter().map(|p| (p[0], p[1])).collect::<Vec<_>>()).color(color),
+        ));
+    }
+    data(marks)
+        .x_axis(|a| a.with_kind(hyozu::axis::Kind::Scalar))
+        .legend(hyozu::legend::Anchor::Bottom)
+        .title("Error amounts on one series")
+}
