@@ -532,7 +532,13 @@ where
                 corner,
             );
 
-            frame.fill(&path, color);
+            match &slice.pattern {
+                Some(pattern) => {
+                    let ink = crate::pattern::Ink::resolve(pattern, color, background, text_pair, &seed);
+                    pattern.fill(&mut frame, &path, ink);
+                }
+                None => frame.fill(&path, color),
+            }
         }
 
         // Slice labels — suppressed mid-sweep so they don't pop in

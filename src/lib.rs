@@ -1,6 +1,7 @@
 pub mod alignment;
 pub mod animation;
 pub mod brush;
+pub mod bullet;
 pub mod cartesian;
 pub mod chart;
 pub mod color;
@@ -16,6 +17,7 @@ pub mod item;
 pub mod map;
 pub mod palette;
 pub mod parts;
+pub mod pattern;
 pub mod polar;
 pub mod props;
 pub mod scale;

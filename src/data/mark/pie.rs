@@ -12,6 +12,8 @@ pub struct Slice {
     pub(crate) label: Option<Label>,
     /// Optional name for this slice (used in legends).
     pub(crate) name: Option<String>,
+    /// Hatched fill in place of the solid slice color.
+    pub(crate) pattern: Option<crate::pattern::Pattern>,
 }
 
 impl Slice {
@@ -31,6 +33,23 @@ impl Slice {
     pub fn name(mut self, name: impl Into<String>) -> Self {
         self.name = Some(name.into());
         self
+    }
+
+    /// Fills this slice with a hatch. The lines default to the slice's
+    /// resolved color and the background to a tint of it.
+    pub fn pattern(mut self, pattern: impl Into<crate::pattern::Pattern>) -> Self {
+        self.pattern = Some(pattern.into());
+        self
+    }
+
+    /// Sets or clears the hatched fill in place.
+    pub fn set_pattern(&mut self, pattern: Option<crate::pattern::Pattern>) {
+        self.pattern = pattern;
+    }
+
+    /// Returns the hatched fill, if any.
+    pub fn get_pattern(&self) -> Option<&crate::pattern::Pattern> {
+        self.pattern.as_ref()
     }
 
     /// Sets the label position for this slice (no-op when no label is set).
@@ -110,6 +129,7 @@ pub fn slice(value: impl Into<f64>) -> Slice {
         color: None,
         label: None,
         name: None,
+        pattern: None,
     }
 }
 
@@ -174,6 +194,7 @@ where
                     color: None,
                     label: None,
                     name: None,
+                    pattern: None,
                 })
                 .collect(),
             gap: 0.0,
@@ -196,6 +217,7 @@ where
                     color: None,
                     label: None,
                     name: None,
+                    pattern: None,
                 })
                 .collect(),
             gap: 0.0,

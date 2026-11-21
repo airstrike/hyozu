@@ -1,5 +1,14 @@
+pub mod connector;
+pub mod group;
+pub mod interpolation;
 pub mod label;
 pub mod marker;
+pub mod nulls;
+
+pub use connector::Connector;
+pub use group::{Group, UpDown, group};
+pub use interpolation::{Interpolation, Step};
+pub use nulls::Nulls;
 
 use crate::color::Color;
 use crate::data::axis::{self, Axis, Kind, Orientation, Placement};
@@ -54,6 +63,15 @@ pub struct Line {
     pub(crate) name: Option<String>,
     /// Dash pattern for the line stroke.
     pub(crate) style: LineStyle,
+    /// Path shape between points.
+    pub(crate) interpolation: Interpolation,
+    /// What the path does at a missing value.
+    pub(crate) nulls: Nulls,
+    /// Excel drop lines from each point to the plot floor.
+    pub(crate) drop_lines: Option<Connector>,
+    /// High-low lines and up/down bars of the [`Group`] this line leads.
+    /// Only [`Group::into_marks`] sets it, from every series in the group.
+    pub(crate) group: Option<Box<group::Decorations>>,
 }
 
 /// Creates a line chart mark from data points.
@@ -83,6 +101,10 @@ pub fn line(data: impl IntoDatums) -> Line {
         marker: None,
         name: None,
         style: LineStyle::Solid,
+        interpolation: Interpolation::Linear,
+        nulls: Nulls::Gap,
+        drop_lines: None,
+        group: None,
     }
 }
 
@@ -134,6 +156,46 @@ impl Line {
     pub fn style(mut self, style: LineStyle) -> Self {
         self.style = style;
         self
+    }
+
+    /// Sets how the path travels between points.
+    ///
+    /// ```
+    /// use hyozu::line::{self, Interpolation, Step};
+    ///
+    /// let smooth = line::line([1, 4, 2, 5]).interpolation(Interpolation::Monotone);
+    /// let stairs = line::line([1, 4, 2, 5]).interpolation(Step::After);
+    /// ```
+    pub fn interpolation(mut self, interpolation: impl Into<Interpolation>) -> Self {
+        self.interpolation = interpolation.into();
+        self
+    }
+
+    /// Sets what the path does at a missing (non-finite) value.
+    pub fn nulls(mut self, nulls: Nulls) -> Self {
+        self.nulls = nulls;
+        self
+    }
+
+    /// Draws Excel drop lines from each point down to the plot floor.
+    pub fn drop_lines(mut self, connector: impl Into<Option<Connector>>) -> Self {
+        self.drop_lines = connector.into();
+        self
+    }
+
+    /// Returns the path interpolation.
+    pub fn interpolation_value(&self) -> Interpolation {
+        self.interpolation
+    }
+
+    /// Returns the missing-value policy.
+    pub fn nulls_value(&self) -> Nulls {
+        self.nulls
+    }
+
+    /// Returns the drop line stroke, if drop lines are drawn.
+    pub fn drop_lines_value(&self) -> Option<&Connector> {
+        self.drop_lines.as_ref()
     }
 
     /// Sets the name for this line (used in legends).

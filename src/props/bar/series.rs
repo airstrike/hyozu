@@ -5,6 +5,7 @@ use crate::core::Pixels;
 use crate::data::mark::bar::label::Position;
 use crate::data::mark::bar::{Label, Series};
 use crate::map::Map;
+use crate::pattern::Pattern;
 
 /// A per-point label property override.
 #[derive(Debug, Clone, PartialEq)]
@@ -46,6 +47,8 @@ pub enum Property {
     LabelFill(Option<Color>),
     /// Per-point label property override
     PointLabel { index: usize, property: PointLabelProperty },
+    /// Hatched fill; `None` restores the solid color.
+    Pattern(Option<Pattern>),
 }
 
 impl Map for Property {}
@@ -80,6 +83,7 @@ impl Property {
                 PointLabelProperty::Style(s) => series.set_point_label_style(*index, *s),
                 PointLabelProperty::Fill(f) => series.set_point_label_fill(*index, *f),
             },
+            Property::Pattern(p) => series.set_pattern(p.clone()),
         }
     }
 }
@@ -112,4 +116,10 @@ pub fn PointColor(index: usize, color: Option<Color>) -> Property {
 #[allow(non_snake_case)]
 pub fn PointLabel(index: usize, property: PointLabelProperty) -> Property {
     Property::PointLabel { index, property }
+}
+
+/// Wraps a hatched fill into a series property.
+#[allow(non_snake_case)]
+pub fn Pattern(value: Option<Pattern>) -> Property {
+    Property::Pattern(value)
 }

@@ -16,6 +16,11 @@ pub enum Property {
     Label(label::Property),
     /// Per-slice label property override
     SliceLabel { index: usize, property: label::Property },
+    /// Per-slice hatched fill; `None` restores the solid color
+    SlicePattern {
+        index: usize,
+        pattern: Option<crate::pattern::Pattern>,
+    },
 }
 
 impl Map for Property {}
@@ -34,6 +39,11 @@ impl Property {
             Property::SliceLabel { index, property } => {
                 if let Some(slice) = pie.slices_mut().get_mut(*index) {
                     apply_slice_label(property, slice);
+                }
+            }
+            Property::SlicePattern { index, pattern } => {
+                if let Some(slice) = pie.slices_mut().get_mut(*index) {
+                    slice.set_pattern(pattern.clone());
                 }
             }
         }
@@ -76,4 +86,10 @@ pub fn SliceColor(index: usize, color: Option<Color>) -> Property {
 #[allow(non_snake_case)]
 pub fn SliceLabel(index: usize, property: label::Property) -> Property {
     Property::SliceLabel { index, property }
+}
+
+/// Creates a per-slice hatched fill property.
+#[allow(non_snake_case)]
+pub fn SlicePattern(index: usize, pattern: Option<crate::pattern::Pattern>) -> Property {
+    Property::SlicePattern { index, pattern }
 }
