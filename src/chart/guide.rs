@@ -549,6 +549,17 @@ fn nice_ticks(min: f64, max: f64, target_count: usize, alignment: Alignment) -> 
     (ticks, step)
 }
 
+/// The whole-number positions among `ticks`, for axes whose labels name
+/// integer indices. Fractional steps are multiples of a whole one's
+/// divisors, so the whole positions keep an even spacing.
+fn whole_positions(ticks: Vec<f64>) -> Vec<f64> {
+    ticks
+        .into_iter()
+        .filter(|tick| (tick - tick.round()).abs() < 1e-6)
+        .map(f64::round)
+        .collect()
+}
+
 /// State for a Guide - stores paragraphs for text measurement
 pub struct State<P>
 where
@@ -834,6 +845,12 @@ where
                 // helper uses None precision so the value is rendered
                 // as a clean integer (10, 100, 1000…).
                 (log_ticks(axis_min, axis_max), None)
+            } else if self.axis.labels.values.is_some() && self.axis.labels.format.is_none() {
+                // Named positions (`x_axis_labels(["Jan", …])` on a
+                // continuous axis) label whole indices only: a half step
+                // would round onto a neighbor and repeat its name.
+                let (ticks, step) = nice_ticks(axis_min, axis_max, target, alignment);
+                (whole_positions(ticks), Some(step.max(1.0)))
             } else {
                 let (ticks, step) = nice_ticks(axis_min, axis_max, target, alignment);
                 (ticks, Some(step))
@@ -2244,6 +2261,30 @@ mod tests {
         assert_eq!(ticks.len(), 6);
         assert_eq!(ticks.first(), Some(&0.0));
         assert!((ticks[5] - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn named_positions_keep_whole_ticks_only() {
+        let (ticks, step) = nice_ticks(0.0, 5.0, 10, Alignment::Auto);
+        assert_eq!(step, 0.5);
+        assert_eq!(whole_positions(ticks), vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0]);
+        let (ticks, _) = nice_ticks(-0.4, 3.0, 20, Alignment::Auto);
+        assert_eq!(whole_positions(ticks), vec![0.0, 1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn wide_line_with_month_names_never_repeats_a_month() {
+        let months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun"];
+        let marks = vec![crate::line([3.0, 5.0, 4.0, 6.0, 8.0, 7.0]).into()];
+        let axis = Axis::new(Orientation::Bottom).labels(months);
+        let guide = Guide::<(), ()>::new(&axis, &marks);
+        let bounds = guide.compute_axis_bounds();
+        let (labels, _) = guide.ticks_and_labels(bounds, Some(2400.0));
+        let names: Vec<&str> = labels.iter().map(|(_, name)| name.as_str()).collect();
+        let mut deduped = names.clone();
+        deduped.dedup();
+        assert_eq!(names, deduped, "repeated names: {names:?}");
+        assert!(names.contains(&"Jan") && names.contains(&"Jun"));
     }
 
     #[test]
