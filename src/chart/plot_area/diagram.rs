@@ -8,7 +8,7 @@ use crate::design::Design;
 use crate::mark::diagram::{Entrance, Sample, label};
 use crate::widget::canvas::{Frame, Path, Stroke};
 use crate::widget::renderer::geometry;
-use std::f32::consts::TAU;
+use std::f32::consts::{PI, TAU};
 
 /// Distance in pixels within which the cursor touches an open path.
 const STROKE: f32 = 3.;
@@ -72,6 +72,36 @@ struct Placed<P: text::Paragraph> {
     entry: Option<usize>,
     /// Sits on its entry's fill, so its color contrasts with that fill.
     inside: bool,
+    /// Clockwise turn about the label's center, in radians: nonzero for a
+    /// label that reads along its sector's radius.
+    rotation: f32,
+}
+
+/// Where [`place`] puts a label.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Spot {
+    /// Top-left corner of the unrotated box, or `None` when hidden.
+    origin: Option<Point>,
+    /// Sits on its entry's fill.
+    inside: bool,
+    /// Clockwise turn about the box's center, in radians.
+    rotation: f32,
+}
+
+impl Spot {
+    const HIDDEN: Self = Self {
+        origin: None,
+        inside: false,
+        rotation: 0.,
+    };
+
+    fn at(origin: Point, inside: bool) -> Self {
+        Self {
+            origin: Some(origin),
+            inside,
+            rotation: 0.,
+        }
+    }
 }
 
 pub(crate) struct State<P: text::Paragraph> {
@@ -306,6 +336,44 @@ enum Area {
 }
 
 impl Area {
+    /// The clockwise turn that lays text along a sector's middle radius,
+    /// kept upright: reading outward on the right half, inward on the
+    /// left. `None` for other areas.
+    fn radial(&self) -> Option<f32> {
+        let Self::Sector { start, span, .. } = *self else {
+            return None;
+        };
+        let middle = start + span / 2.;
+        let turn = if middle.cos() < 0. { middle + PI } else { middle };
+        Some(turn.sin().atan2(turn.cos()))
+    }
+
+    /// The area as a box turned `rotation` clockwise about `pivot` sees it:
+    /// the area turned the other way. A sector turns its center and start;
+    /// other areas are returned as they are.
+    fn turned(&self, pivot: Point, rotation: f32) -> Self {
+        match *self {
+            Self::Sector {
+                center,
+                inner,
+                outer,
+                start,
+                span,
+            } => {
+                let (sin, cos) = (-rotation).sin_cos();
+                let v = center - pivot;
+                Self::Sector {
+                    center: pivot + Vector::new(v.x * cos - v.y * sin, v.x * sin + v.y * cos),
+                    inner,
+                    outer,
+                    start: start - rotation,
+                    span,
+                }
+            }
+            ref other => other.clone(),
+        }
+    }
+
     /// Whether `rect` lies entirely within the area.
     fn holds(&self, rect: Rectangle) -> bool {
         let corners = [
@@ -483,12 +551,11 @@ fn regions(d: &crate::mark::diagram::Diagram, plane: &Plane<'_>) -> Vec<Region> 
 }
 
 /// Where a label of `bounds` lands, and whether it sits on its entry's fill.
-fn place(
-    d: &crate::mark::diagram::Diagram,
-    spec: &label::Label,
-    bounds: Size,
-    plane: &Plane<'_>,
-) -> (Option<Point>, bool) {
+///
+/// A label inside a sector that can't sit level turns to read along the
+/// sector's radius when it fits that way, which a narrow sunburst wedge
+/// often allows.
+fn place(d: &crate::mark::diagram::Diagram, spec: &label::Label, bounds: Size, plane: &Plane<'_>) -> Spot {
     let anchor = plane.point(spec.anchor.map(f64::from));
     let centered = anchor - Vector::new(bounds.width / 2., bounds.height / 2.);
     match &spec.place {
@@ -500,17 +567,27 @@ fn place(
             } else {
                 0.
             };
-            (Some(anchor - Vector::new(dx, bounds.height / 2.)), false)
+            Spot::at(anchor - Vector::new(dx, bounds.height / 2.), false)
         }
-        label::Place::Toward(toward) => (Some(beside(anchor, bounds, *toward)), false),
+        label::Place::Toward(toward) => Spot::at(beside(anchor, bounds, *toward), false),
         label::Place::Inside { region, otherwise } => {
-            if plane.area(region).holds(Rectangle::new(centered, bounds).expand(INSET)) {
-                return (Some(centered), spec.on_fill);
+            let area = plane.area(region);
+            let boxed = Rectangle::new(centered, bounds).expand(INSET);
+            if area.holds(boxed) {
+                return Spot::at(centered, spec.on_fill);
+            }
+            if let Some(rotation) = area.radial()
+                && area.turned(anchor, rotation).holds(boxed)
+            {
+                return Spot {
+                    rotation,
+                    ..Spot::at(centered, spec.on_fill)
+                };
             }
             match otherwise {
-                label::Overflow::Hide => (None, false),
+                label::Overflow::Hide => Spot::HIDDEN,
                 label::Overflow::Beside { anchor, toward } => {
-                    (Some(beside(plane.point(anchor.map(f64::from)), bounds, *toward)), false)
+                    Spot::at(beside(plane.point(anchor.map(f64::from)), bounds, *toward), false)
                 }
             }
         }
@@ -544,6 +621,7 @@ pub(super) fn layout<R: text::Renderer>(
         origin: None,
         entry: None,
         inside: false,
+        rotation: 0.,
     });
     let font = design
         .map(|d| d.data_label_text().resolved_font(renderer.font()))
@@ -567,7 +645,8 @@ pub(super) fn layout<R: text::Renderer>(
             letter_spacing: Default::default(),
             weight: None,
         });
-        (placed.origin, placed.inside) = place(d, spec, placed.paragraph.min_bounds(), &plane);
+        let spot = place(d, spec, placed.paragraph.min_bounds(), &plane);
+        (placed.origin, placed.inside, placed.rotation) = (spot.origin, spot.inside, spot.rotation);
         placed.entry = spec.entry;
     }
 }
@@ -694,7 +773,8 @@ pub(super) fn draw<'p, R, D: Design + ?Sized>(
     }
     let geometry = frame.into_geometry();
     renderer.with_translation(translation, |r| r.draw_geometry(geometry));
-    for placed in &state.labels {
+    let mut turned = Frame::new(renderer, bounds.size());
+    for (spec, placed) in data.labels.iter().zip(&state.labels) {
         let Some(origin) = placed.origin else {
             continue;
         };
@@ -708,6 +788,30 @@ pub(super) fn draw<'p, R, D: Design + ?Sized>(
                 None => ink,
             }
         });
+        // Shaped paragraphs can't turn, so a radial label draws as canvas
+        // text, on its sector and clear of the label layer's placement.
+        if placed.rotation != 0. {
+            use text::Paragraph;
+            let raw = placed.paragraph.raw();
+            let size = raw.min_bounds();
+            let center = origin + Vector::new(size.width / 2., size.height / 2.);
+            turned.with_save(|frame| {
+                frame.translate(center - Point::ORIGIN);
+                frame.rotate(placed.rotation);
+                frame.fill_text(crate::widget::canvas::Text {
+                    content: spec.text.clone(),
+                    position: Point::ORIGIN,
+                    color,
+                    size: raw.size(),
+                    font: raw.font(),
+                    align_x: text::Alignment::Center,
+                    align_y: crate::core::alignment::Vertical::Center,
+                    shaping: text::Shaping::Basic,
+                    ..crate::widget::canvas::Text::default()
+                });
+            });
+            continue;
+        }
         labels.push_backed(
             placed.paragraph.raw(),
             origin + translation,
@@ -715,6 +819,8 @@ pub(super) fn draw<'p, R, D: Design + ?Sized>(
             data.label_background,
         );
     }
+    let geometry = turned.into_geometry();
+    renderer.with_translation(translation, |r| r.draw_geometry(geometry));
 }
 
 #[cfg(test)]
@@ -1014,13 +1120,61 @@ mod tests {
         );
         let fits = |name: &str, width: f32| {
             let spec = d.labels.iter().find(|l| l.text == name).expect("label");
-            place(&d, spec, Size::new(width, 14.), &plane).0.is_some()
+            place(&d, spec, Size::new(width, 14.), &plane).origin.is_some()
         };
         assert!(fits("Wide", 30.));
         assert!(fits("Big", 30.));
         assert!(!fits("x", 30.));
         assert!(!fits("Thin", 30.));
         assert!(!fits("Big", 400.));
+    }
+
+    #[test]
+    fn sunburst_labels_turn_along_the_radius_when_level_ones_dont_fit() {
+        use crate::mark::diagram::Node;
+        let leaves = (0..12).map(|i| Node::leaf(format!("Leaf {i}"), 1.)).collect();
+        let d = crate::sunburst(&[Node::branch("All", leaves)]);
+        let domain = unit();
+        let side = Size::new(400., 400.);
+        let plane = Plane::new(&d, side, &domain, Rectangle::with_size(side));
+        let spot = |name: &str, width: f32| {
+            let spec = d.labels.iter().find(|l| l.text == name).expect("label");
+            place(&d, spec, Size::new(width, 14.), &plane)
+        };
+        // A short name sits level in the wedge at one o'clock.
+        let level = spot("Leaf 0", 20.);
+        assert!(level.origin.is_some());
+        assert_eq!(level.rotation, 0.);
+        // A long one turns to read along the wedge's radius, upright.
+        let radial = spot("Leaf 0", 80.);
+        assert!(radial.origin.is_some(), "fits along the radius");
+        let expected = -std::f32::consts::FRAC_PI_2 + std::f32::consts::PI / 12.;
+        assert!((radial.rotation - expected).abs() < 1e-4, "{}", radial.rotation);
+        // On the left half the text turns the other way to stay upright.
+        let left = spot("Leaf 8", 80.);
+        assert!(left.rotation.cos() > 0.);
+        // Longer than the ring is thick, it hides.
+        assert_eq!(spot("Leaf 0", 120.).origin, None);
+    }
+
+    #[test]
+    fn turned_sector_matches_a_turned_box() {
+        let center = Point::new(100., 100.);
+        // A narrow wedge about the down-right diagonal.
+        let wedge = Area::Sector {
+            center,
+            inner: 40.,
+            outer: 95.,
+            start: TAU / 8. - TAU / 32.,
+            span: TAU / 16.,
+        };
+        let rotation = wedge.radial().expect("sector");
+        assert!((rotation - TAU / 8.).abs() < 1e-5);
+        let pivot = center + Vector::new(67.5 * (TAU / 8.).cos(), 67.5 * (TAU / 8.).sin());
+        let long = Rectangle::new(pivot - Vector::new(25., 5.), Size::new(50., 10.));
+        assert!(!wedge.holds(long), "level, the box pokes out of the wedge");
+        assert!(wedge.turned(pivot, rotation).holds(long), "turned, it fits");
+        assert_eq!(Area::Rect(long).radial(), None);
     }
 
     #[test]
@@ -1031,12 +1185,12 @@ mod tests {
         let plane = Plane::new(&d, size, &domain, Rectangle::with_size(size));
         assert_eq!(d.labels[0].text, "Visited · 100");
         let bounds = Size::new(80., 14.);
-        let (inside, on_fill) = place(&d, &d.labels[0], bounds, &plane);
-        assert!(on_fill);
-        assert_eq!(inside, Some(Point::new(160., 43.)));
-        let (beside, on_fill) = place(&d, &d.labels[1], bounds, &plane);
-        assert!(!on_fill);
-        assert!(beside.is_some_and(|p| p.x > 200. && p.y < 150.));
+        let inside = place(&d, &d.labels[0], bounds, &plane);
+        assert!(inside.inside);
+        assert_eq!(inside.origin, Some(Point::new(160., 43.)));
+        let beside = place(&d, &d.labels[1], bounds, &plane);
+        assert!(!beside.inside);
+        assert!(beside.origin.is_some_and(|p| p.x > 200. && p.y < 150.));
     }
 
     #[test]

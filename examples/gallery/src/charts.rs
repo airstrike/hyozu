@@ -1128,6 +1128,14 @@ pub fn variants() -> Vec<Variant> {
             "charts/bar_horizontal.rs"
         ),
         variant!(162, "Broken axis", Bar, Flat, axes::broken_axis, "charts/axes.rs"),
+        variant!(
+            163,
+            "Sunburst leaves",
+            Diagram,
+            Flat,
+            diagrams::sunburst_leaves,
+            "charts/diagrams.rs"
+        ),
     ]
 }
 

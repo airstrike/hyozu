@@ -177,3 +177,37 @@ pub fn polar_months() -> Data {
     .legend(hyozu::legend::Anchor::Right)
     .title("Monthly rainfall")
 }
+
+/// Many narrow wedges: names that can't sit level in their wedge turn to
+/// read along its radius.
+pub fn sunburst_leaves() -> Data {
+    let branch = |name: &str, leaves: &[(&str, f64)]| {
+        Node::branch(
+            name,
+            leaves.iter().map(|&(leaf, value)| Node::leaf(leaf, value)).collect(),
+        )
+    };
+    data(hyozu::sunburst(&[
+        branch("Americas", &[
+            ("Canada", 14.),
+            ("United States", 38.),
+            ("Mexico", 11.),
+            ("Brazil", 16.),
+            ("Argentina", 7.),
+        ]),
+        branch("Europe", &[
+            ("Germany", 18.),
+            ("France", 13.),
+            ("Spain", 9.),
+            ("Italy", 10.),
+            ("Poland", 6.),
+        ]),
+        branch("Asia", &[
+            ("Japan", 17.),
+            ("Korea", 9.),
+            ("India", 15.),
+            ("Vietnam", 6.),
+        ]),
+    ]))
+    .title("Orders by region and country")
+}
