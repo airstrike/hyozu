@@ -3196,8 +3196,17 @@ fn draw_tooltip_overlay<Message>(
                             value,
                             d.data.spoke(spoke).map_or_else(|| spoke.to_string(), str::to_owned),
                         ),
+                        crate::mark::diagram::Sample::Flow { source, target, value } => {
+                            let node = |i: usize| d.data.entries().get(i).map_or("", |n| n.name.as_str());
+                            let link = format!("{} → {}", node(source), node(target));
+                            (source as f64, value, link)
+                        }
                     };
-                    (pixel, x, y, format!("{} ({at})", e.name))
+                    let name = match v.sample {
+                        crate::mark::diagram::Sample::Flow { .. } => at,
+                        _ => format!("{} ({at})", e.name),
+                    };
+                    (pixel, x, y, name)
                 }
                 None if e.quantitative => {
                     let Some(anchor) = cursor.position() else {

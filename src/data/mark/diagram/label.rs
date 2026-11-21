@@ -10,6 +10,10 @@ pub(crate) struct Label {
     /// The entry this label describes. Data labels wait for the entrance
     /// animation to settle, while guide labels (axes, ticks) never move.
     pub(crate) entry: Option<usize>,
+    /// Whether a label placed inside its region reads against the entry's
+    /// opaque fill. A translucent band, such as a Sankey link, shows the
+    /// background through, so its label keeps the plain ink.
+    pub(crate) on_fill: bool,
 }
 
 /// How a label's box relates to its anchor.
@@ -62,6 +66,7 @@ impl Label {
             anchor,
             place: Place::Free,
             entry: None,
+            on_fill: true,
         }
     }
 
@@ -86,6 +91,13 @@ impl Label {
     /// Describes `entry`, so the label appears once its geometry settles.
     pub(crate) fn of(mut self, entry: usize) -> Self {
         self.entry = Some(entry);
+        self
+    }
+
+    /// Sits on a translucent band, so it keeps the plain ink rather than
+    /// contrast with the entry's opaque fill.
+    pub(crate) fn on_band(mut self) -> Self {
+        self.on_fill = false;
         self
     }
 

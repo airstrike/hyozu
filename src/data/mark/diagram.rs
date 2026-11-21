@@ -23,6 +23,8 @@ pub enum Sample {
     Polar { angle: f64, radius: f64 },
     /// A value on one of a radar's named spokes, by spoke index.
     Spoke { spoke: usize, value: f64 },
+    /// A Sankey link carrying `value` from entry `source` to entry `target`.
+    Flow { source: usize, target: usize, value: f64 },
 }
 
 #[derive(Clone, Debug)]
@@ -491,6 +493,9 @@ pub struct Flow {
 /// equals the larger of its incoming and outgoing totals. A cycle, unknown
 /// endpoint, invalid value or nonfinite total returns `None`. Node names sit
 /// beside their nodes: right of every column but the last, left of the last.
+/// Each link carries its value a third of the way along when the text fits
+/// inside the band, and hovering a link reports its source, target and
+/// value.
 pub fn sankey<S: AsRef<str>>(names: &[S], flows: &[Flow]) -> Option<Diagram> {
     let count = names.len();
     let mut incoming = vec![0.; count];
@@ -595,7 +600,35 @@ pub fn sankey<S: AsRef<str>>(names: &[S], flows: &[Flow]) -> Option<Diagram> {
         };
         let mut path: Vec<_> = (0..=20).map(|i| boundary(i, 0.)).collect();
         path.extend((0..=20).rev().map(|i| boundary(i, h)));
-        d.polygon(f.source, path, 0.36);
+        // Hover anchors at the band's middle. The value label sits a third
+        // of the way along instead, where a short stretch of band is near
+        // enough a parallelogram to hold it, and where links that cross
+        // (symmetric about their middles) don't stack their labels.
+        let [x, y] = boundary(10, h / 2.);
+        let anchor = [f64::from(x), f64::from(y)];
+        let stretch = vec![boundary(5, 0.), boundary(9, 0.), boundary(9, h), boundary(5, h)];
+        let label_at = boundary(7, h / 2.);
+        let flow = Sample::Flow {
+            source: f.source,
+            target: f.target,
+            value: f.value,
+        };
+        d.sampled(
+            f.source,
+            path.into_iter().map(|p| p.map(f64::from)).collect(),
+            true,
+            0.36,
+            vec![(anchor, flow)],
+        );
+        d.labels.push(
+            Label::inside(
+                f.source,
+                label_at,
+                label::Region::Convex(stretch),
+                crate::scale::default_f64_format(f.value),
+            )
+            .on_band(),
+        );
         source_offset[f.source] += h;
         target_offset[f.target] += h;
     }

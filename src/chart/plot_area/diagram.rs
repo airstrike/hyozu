@@ -505,7 +505,7 @@ fn place(
         label::Place::Toward(toward) => (Some(beside(anchor, bounds, *toward)), false),
         label::Place::Inside { region, otherwise } => {
             if plane.area(region).holds(Rectangle::new(centered, bounds).expand(INSET)) {
-                return (Some(centered), true);
+                return (Some(centered), spec.on_fill);
             }
             match otherwise {
                 label::Overflow::Hide => (None, false),
@@ -899,6 +899,45 @@ mod tests {
             .and_then(|h| h.vertex)
             .expect("near the bottom");
         assert_eq!(bottom.sample, Sample::Cartesian { x: 5., y: 2. });
+    }
+
+    #[test]
+    fn sankey_links_report_their_flow_and_carry_a_value_label() {
+        use crate::mark::diagram::Flow;
+        let d = crate::sankey(&["Search", "Trial", "Paid"], &[
+            Flow {
+                source: 0,
+                target: 1,
+                value: 60.,
+            },
+            Flow {
+                source: 1,
+                target: 2,
+                value: 25.,
+            },
+        ])
+        .expect("acyclic");
+        let st = traced(&d);
+        let link = st
+            .regions
+            .iter()
+            .find(|r| r.closed && r.samples.len() == 1)
+            .expect("first link");
+        let middle = link.samples[0].pixel;
+        let hit = st.hit(middle).expect("on the link");
+        assert_eq!(hit.entry, 0, "links take their source's entry");
+        assert_eq!(
+            hit.vertex.map(|v| v.sample),
+            Some(Sample::Flow {
+                source: 0,
+                target: 1,
+                value: 60.,
+            })
+        );
+        let values: Vec<&str> = d.labels.iter().map(|l| l.text.as_str()).collect();
+        assert!(values.contains(&"60") && values.contains(&"25"), "{values:?}");
+        let link = d.labels.iter().find(|l| l.text == "60").expect("link label");
+        assert!(!link.on_fill, "link labels read against the background");
     }
 
     #[test]
