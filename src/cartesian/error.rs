@@ -17,7 +17,7 @@ pub enum Amount {
     StdDev(Magnitude),
     /// The standard error of the series mean, s / √n, around each point.
     StdErr,
-    /// Separate plus and minus distances for every point.
+    /// Separate plus and minus distances, per point or one pair for all.
     Custom(Custom),
 }
 
@@ -34,11 +34,21 @@ pub enum Direction {
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub struct Magnitude(f64);
 
-/// Per-point plus and minus distances, one pair per series sample.
+/// Plus and minus distances: one pair per series sample, or, like Excel's
+/// single-value custom amount, one pair that every sample shares.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Custom {
-    plus: Vec<Magnitude>,
-    minus: Vec<Magnitude>,
+    plus: Distances,
+    minus: Distances,
+}
+
+/// One side's custom distances.
+#[derive(Clone, Debug, PartialEq)]
+enum Distances {
+    /// One distance per sample, in input order.
+    Each(Vec<Magnitude>),
+    /// The same distance at every sample.
+    All(Magnitude),
 }
 
 /// Why error amounts could not be computed.
@@ -91,17 +101,48 @@ impl Custom {
         }
         let magnitudes = |v: &[f64]| v.iter().map(|&v| Magnitude::new(v)).collect::<Result<Vec<_>, _>>();
         Ok(Self {
-            plus: magnitudes(plus)?,
-            minus: magnitudes(minus)?,
+            plus: Distances::Each(magnitudes(plus)?),
+            minus: Distances::Each(magnitudes(minus)?),
         })
     }
 
-    pub fn len(&self) -> usize {
-        self.plus.len()
+    /// One plus and one minus distance for every point, which may differ,
+    /// unlike [`Amount::Fixed`].
+    pub fn uniform(plus: f64, minus: f64) -> Result<Self, Error> {
+        Ok(Self {
+            plus: Distances::All(Magnitude::new(plus)?),
+            minus: Distances::All(Magnitude::new(minus)?),
+        })
     }
 
+    /// How many points the distances are listed for, or `None` when one
+    /// pair covers every point.
+    pub fn len(&self) -> Option<usize> {
+        match &self.plus {
+            Distances::Each(each) => Some(each.len()),
+            Distances::All(_) => None,
+        }
+    }
+
+    /// Whether the distances are listed for no points at all.
     pub fn is_empty(&self) -> bool {
-        self.plus.is_empty()
+        self.len() == Some(0)
+    }
+
+    /// The plus and minus distances at sample `index`.
+    fn at(&self, index: usize) -> (f64, f64) {
+        (self.plus.at(index), self.minus.at(index))
+    }
+}
+
+impl Distances {
+    /// The distance at sample `index`. The caller has checked an `Each`
+    /// list against the series length.
+    fn at(&self, index: usize) -> f64 {
+        match self {
+            Self::Each(each) => each.get(index).map_or(0.0, |m| m.0),
+            Self::All(all) => all.0,
+        }
     }
 }
 
@@ -119,11 +160,12 @@ impl Amount {
 
     fn intervals(&self, series: &[[f64; 2]], direction: Direction, axis: usize) -> Result<Vec<Interval>, Error> {
         if let Self::Custom(custom) = self
-            && custom.len() != series.len()
+            && let Some(found) = custom.len()
+            && found != series.len()
         {
             return Err(Error::Length {
                 expected: series.len(),
-                found: custom.len(),
+                found,
             });
         }
         let values: Vec<_> = series
@@ -149,7 +191,10 @@ impl Amount {
                         (s.mean, k.0 * s.deviation, k.0 * s.deviation)
                     }
                     Self::StdErr => (value, spread?.error, spread?.error),
-                    Self::Custom(c) => (value, c.plus[i].0, c.minus[i].0),
+                    Self::Custom(c) => {
+                        let (plus, minus) = c.at(i);
+                        (value, plus, minus)
+                    }
                 };
                 let (plus, minus) = match direction {
                     Direction::Both => (plus, minus),
@@ -281,6 +326,20 @@ mod tests {
             short.vertical(&series(), Direction::Both),
             Err(Error::Length { expected: 8, found: 1 })
         );
+    }
+
+    #[test]
+    fn uniform_custom_amount_applies_one_pair_to_every_point() {
+        let uniform = Custom::uniform(2., 0.5).unwrap();
+        assert_eq!(uniform.len(), None);
+        assert!(!uniform.is_empty());
+        let bars = Amount::Custom(uniform).vertical(&series(), Direction::Both).unwrap();
+        assert_eq!(bars.len(), 8);
+        for (v, [_, y]) in bars.iter().zip(series()) {
+            assert_eq!((v.low, v.high), (y - 0.5, y + 2.));
+        }
+        assert_eq!(Custom::uniform(1., -1.), Err(Error::Magnitude(-1.)));
+        assert_eq!(Custom::new(&[], &[]).map(|c| c.is_empty()), Ok(true));
     }
 
     #[test]
