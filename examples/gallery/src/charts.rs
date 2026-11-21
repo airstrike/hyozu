@@ -969,6 +969,30 @@ pub fn variants() -> Vec<Variant> {
         ),
         variant!(140, "Rotated labels", Bar, Flat, axes::rotated_labels, "charts/axes.rs"),
         variant!(141, "Origin axes", Line, Flat, axes::origin_axes, "charts/axes.rs"),
+        variant!(
+            142,
+            "Wind rose",
+            Diagram,
+            Flat,
+            diagrams::wind_rose,
+            "charts/diagrams.rs"
+        ),
+        variant!(
+            143,
+            "Radar scale",
+            Diagram,
+            Flat,
+            diagrams::radar_scale,
+            "charts/diagrams.rs"
+        ),
+        variant!(
+            144,
+            "Polar categories",
+            Line,
+            Flat,
+            diagrams::polar_months,
+            "charts/diagrams.rs"
+        ),
     ]
 }
 
