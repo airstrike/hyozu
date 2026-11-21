@@ -109,11 +109,11 @@ impl<M, T> canvas::Program<M, T> for Brush<'_, M> {
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
                 (2, cursor.position().unwrap_or(Point::ORIGIN), None)
             }
-            Event::Touch(touch::Event::FingerPressed { id, position }) => (0, *position, Some(*id)),
-            Event::Touch(touch::Event::FingerMoved { id, position }) => (1, *position, Some(*id)),
-            Event::Touch(touch::Event::FingerLifted { id, position } | touch::Event::FingerLost { id, position }) => {
-                (2, *position, Some(*id))
-            }
+            Event::Touch(touch::Event::FingerPressed { id, position, .. }) => (0, *position, Some(*id)),
+            Event::Touch(touch::Event::FingerMoved { id, position, .. }) => (1, *position, Some(*id)),
+            Event::Touch(
+                touch::Event::FingerLifted { id, position, .. } | touch::Event::FingerLost { id, position, .. },
+            ) => (2, *position, Some(*id)),
             _ => return None,
         };
         if bounds.width <= 0. {
