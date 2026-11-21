@@ -150,6 +150,7 @@ pub fn pareto<S: AsRef<str>>(entries: &[(S, u64)]) -> Data {
 
 pub mod fit;
 pub mod summary;
+pub mod trend;
 
 /// Stacked dots at each bin midpoint, one dot per included observation.
 /// The y value gives its one-based position within the stack.

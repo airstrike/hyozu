@@ -941,6 +941,22 @@ pub fn variants() -> Vec<Variant> {
             "charts/specialty.rs"
         ),
         variant!(135, "Hat graph", Bar, Flat, specialty::hats, "charts/specialty.rs"),
+        variant!(
+            136,
+            "Excel trendlines",
+            Statistical,
+            Flat,
+            summaries::trendlines,
+            "charts/summaries.rs"
+        ),
+        variant!(
+            137,
+            "Series error amounts",
+            Statistical,
+            Flat,
+            summaries::error_amounts,
+            "charts/summaries.rs"
+        ),
     ]
 }
 
