@@ -1893,16 +1893,28 @@ where
         let bounds = layout.bounds();
         let orientation = self.axis.orientation();
         let gap = state.tick_space + state.label_offset;
-        let mut frame = Frame::new(renderer, bounds.size());
+        // A canvas frame clips to its own size, but edge labels may overhang
+        // the guide into the sibling axis gutters (the overflow budget the
+        // layout granted), so widen the frame to cover every footprint.
+        let footprints: Vec<Footprint> = state
+            .labels
+            .iter()
+            .take(state.label_info.len())
+            .map(|paragraph| Footprint::rotated(paragraph.min_bounds(), angle, orientation))
+            .collect();
+        let reach = footprints.iter().fold(0.0f32, |reach, footprint| {
+            reach.max(footprint.before()).max(footprint.after())
+        });
+        let origin = Vector::new(bounds.x - reach, bounds.y);
+        let mut frame = Frame::new(renderer, Size::new(bounds.width + 2.0 * reach, bounds.height));
 
-        for (((_pos, label), paragraph), (child_layout, _)) in state
+        for (((_pos, label), footprint), (child_layout, _)) in state
             .label_info
             .iter()
-            .zip(&state.labels)
+            .zip(&footprints)
             .zip(layout.iter(&tree.children))
         {
-            let footprint = Footprint::rotated(paragraph.min_bounds(), angle, orientation);
-            let tick_x = child_layout.bounds().x - bounds.x;
+            let tick_x = child_layout.bounds().x - origin.x;
             let pivot_y = match orientation {
                 Orientation::Top => bounds.height - gap - (footprint.bounds.y + footprint.bounds.height),
                 Orientation::Bottom | Orientation::Left | Orientation::Right => gap - footprint.bounds.y,
@@ -1928,7 +1940,7 @@ where
         }
 
         let geometry = frame.into_geometry();
-        renderer.with_translation(Vector::new(bounds.x, bounds.y), |renderer| {
+        renderer.with_translation(origin, |renderer| {
             renderer.draw_geometry(geometry);
         });
     }
