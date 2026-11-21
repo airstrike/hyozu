@@ -9,6 +9,7 @@ pub mod scale_legend;
 mod scene;
 pub mod title;
 pub mod value;
+pub mod zoom;
 
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -65,7 +66,36 @@ where
     /// back to its built-in canvas-drawn tooltip box.
     hover_fn: Option<hover::HoverFn<'a, Message, Theme>>,
     hover_group_fn: Option<hover::GroupFn<'a, Message, Theme>>,
+    interaction: Interaction,
     _theme: std::marker::PhantomData<Theme>,
+}
+
+/// Pointer interactions a chart opts into beyond hover and click.
+#[derive(Clone, Copy, Debug, Default)]
+struct Interaction {
+    /// Axes that wheel zoom and drag pan, when enabled.
+    zoom: Option<zoom::Axes>,
+    /// Whether a drag selects a rectangle of entries.
+    select: bool,
+    /// The linked group's hover, when this chart joins one.
+    sync: Option<crate::sync::Cursor>,
+}
+
+/// Pixels the pointer must travel with the button down before a press
+/// becomes a pan or a selection instead of a click.
+const DRAG_THRESHOLD: f32 = 3.0;
+
+/// A left-button drag over the plot, from press to release.
+#[derive(Clone, Copy, Debug)]
+enum Gesture {
+    /// Pressed but not yet moved past [`DRAG_THRESHOLD`]; releasing here
+    /// is a click. `select` records whether moving on selects or pans.
+    Pressed { origin: Point, select: bool },
+    /// Panning the zoom windows the chart showed at the press.
+    Pan { origin: Point, start: zoom::State },
+    /// Dragging a selection rectangle from `origin` to `to`, both inside
+    /// the data rectangle.
+    Select { origin: Point, to: Point },
 }
 
 /// Variant tag for [`Chart`], carrying any variant-specific overlay state.
@@ -109,6 +139,18 @@ struct State {
     /// Names of series hidden via legend click toggles. Lives with the
     /// widget state and is reset when the tree is dropped.
     hidden_series: std::collections::HashSet<String>,
+    /// Visible zoom windows. Kept across data changes so a streaming
+    /// chart stays zoomed.
+    zoom: zoom::State,
+    /// The drag in progress, if any.
+    gesture: Option<Gesture>,
+    /// Keyboard modifiers, to tell a Shift-drag selection from a pan.
+    modifiers: keyboard::Modifiers,
+    /// The previous press, to detect a double-click reset.
+    last_click: Option<mouse::Click>,
+    /// Plot-local anchor of a hover taken from the linked group's cursor
+    /// rather than the pointer. `None` while the pointer drives [`Self::hover`].
+    linked: Option<Point>,
 }
 
 impl Default for State {
@@ -124,6 +166,11 @@ impl Default for State {
             last_cursor: None,
             annotation_tree: Tree::empty(),
             hidden_series: std::collections::HashSet::new(),
+            zoom: zoom::State::default(),
+            gesture: None,
+            modifiers: keyboard::Modifiers::default(),
+            last_click: None,
+            linked: None,
         }
     }
 }
@@ -194,6 +241,7 @@ where
             animate: data.animate,
             hover_fn: None,
             hover_group_fn: None,
+            interaction: Interaction::default(),
             _theme: std::marker::PhantomData,
         }
     }
@@ -237,6 +285,7 @@ where
             animate: self.animate,
             hover_fn: self.hover_fn,
             hover_group_fn: self.hover_group_fn,
+            interaction: self.interaction,
             _theme: std::marker::PhantomData,
         }
     }
@@ -244,6 +293,39 @@ where
     /// Sets the action handler for the chart.
     pub fn on_action(mut self, f: impl Fn(Action) -> Message + 'a) -> Self {
         self.on_action = Some(Box::new(f));
+        self
+    }
+
+    /// Zooms `axes` with the mouse wheel about the cursor and pans them by
+    /// dragging the plot. Double-click returns to the full domain.
+    ///
+    /// The visible window lives in widget state and composes with each
+    /// axis's transform and direction: log axes zoom in log space and
+    /// reversed axes pan with the pointer. Categorical axes stay put. Each
+    /// change is reported as [`Action::Viewport`]. A press that doesn't
+    /// move still clicks.
+    pub fn zoom(mut self, axes: zoom::Axes) -> Self {
+        self.interaction.zoom = Some(axes);
+        self
+    }
+
+    /// Selects the entries inside a dragged rectangle, reported as
+    /// [`Action::Selected`] on release. With [`Self::zoom`] also enabled,
+    /// a plain drag pans and a Shift-drag selects.
+    pub fn select_region(mut self) -> Self {
+        self.interaction.select = true;
+        self
+    }
+
+    /// Joins a group of linked charts sharing `cursor`.
+    ///
+    /// While the pointer is elsewhere, this chart shows its tooltip and
+    /// highlights at the cursor's x. While hovered, it reports its own
+    /// snapped x as [`Action::Hovered`]; store that with
+    /// [`crate::sync::Cursor::update`] and pass the result to every chart
+    /// in the group.
+    pub fn sync(mut self, cursor: crate::sync::Cursor) -> Self {
+        self.interaction.sync = Some(cursor);
         self
     }
 
@@ -1833,6 +1915,10 @@ where
         // historical `renderer.font()` / 12px defaults.
         let design: Option<&dyn design::Design> = self.design.as_deref().map(|d| d as &dyn design::Design);
 
+        // The zoom windows narrow the guides' bounds, which the plot area
+        // then maps through.
+        self.scene.zoom(&tree.state.downcast_ref::<State>().zoom);
+
         // Split-borrow so we can lay out the optional center child after
         // the scene has populated pie state at scene_tree.children[6].
         let (scene_slot, rest) = tree.children.split_at_mut(1);
@@ -1871,6 +1957,9 @@ where
         } else {
             Vec::new()
         };
+        if self.scene.has_tooltip() {
+            self.link_hover(state, &scene_tree.children[6]);
+        }
         tree.size = size;
     }
 
@@ -1929,6 +2018,12 @@ where
             if shell.is_event_captured() {
                 return;
             }
+        }
+
+        // Wheel zoom, drag pan and rectangle selection take the event
+        // before hover and click once a drag is underway.
+        if self.interact(tree, event, layout, cursor, shell, viewport) {
+            return;
         }
 
         let has_tooltip = self.scene.has_tooltip();
@@ -2076,9 +2171,22 @@ where
                         // point and projected through a deterministic plane, so
                         // identical hovered points produce identical f64 bits — exact
                         // equality is sufficient (no need for an epsilon shim).
-                        let changed = state.hover != new_hover;
+                        let changed = state.hover != new_hover || state.linked.is_some();
+
+                        if let Some(group) = self.interaction.sync
+                            && let Some(on_action) = &self.on_action
+                        {
+                            let x = match &new_hover {
+                                Some(hover::Geometry::Cartesian { data_x, .. }) => crate::sync::Cursor::at(*data_x),
+                                _ => crate::sync::Cursor::IDLE,
+                            };
+                            if x != group {
+                                shell.publish(on_action(Action::Hovered(x)));
+                            }
+                        }
 
                         state.hover = new_hover;
+                        state.linked = None;
                         state.selected = None;
                         if matches!(event, Event::Touch(_)) {
                             state.is_pressed = has_action;
@@ -2090,18 +2198,20 @@ where
                         }
                     }
                     None => {
-                        if state.hover.is_some() {
-                            state.hover = None;
-                            state.last_cursor = None;
-                            shell.request_redraw();
+                        // A hover taken from the linked group stays until
+                        // the group's cursor moves; only a pointer hover
+                        // ends when the pointer leaves the plot.
+                        if state.linked.is_none() {
+                            self.leave(state, shell);
                         }
                     }
                 }
             }
             Event::Mouse(mouse::Event::CursorLeft) | Event::Touch(touch::Event::FingerLost { .. }) => {
                 state.is_pressed = false;
+                self.leave(state, shell);
+                state.linked = None;
                 state.hover = None;
-                state.last_cursor = None;
                 shell.request_redraw();
             }
 
@@ -2352,6 +2462,25 @@ where
             });
         }
 
+        // The selection rectangle being dragged.
+        if let Some(Gesture::Select { origin, to }) = state.gesture {
+            let band = Rectangle::new(origin, Size::ZERO).union(&Rectangle::new(to, Size::ZERO));
+            let color =
+                design
+                    .axis_color()
+                    .resolve(design.background_color(), design.text_pair(), &design.seed(), None);
+            renderer.with_layer(*viewport, |renderer| {
+                renderer.fill_quad(
+                    crate::core::renderer::Quad {
+                        bounds: band,
+                        border: border::width(1).color(color.scale_alpha(0.7)),
+                        ..Default::default()
+                    },
+                    color.scale_alpha(0.12),
+                );
+            });
+        }
+
         // Tooltip overlay draws last so hover annotations composite above
         // every other element, including the donut center overlay.
         // Highlights (tracking line, point markers, polygon stroke,
@@ -2399,6 +2528,19 @@ where
         // over a toggleable swatch so the affordance is clear.
         if self.legend_entry_at(tree, layout, cursor).is_some() {
             return mouse::Interaction::Pointer;
+        }
+
+        match tree.state.downcast_ref::<State>().gesture {
+            Some(Gesture::Pan { .. }) => return mouse::Interaction::Grabbing,
+            Some(Gesture::Select { .. }) => return mouse::Interaction::Crosshair,
+            _ => {}
+        }
+        if self.interaction.zoom.is_some()
+            && self
+                .zoom_plot(tree, layout)
+                .is_some_and(|plot| cursor.is_over(plot.rect))
+        {
+            return mouse::Interaction::Grab;
         }
 
         if self.scene.has_tooltip() {
@@ -2489,8 +2631,20 @@ where
             )?;
             (self.hover_fn.as_ref()?)(&entry)
         };
+        // A hover linked from another chart anchors at its snapped x.
+        let linked = state.linked.map(|anchor| {
+            compute_plot_bounds(
+                layout.bounds(),
+                self.padding,
+                self.scene.plot_area_offset(),
+                Rectangle::with_size(self.scene.plot_area_size()),
+            )
+            .position()
+                + Vector::new(anchor.x, anchor.y)
+        });
         let cursor = state
             .last_cursor
+            .or(linked)
             .map(|cursor| cursor + translation)
             .unwrap_or_else(|| Point::new(chart_bounds.center_x(), chart_bounds.center_y()));
         let annotation_tree = &mut state.annotation_tree;
@@ -2581,6 +2735,305 @@ where
             Kind::Generic => {}
         }
     }
+}
+
+impl<'a, Message, Design, Theme> Chart<'a, Message, Design, Theme>
+where
+    Design: design::Design + Clone + 'a,
+    Theme: design::Design,
+{
+    /// The data rectangle in window coordinates and its zoomable axes, as
+    /// of the last layout. `None` before layout and for charts without a
+    /// Cartesian domain.
+    fn zoom_plot(&self, tree: &Tree, layout: Layout) -> Option<zoom::Plot> {
+        let scene_tree = tree.children.first()?;
+        let plot_state = scene_tree.children.get(6)?.state.downcast_ref::<plot_area::State>();
+        plot_state.domain.as_ref()?;
+        let plot_bounds = compute_plot_bounds(
+            layout.bounds(),
+            self.padding,
+            self.scene.plot_area_offset(),
+            Rectangle::with_size(self.scene.plot_area_size()),
+        );
+        let (x, y) = self.scene.zoom_axes(scene_tree);
+        Some(zoom::Plot {
+            rect: plot_state.content_rect + (plot_bounds.position() - Point::ORIGIN),
+            x,
+            y,
+        })
+    }
+
+    /// Handles wheel zoom, drag pan and rectangle selection. Returns
+    /// whether the event was consumed.
+    fn interact(
+        &self,
+        tree: &mut Tree,
+        event: &Event,
+        layout: Layout,
+        cursor: mouse::Cursor,
+        shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) -> bool {
+        let Interaction { zoom, select, .. } = self.interaction;
+        if zoom.is_none() && !select {
+            return false;
+        }
+        if let Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) = event {
+            tree.state.downcast_mut::<State>().modifiers = *modifiers;
+            return false;
+        }
+        let Some(plot) = self.zoom_plot(tree, layout) else {
+            return false;
+        };
+        let state = tree.state.downcast_mut::<State>();
+        let over = cursor.position_over(plot.rect).filter(|_| cursor.is_over(*viewport));
+        match event {
+            Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
+                let (Some(axes), Some(position)) = (zoom, over) else {
+                    return false;
+                };
+                let lines = match delta {
+                    mouse::ScrollDelta::Lines { y, .. } => *y,
+                    mouse::ScrollDelta::Pixels { y, .. } => *y / zoom::State::PIXELS_PER_LINE,
+                };
+                if state.zoom.wheel(axes, &plot, position, lines) {
+                    self.zoomed(state, &plot, shell);
+                }
+                shell.capture_event();
+                true
+            }
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                let Some(origin) = over else {
+                    return false;
+                };
+                let click = mouse::Click::new(origin, mouse::Button::Left, state.last_click);
+                state.last_click = Some(click);
+                if zoom.is_some() && click.kind() == mouse::click::Kind::Double && state.zoom.reset() {
+                    state.gesture = None;
+                    self.zoomed(state, &plot, shell);
+                    shell.capture_event();
+                    return true;
+                }
+                state.gesture = Some(Gesture::Pressed {
+                    origin,
+                    select: select && (zoom.is_none() || state.modifiers.shift()),
+                });
+                // The press may still turn out to be a click.
+                false
+            }
+            Event::Mouse(mouse::Event::CursorMoved { position }) => {
+                let gesture = match state.gesture {
+                    Some(Gesture::Pressed { origin, select }) if origin.distance(*position) > DRAG_THRESHOLD => {
+                        // Past the threshold the press is a drag, not a click.
+                        state.is_pressed = false;
+                        state.hover = None;
+                        if select {
+                            Gesture::Select { origin, to: origin }
+                        } else {
+                            Gesture::Pan {
+                                origin,
+                                start: state.zoom,
+                            }
+                        }
+                    }
+                    Some(Gesture::Pressed { .. }) | None => return false,
+                    Some(active) => active,
+                };
+                match gesture {
+                    Gesture::Pan { origin, start } => {
+                        state.gesture = Some(gesture);
+                        if let Some(axes) = zoom
+                            && state.zoom.pan(start, axes, &plot, *position - origin)
+                        {
+                            self.zoomed(state, &plot, shell);
+                        }
+                    }
+                    Gesture::Select { origin, .. } => {
+                        let to = Point::new(
+                            position.x.clamp(plot.rect.x, plot.rect.x + plot.rect.width),
+                            position.y.clamp(plot.rect.y, plot.rect.y + plot.rect.height),
+                        );
+                        state.gesture = Some(Gesture::Select { origin, to });
+                        shell.request_redraw();
+                    }
+                    Gesture::Pressed { .. } => {}
+                }
+                shell.capture_event();
+                true
+            }
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => match state.gesture.take() {
+                Some(Gesture::Select { origin, to }) => {
+                    let region = self.region(
+                        &tree.children[0],
+                        layout,
+                        Rectangle::new(origin, Size::ZERO).union(&Rectangle::new(to, Size::ZERO)),
+                    );
+                    if let (Some(region), Some(on_action)) = (region, &self.on_action) {
+                        shell.publish(on_action(Action::Selected(region)));
+                    }
+                    shell.request_redraw();
+                    shell.capture_event();
+                    true
+                }
+                Some(Gesture::Pan { .. }) => {
+                    shell.capture_event();
+                    true
+                }
+                Some(Gesture::Pressed { .. }) | None => false,
+            },
+            _ => false,
+        }
+    }
+
+    /// Relays a zoom change: the guides need a fresh layout, and the
+    /// application hears the new viewport.
+    fn zoomed(&self, state: &mut State, plot: &zoom::Plot, shell: &mut Shell<'_, Message>) {
+        shell.invalidate_layout();
+        shell.request_redraw();
+        if let Some(on_action) = &self.on_action {
+            shell.publish(on_action(Action::Viewport(state.zoom.viewport(plot))));
+        }
+    }
+
+    /// The data-space region and entries under `selection`, a rectangle
+    /// in window coordinates.
+    fn region(&self, scene_tree: &Tree, layout: Layout, selection: Rectangle) -> Option<crate::brush::Region> {
+        let plot_tree = scene_tree.children.get(6)?;
+        let plot_state = plot_tree.state.downcast_ref::<plot_area::State>();
+        let domain = plot_state.domain.as_ref()?;
+        let plot_bounds = compute_plot_bounds(
+            layout.bounds(),
+            self.padding,
+            self.scene.plot_area_offset(),
+            Rectangle::with_size(self.scene.plot_area_size()),
+        );
+        let local = selection - (plot_bounds.position() - Point::ORIGIN);
+        let content = plot_state.content_rect;
+        let data_y = |y: f32| {
+            let unit = f64::from((content.y + content.height - y) / content.height.max(1.0));
+            domain.y_mapping.unit_to_value(unit, domain.y.min, domain.y.max)
+        };
+        Some(crate::brush::Region::new(
+            [
+                plot_area::to_data_x(domain, content, local.x),
+                plot_area::to_data_x(domain, content, local.x + local.width),
+            ],
+            [data_y(local.y + local.height), data_y(local.y)],
+            entries_in(local, plot_tree, self.scene.plot_area()),
+        ))
+    }
+
+    /// Shows the linked group's cursor while the pointer is elsewhere:
+    /// snaps it the way a pointer at that x would snap, and remembers the
+    /// anchor for the annotation overlay.
+    fn link_hover(&self, state: &mut State, plot_tree: &Tree) {
+        let Some(group) = self.interaction.sync else {
+            return;
+        };
+        if state.last_cursor.is_some() {
+            return;
+        }
+        let plot_state = plot_tree.state.downcast_ref::<plot_area::State>();
+        let linked = group.x().zip(plot_state.domain.as_ref()).and_then(|(x, domain)| {
+            let content = plot_state.content_rect;
+            let anchor = Point::new(
+                plot_area::to_pixel(domain, content, crate::Datum { x, y: domain.y.min }).x,
+                content.center_y(),
+            );
+            find_nearest_cartesian_hover(anchor, plot_tree, self.scene.plot_area(), domain, content)
+                .map(|hover| (hover, anchor))
+        });
+        match linked {
+            Some((hover, anchor)) => {
+                state.hover = Some(hover);
+                state.linked = Some(anchor);
+            }
+            None if state.linked.take().is_some() => state.hover = None,
+            None => {}
+        }
+    }
+
+    /// Ends a pointer hover and, when this chart led its linked group,
+    /// tells the group the pointer left.
+    fn leave(&self, state: &mut State, shell: &mut Shell<'_, Message>) {
+        let led = state.last_cursor.take().is_some();
+        if state.hover.take().is_some() {
+            shell.request_redraw();
+        }
+        if led
+            && let Some(group) = self.interaction.sync
+            && group.x().is_some()
+            && let Some(on_action) = &self.on_action
+        {
+            shell.publish(on_action(Action::Hovered(crate::sync::Cursor::IDLE)));
+        }
+    }
+}
+
+/// Entries of Cartesian marks whose plotted position falls inside `rect`,
+/// in plot-local pixels: line, area and scatter points by their center,
+/// bars by any overlap. Geo-projected scatter points are skipped.
+fn entries_in<Message>(
+    rect: Rectangle,
+    plot_area_tree: &Tree,
+    plot_area: &plot_area::PlotArea<'_, Message, Renderer>,
+) -> Vec<crate::Target> {
+    type Paragraph = <Renderer as crate::core::text::Renderer>::Paragraph;
+    let inside = |point: &Point| point.x.is_finite() && point.y.is_finite() && rect.contains(*point);
+    let entry = |mark, series, index| crate::Target::Entry { mark, series, index };
+    let mut targets = Vec::new();
+    for (mark, (series, tree)) in plot_area.series.iter().zip(&plot_area_tree.children).enumerate() {
+        match series {
+            plot_area::Series::Line(_) => {
+                let state = tree.state.downcast_ref::<plot_area::line::State<Paragraph>>();
+                targets.extend(
+                    state
+                        .pixel_points
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, p)| inside(p))
+                        .map(|(i, _)| entry(mark, 0, i)),
+                );
+            }
+            plot_area::Series::Area(_) => {
+                let state = tree.state.downcast_ref::<plot_area::area::State<Paragraph>>();
+                for (s, points) in state.series_points.iter().enumerate() {
+                    targets.extend(
+                        points
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, p)| inside(p))
+                            .map(|(i, _)| entry(mark, s, i)),
+                    );
+                }
+            }
+            plot_area::Series::Xy(xy) if xy.data.coord_kind != crate::mark::xy::CoordKind::Geo => {
+                let state = tree.state.downcast_ref::<plot_area::xy::State>();
+                targets.extend(
+                    state
+                        .pixel_points
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, p)| inside(p))
+                        .map(|(i, _)| entry(mark, 0, i)),
+                );
+            }
+            plot_area::Series::Bars(_) => {
+                let state = tree.state.downcast_ref::<plot_area::bars::State<Paragraph>>();
+                for (s, rects) in state.series_rects.iter().enumerate() {
+                    targets.extend(
+                        rects
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, bar)| bar.width.is_finite() && bar.height.is_finite() && rect.intersects(bar))
+                            .map(|(i, _)| entry(mark, s, i)),
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+    targets
 }
 
 impl<Message, Design, Theme> widget::Meta for Chart<'_, Message, Design, Theme> where Design: design::Design + Clone {}

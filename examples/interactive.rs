@@ -232,6 +232,9 @@ impl App {
                 Action::Set(item) => {
                     self.data_mut().perform(Action::Set(item.clone()));
                 }
+                // This example enables no zoom, region selection or
+                // linked hover, so these never arrive.
+                Action::Viewport(_) | Action::Selected(_) | Action::Hovered(_) => {}
             },
             Message::ThemeChanged(theme) => {
                 self.theme = theme;

@@ -45,6 +45,7 @@ enum Message {
     Copy,
     Copied(bool),
     Chart(usize, hyozu::Action),
+    Selecting(bool),
 }
 
 struct App {
@@ -170,6 +171,13 @@ impl App {
                 }
             }
             Message::Copied(success) => self.copied = success,
+            Message::Selecting(selecting) => {
+                if let Some(id) = self.selected
+                    && let charts::Preview::Zoom(zoom) = &mut self.data[id.0]
+                {
+                    zoom.selecting = selecting;
+                }
+            }
             Message::Chart(panel, action) => {
                 if let Some(id) = self.selected {
                     self.data[id.0].perform(panel, action);
@@ -367,6 +375,53 @@ impl App {
             }
             charts::Preview::Single(chart) => render(0, chart.as_ref()),
             charts::Preview::Facets(grid) => grid.view_with(render),
+            // A card is too short for three stacked charts; it previews the first.
+            charts::Preview::Linked(linked) if !interactive => match linked.charts.first() {
+                Some(chart) => render(0, chart),
+                None => iced::widget::space().boxed(),
+            },
+            charts::Preview::Linked(linked) => {
+                let charts = linked.charts.iter().enumerate().map(|(panel, chart)| {
+                    hyozu::chart::<Message, iced::Theme>(chart)
+                        .style(hyozu::chart::transparent)
+                        .padding(12)
+                        .height(Fill)
+                        .sync(linked.cursor)
+                        .on_action(move |a| Message::Chart(panel, a))
+                        .boxed()
+                });
+                iced::widget::Column::with_children(charts).spacing(4).boxed()
+            }
+            charts::Preview::Zoom(zoom) if !interactive => render(0, &zoom.chart),
+            charts::Preview::Zoom(zoom) => {
+                // Pan mode zooms, pans and Shift-drag selects; select mode
+                // turns a plain drag into a selection. The zoom window
+                // lives in the chart's widget state either way.
+                let chart = hyozu::chart::<Message, iced::Theme>(&zoom.chart)
+                    .style(hyozu::chart::transparent)
+                    .padding(18)
+                    .height(Fill)
+                    .select_region()
+                    .on_action(|a| Message::Chart(0, a));
+                let chart = if zoom.selecting {
+                    chart
+                } else {
+                    chart.zoom(hyozu::chart::zoom::Axes::Both)
+                };
+                let mode = |label, selecting: bool| {
+                    button(text(label).size(13))
+                        .style(if zoom.selecting == selecting {
+                            button::primary
+                        } else {
+                            button::secondary
+                        })
+                        .on_press(Message::Selecting(selecting))
+                };
+                let controls = row![mode("Pan", false), mode("Select", true), text(zoom.status()).size(13)]
+                    .spacing(8)
+                    .align_y(Alignment::Center);
+                column![chart, controls].spacing(6).boxed()
+            }
         };
         container(themer(Some(self.theme.iced_theme().clone()), content))
             .width(Fill)
