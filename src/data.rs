@@ -170,6 +170,9 @@ fn axes_for_mark(mark: &Mark) -> (Option<Axis>, Option<Axis>) {
         // (e.g. via `bubble_map_with_labels`), the primary mark's axes
         // win during the `Vec<Mark>` axis inference in `Area::from`.
         Mark::Text(_) => (None, None),
+        // Annotations point into the axes of the marks they describe and
+        // never own an axis pair or extend its range.
+        Mark::Annotation(_) => (None, None),
     }
 }
 
@@ -196,7 +199,12 @@ impl From<Vec<Mark>> for Area {
         // Text is a passive label layer that doesn't own axes.
         let (x_axis, y_axis) = marks
             .iter()
-            .find(|m| !matches!(m, Mark::Rule(_) | Mark::Band(_) | Mark::Tick(_) | Mark::Text(_)))
+            .find(|m| {
+                !matches!(
+                    m,
+                    Mark::Rule(_) | Mark::Band(_) | Mark::Tick(_) | Mark::Text(_) | Mark::Annotation(_)
+                )
+            })
             .or(marks.first())
             .map(axes_for_mark)
             .unwrap_or((None, None));
@@ -762,7 +770,12 @@ impl Data {
         if self.secondary.y_axis.is_none() {
             let (_, auto_y) = new_marks
                 .iter()
-                .find(|m| !matches!(m, Mark::Rule(_) | Mark::Band(_) | Mark::Tick(_) | Mark::Text(_)))
+                .find(|m| {
+                    !matches!(
+                        m,
+                        Mark::Rule(_) | Mark::Band(_) | Mark::Tick(_) | Mark::Text(_) | Mark::Annotation(_)
+                    )
+                })
                 .or(new_marks.first())
                 .map(axes_for_mark)
                 .unwrap_or((None, None));
@@ -993,6 +1006,31 @@ impl Data {
 mod tests {
     use super::*;
     use crate::bars;
+
+    #[test]
+    fn annotations_leave_bounds_axes_and_palette_alone() {
+        let plain = data(vec![Mark::from(crate::line([2.0, 8.0, 5.0]))]);
+        let annotated = data(vec![
+            crate::annotation(40.0, 900.0).note("far outside").into(),
+            Mark::from(crate::line([2.0, 8.0, 5.0])),
+            crate::mark::annotation::entry(1, 0, 1).note("peak").into(),
+        ]);
+        let (a, b) = (plain.primary_bounds(), annotated.primary_bounds());
+        assert_eq!(
+            (a.x_min, a.x_max, a.y_min, a.y_max),
+            (b.x_min, b.x_max, b.y_min, b.y_max)
+        );
+        // The line owns the axes even when an annotation comes first.
+        assert_eq!(
+            annotated.primary.x_axis.as_ref().map(|a| a.kind()),
+            plain.primary.x_axis.as_ref().map(|a| a.kind())
+        );
+        assert_eq!(
+            crate::palette::Palette::default_for(annotated.marks()),
+            crate::palette::Palette::default_for(plain.marks())
+        );
+        assert_eq!(crate::palette::count_color_slots(annotated.marks()), 1);
+    }
 
     #[test]
     fn tooltip_visibility_preserves_an_enabled_custom_formatter() {

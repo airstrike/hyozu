@@ -765,7 +765,8 @@ where
                     | crate::Mark::Diagram(_)
                     | crate::Mark::Treemap(_)
                     | crate::Mark::Choropleth(_)
-                    | crate::Mark::Text(_) => {}
+                    | crate::Mark::Text(_)
+                    | crate::Mark::Annotation(_) => {}
                 }
             }
 
@@ -1139,7 +1140,8 @@ where
                 | crate::Mark::Gauge(_)
                 | crate::Mark::Treemap(_)
                 | crate::Mark::Choropleth(_)
-                | crate::Mark::Text(_) => {}
+                | crate::Mark::Text(_)
+                | crate::Mark::Annotation(_) => {}
             }
         }
 

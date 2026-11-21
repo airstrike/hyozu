@@ -33,7 +33,8 @@ fn mark_value_format(mark: &Mark) -> Option<crate::scale::Format<f64>> {
         | Mark::Tick(_)
         | Mark::Heatmap(_)
         | Mark::Violin(_)
-        | Mark::Text(_) => None,
+        | Mark::Text(_)
+        | Mark::Annotation(_) => None,
     }
 }
 
@@ -1295,6 +1296,8 @@ where
                 &mut labels,
             );
             labels.draw(renderer, viewport);
+            self.plot_area
+                .draw_annotations(&tree.children[6], renderer, design, plot_layout, viewport);
         };
         if self.zoomed {
             let content = tree.children[6]

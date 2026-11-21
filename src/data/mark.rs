@@ -18,6 +18,7 @@ pub mod violin;
 pub mod waterfall;
 pub mod xy;
 
+pub use annotation::{Annotation, annotation};
 pub use area::{Area, IntoAreas, area, areas};
 pub use band::{Band, BandOrientation, band};
 pub use bar::{Bars, IntoBars, bar, bars};
@@ -90,6 +91,7 @@ pub enum Mark {
     Heatmap(Heatmap),
     Violin(Violin),
     Text(Text),
+    Annotation(Annotation),
 }
 
 impl Mark {
@@ -209,10 +211,12 @@ impl Mark {
                     value: None,
                 })
                 .collect(),
-            // Rule, Band, Tick, Gauge, Heatmap, Choropleth, Text don't
-            // contribute to legend. Text is a label layer composed atop
-            // another mark; it doesn't claim its own legend entry.
+            // Rule, Band, Tick, Gauge, Heatmap, Choropleth, Text and
+            // Annotation don't contribute to legend. Text and Annotation
+            // are layers composed atop another mark; they don't claim their
+            // own legend entry.
             Mark::Rule(_)
+            | Mark::Annotation(_)
             | Mark::Band(_)
             | Mark::Tick(_)
             | Mark::Gauge(_)
@@ -234,7 +238,8 @@ impl Mark {
             // surface. Listed explicitly so adding a future variant
             // forces a deliberate decision rather than silently
             // defaulting to None.
-            Mark::Area(_)
+            Mark::Annotation(_)
+            | Mark::Area(_)
             | Mark::Band(_)
             | Mark::Bars(_)
             | Mark::BoxPlot(_)
@@ -353,5 +358,11 @@ impl From<Choropleth> for Mark {
 impl From<Text> for Mark {
     fn from(t: Text) -> Self {
         Mark::Text(t)
+    }
+}
+
+impl From<Annotation> for Mark {
+    fn from(a: Annotation) -> Self {
+        Mark::Annotation(a)
     }
 }
