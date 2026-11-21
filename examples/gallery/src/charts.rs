@@ -1119,6 +1119,14 @@ pub fn variants() -> Vec<Variant> {
             "charts/heatmap_warm.rs"
         ),
         variant!(160, "Axis titles", Line, Flat, axes::axis_titles, "charts/axes.rs"),
+        variant!(
+            161,
+            "Log horizontal bars",
+            Bar,
+            Flat,
+            bar_horizontal::log_values,
+            "charts/bar_horizontal.rs"
+        ),
     ]
 }
 

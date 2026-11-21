@@ -603,6 +603,9 @@ impl Data {
     /// [`crate::scale::Transform::Log`] for the clamp semantics on
     /// non-positive values. Sugar for `data.y_scale = data.y_scale.log()`.
     ///
+    /// The y channel carries the values, so on horizontal bars, which lay
+    /// their values along the bottom axis, this logs the bottom axis.
+    ///
     /// Bumps [`Self::generation`] so a chart rebuilt with this
     /// transform animates between linear and log layouts (e.g. the
     /// `examples/log_axis.rs` toggle).

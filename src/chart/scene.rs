@@ -353,15 +353,23 @@ where
             .map(|(i, (mark, offset))| (i, mark, offset))
             .collect();
 
-        let y_transform = data.y_scale().transform;
-        let y_nice = data.y_scale().nice;
         let secondary_y_transform = data.secondary_y_scale_ref().transform;
         let secondary_y_nice = data.secondary_y_scale_ref().nice;
         // X-axis transform and nicing flow from whichever `Scale` the x-axis
         // is tagged with. Only numeric x scales carry a transform; category
         // and time axes map linearly and keep their own tick alignment.
-        let x_transform = data.x_scale_ref().transform();
-        let x_nice = data.x_scale_ref().nice();
+        //
+        // Scales follow the data channels, not the screen: horizontal bars
+        // lay their values (the y channel) along the bottom axis and their
+        // categories (the x channel) up the left, so `y_log` logs the
+        // bottom axis there.
+        let values = (data.y_scale().transform, data.y_scale().nice);
+        let categories = (data.x_scale_ref().transform(), data.x_scale_ref().nice());
+        let ((x_transform, x_nice), (y_transform, y_nice)) = if has_horizontal_bars(primary_marks) {
+            (values, categories)
+        } else {
+            (categories, values)
+        };
 
         let mapping = |transform, axis: Option<&crate::Axis>| {
             crate::scale::Mapping::new(transform, axis.map(crate::Axis::order).unwrap_or_default())
@@ -1382,6 +1390,14 @@ where
     }
 }
 
+/// Whether `marks` include horizontal bars, which swap the channels'
+/// screen axes: values run along x and categories up y.
+fn has_horizontal_bars(marks: &[crate::Mark]) -> bool {
+    marks.iter().any(
+        |mark| matches!(mark, crate::Mark::Bars(bars) if bars.direction == crate::mark::bar::Direction::Horizontal),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -1507,6 +1523,24 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn y_log_on_horizontal_bars_logs_the_value_axis() {
+        use crate::scale::Transform;
+        let data = crate::data(crate::bars([2950.0, 410.0, 63.0, 8.2]).horizontal()).y_log();
+        let scene = super::Scene::<(), ()>::new(&data);
+        assert_eq!(scene.mappings.x.transform, Transform::Log);
+        assert_eq!(scene.mappings.y.transform, Transform::Linear);
+        let bottom = scene.bottom_axis.as_ref().expect("value axis");
+        let left = scene.left_axis.as_ref().expect("category axis");
+        assert_eq!(bottom.mapping().transform, Transform::Log);
+        assert_eq!(left.mapping().transform, Transform::Linear);
+
+        let vertical = crate::data(crate::bars([2950.0, 410.0])).y_log();
+        let scene = super::Scene::<(), ()>::new(&vertical);
+        assert_eq!(scene.mappings.y.transform, Transform::Log);
+        assert_eq!(scene.mappings.x.transform, Transform::Linear);
     }
 
     #[test]
