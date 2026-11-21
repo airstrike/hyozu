@@ -32,10 +32,12 @@
 use std::sync::Arc;
 
 pub mod color;
+pub mod mapping;
 pub mod transform;
 pub mod x;
 
 pub use color::ColorScale;
+pub use mapping::Mapping;
 pub use transform::Transform;
 pub use x::XScale;
 
@@ -129,6 +131,19 @@ impl<T> Scale<T> {
         self
     }
 
+    /// Sets the transform to [`Transform::Sqrt`]. Honored by numeric-axis
+    /// marks; see [`Transform::Sqrt`] for the below-domain clamp.
+    pub fn sqrt(mut self) -> Self {
+        self.transform = Transform::Sqrt;
+        self
+    }
+
+    /// Sets the transform wholesale.
+    pub fn transform(mut self, transform: Transform) -> Self {
+        self.transform = transform;
+        self
+    }
+
     /// Toggles nice-number rounding for auto-derived axis bounds. `true`
     /// is the default; pass `false` to keep the raw data range when the
     /// user hasn't supplied explicit bounds. Has no effect when explicit
@@ -193,5 +208,11 @@ mod tests {
     fn log_builder_flips_transform() {
         let s: Scale<f64> = Scale::new().log();
         assert_eq!(s.transform, Transform::Log);
+    }
+
+    #[test]
+    fn sqrt_builder_flips_transform() {
+        let s: Scale<f64> = Scale::new().sqrt();
+        assert_eq!(s.transform, Transform::Sqrt);
     }
 }

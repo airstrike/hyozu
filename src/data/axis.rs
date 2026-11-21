@@ -5,7 +5,7 @@ use crate::text;
 pub mod label;
 pub mod tick;
 
-pub use label::{Labels, Placement, TextAlign};
+pub use label::{Angle, Labels, Placement, TextAlign};
 pub use tick::{Alignment, Ticks};
 
 /// Orientation of an axis relative to the data area.
@@ -32,6 +32,24 @@ impl Order {
             Order::Reverse => len.saturating_sub(1).saturating_sub(index),
         }
     }
+}
+
+/// Where an axis line sits across the plot.
+///
+/// [`Crossing::Edge`] draws the axis on its own edge of the plot area (a
+/// bottom axis along the bottom). [`Crossing::Value`] draws the line, tick
+/// marks and tick labels where the perpendicular axis equals the value, as
+/// Excel's "axis crosses at" and Matplotlib's data-positioned spines do: a
+/// bottom axis that crosses at `0.0` runs along `y = 0`. A value outside
+/// the perpendicular domain pins the axis to the nearer edge. The axis
+/// keeps its gutter either way, so moving it doesn't resize the plot.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum Crossing {
+    /// On the axis's own plot edge.
+    #[default]
+    Edge,
+    /// Where the perpendicular axis takes this data value.
+    Value(f64),
 }
 
 /// The semantic kind of an axis - determines bounds computation and formatting.
@@ -206,6 +224,11 @@ pub struct Axis {
     pub(crate) lower_bound: Option<f64>,
     pub(crate) upper_bound: Option<f64>,
 
+    /// Direction of the domain along the axis.
+    order: Order,
+    /// Where the axis line crosses the perpendicular axis.
+    crossing: Crossing,
+
     // Display options
     title: Option<String>,
     show_line: bool,
@@ -254,6 +277,8 @@ impl Axis {
             labels: label::Labels::default(),
             lower_bound: None,
             upper_bound: None,
+            order: Order::Forward,
+            crossing: Crossing::Edge,
             title: None,
             show_line: true,
             show_ticks: None,
@@ -324,7 +349,60 @@ impl Axis {
         if new_labels.align.is_some() {
             self.labels.align = new_labels.align;
         }
+        if new_labels.angle.is_some() {
+            self.labels.angle = new_labels.angle;
+        }
         self
+    }
+
+    /// Rotates tick labels by `angle` degrees, counterclockwise-positive.
+    ///
+    /// `45.0` gives the familiar slanted category labels that rise toward
+    /// their tick; `-45.0` slants them the other way and `90.0` stands them
+    /// upright. Angles clamp to `[-90, 90]` (see [`label::Angle`]). Applies
+    /// to horizontal (bottom/top) axes; the guide reserves the rotated
+    /// label's bounding box, so the axis grows to fit. Rotated labels
+    /// aren't ellipsized or wrapped.
+    pub fn label_angle(mut self, angle: impl Into<label::Angle>) -> Self {
+        self.labels.angle = Some(angle.into());
+        self
+    }
+
+    /// Reverses the axis so the domain maximum sits at the origin end: a
+    /// reversed y-axis grows downward (depth, rank), a reversed x-axis grows
+    /// leftward. Works for numeric, log, time and categorical axes; marks,
+    /// gridlines and ticks all follow.
+    pub fn reverse(self) -> Self {
+        self.with_order(Order::Reverse)
+    }
+
+    /// Sets the axis direction explicitly.
+    pub fn with_order(mut self, order: Order) -> Self {
+        self.order = order;
+        self
+    }
+
+    /// Returns the axis direction.
+    pub fn order(&self) -> Order {
+        self.order
+    }
+
+    /// Draws the axis where the perpendicular axis equals `value`, e.g.
+    /// `x_axis(|a| a.crosses_at(0.0))` runs the x-axis along `y = 0`.
+    /// See [`Crossing`].
+    pub fn crosses_at(self, value: f64) -> Self {
+        self.with_crossing(Crossing::Value(value))
+    }
+
+    /// Sets where the axis crosses the perpendicular axis.
+    pub fn with_crossing(mut self, crossing: Crossing) -> Self {
+        self.crossing = crossing;
+        self
+    }
+
+    /// Returns where the axis crosses the perpendicular axis.
+    pub fn crossing(&self) -> Crossing {
+        self.crossing
     }
 
     /// Set label format function (deprecated - use labels() instead).
@@ -543,5 +621,31 @@ impl Axis {
     /// Returns a mutable reference to the tick configuration.
     pub fn ticks_mut(&mut self) -> &mut tick::Ticks {
         &mut self.ticks
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reverse_sets_reverse_order() {
+        let axis = Axis::new(Orientation::Left);
+        assert_eq!(axis.order(), Order::Forward);
+        assert_eq!(axis.reverse().order(), Order::Reverse);
+    }
+
+    #[test]
+    fn crosses_at_records_value() {
+        let axis = Axis::new(Orientation::Bottom);
+        assert_eq!(axis.crossing(), Crossing::Edge);
+        assert_eq!(axis.crosses_at(0.0).crossing(), Crossing::Value(0.0));
+    }
+
+    #[test]
+    fn label_angle_survives_later_label_merges() {
+        let axis = Axis::new(Orientation::Bottom).label_angle(45.0).labels(["a", "b"]);
+        assert_eq!(axis.labels.angle, Some(Angle::degrees(45.0)));
+        assert_eq!(axis.labels.values.as_ref().map(Vec::len), Some(2));
     }
 }

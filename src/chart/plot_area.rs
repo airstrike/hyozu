@@ -51,31 +51,61 @@ pub struct Range {
 }
 
 /// The data domain that the plot area maps to pixels: an x and y [`Range`]
-/// plus the transform applied to the y axis. Carries no pixel geometry — the
-/// destination rectangle is supplied per call to [`to_pixel`] / [`to_data_x`].
+/// plus how each axis maps onto the unit interval. Carries no pixel
+/// geometry — the destination rectangle is supplied per call to
+/// [`to_pixel`] / [`to_data_x`].
 #[derive(Debug, Clone, Copy)]
 pub struct Domain {
     /// Data range along the x axis.
     pub x: Range,
     /// Data range along the y axis.
     pub y: Range,
-    /// Transform applied to the y domain when mapping to pixels.
-    /// Honored by numeric-axis marks via [`to_pixel`]; categorical or
-    /// geographic marks (Pie, Treemap, Choropleth) bypass the domain
-    /// entirely and aren't affected.
-    pub y_transform: crate::scale::Transform,
+    /// Transform and direction of the x axis.
+    pub x_mapping: crate::scale::Mapping,
+    /// Transform and direction of the y axis. Honored by numeric-axis
+    /// marks via [`to_pixel`]; categorical or geographic marks (Pie,
+    /// Treemap, Choropleth) bypass the domain entirely and aren't
+    /// affected.
+    pub y_mapping: crate::scale::Mapping,
+}
+
+impl Domain {
+    /// A domain over `x` and `y` with the given per-axis mappings.
+    pub fn new(x: Range, y: Range, mappings: Mappings) -> Self {
+        Self {
+            x,
+            y,
+            x_mapping: mappings.x,
+            y_mapping: mappings.y,
+        }
+    }
+
+    /// A linear, forward domain over `x` and `y`.
+    pub fn linear(x: Range, y: Range) -> Self {
+        Self::new(x, y, Mappings::default())
+    }
+}
+
+/// The x and y [`crate::scale::Mapping`]s of one axis pair.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Mappings {
+    /// Mapping of the horizontal axis.
+    pub x: crate::scale::Mapping,
+    /// Mapping of the vertical axis.
+    pub y: crate::scale::Mapping,
 }
 
 /// Transform a data point (f64) to pixel coordinates (f32) within `rect`.
 pub fn to_pixel(domain: &Domain, rect: Rectangle, datum: Datum) -> crate::core::Point {
     let x = if domain.x.max > domain.x.min {
-        rect.x + (((datum.x - domain.x.min) / (domain.x.max - domain.x.min)) as f32) * rect.width
+        let unit = domain.x_mapping.map_to_unit(datum.x, domain.x.min, domain.x.max) as f32;
+        rect.x + unit * rect.width
     } else {
         rect.x + rect.width / 2.0
     };
 
     let y = if domain.y.max > domain.y.min {
-        let unit = domain.y_transform.map_to_unit(datum.y, domain.y.min, domain.y.max) as f32;
+        let unit = domain.y_mapping.map_to_unit(datum.y, domain.y.min, domain.y.max) as f32;
         rect.y + rect.height - unit * rect.height
     } else {
         rect.y + rect.height / 2.0
@@ -91,8 +121,57 @@ pub fn to_data_x(domain: &Domain, rect: Rectangle, pixel_x: f32) -> f64 {
         domain.x.min
     } else {
         let t = (pixel_x - rect.x) / rect.width;
-        domain.x.min + (t as f64) * (domain.x.max - domain.x.min)
+        domain.x_mapping.unit_to_value(t as f64, domain.x.min, domain.x.max)
     }
+}
+
+/// Returns `[min, max]` as a [`Range`], lifting a nonpositive `min` on a
+/// log axis to `max / 1e4`.
+///
+/// Log axes can't show nonpositive values; the transform clamps to
+/// `f64::EPSILON` for mapping anyway, which spans ~16 decades of empty
+/// space below any real data. When the user passes `axis_bounds(0.0, …)`
+/// on a log-scaled axis, this documented clamp keeps the rendered range
+/// matching what the guide's tick generation produces.
+fn log_safe_range(min: f64, max: f64, mapping: crate::scale::Mapping) -> Range {
+    if matches!(mapping.transform, crate::scale::Transform::Log) && min <= 0.0 && max > 0.0 {
+        Range { min: max / 1e4, max }
+    } else {
+        Range { min, max }
+    }
+}
+
+/// Minor gridline positions strictly between consecutive major `ticks`.
+///
+/// Linear and sqrt axes split each interval into `subdivisions` equal
+/// steps. Log axes place minors at `2..=9 × 10^k` inside each interval
+/// (plus any decades a strided major sequence skipped), the familiar
+/// semi-log paper ruling.
+fn minor_ticks(ticks: &[f64], transform: crate::scale::Transform, subdivisions: usize) -> Vec<f64> {
+    let mut minors = Vec::new();
+    for pair in ticks.windows(2) {
+        let (t0, t1) = (pair[0].min(pair[1]), pair[0].max(pair[1]));
+        match transform {
+            crate::scale::Transform::Log if t0 > 0.0 => {
+                let mut decade = 10f64.powi(t0.log10().floor() as i32);
+                while decade < t1 {
+                    for k in 1..=9 {
+                        let v = decade * k as f64;
+                        // Skip values within float noise of a major tick.
+                        if v > t0 * (1.0 + 1e-9) && v < t1 * (1.0 - 1e-9) {
+                            minors.push(v);
+                        }
+                    }
+                    decade *= 10.0;
+                }
+            }
+            _ => {
+                let step = (t1 - t0) / subdivisions as f64;
+                minors.extend((1..subdivisions).map(|k| t0 + step * k as f64));
+            }
+        }
+    }
+    minors
 }
 
 /// Builds the shared data-mapping region: the plot rect of `size` inset
@@ -810,11 +889,8 @@ where
 
     /// Layout the plot area - builds the data domains and delegates to each series.
     ///
-    /// `y_transform` and `secondary_y_transform` carry the y-domain
-    /// transform (Linear / Log) for the primary and secondary planes
-    /// respectively. The x-axis transform isn't plumbed here yet;
-    /// `XScale` doesn't expose a numeric transform on its `Linear`
-    /// variant in the v1 surface.
+    /// `mappings` and `secondary_mappings` carry the per-axis transform
+    /// and direction for the primary and secondary planes respectively.
     #[allow(clippy::too_many_arguments)]
     pub fn layout(
         &self,
@@ -825,8 +901,8 @@ where
         secondary_axis_bounds: Option<(f64, f64, f64, f64)>, // bounds from secondary axes
         insets: Insets,                            // Data-rect margins (shared with axis ticks)
         axis_obstacles: &[Rectangle],              // Plot-local axis gutters labels avoid
-        y_transform: crate::scale::Transform,
-        secondary_y_transform: crate::scale::Transform,
+        mappings: Mappings,
+        secondary_mappings: Mappings,
         geo_config: &GeoConfig,
         design: Option<&dyn crate::design::Design>,
     ) {
@@ -834,25 +910,15 @@ where
         let size = limits.bounds();
 
         // Use axis bounds if provided, otherwise compute from data
-        let (x_min, x_max, mut y_min, y_max) = axis_bounds.unwrap_or_else(|| self.compute_data_bounds());
-
-        // Log axes can't show non-positive values; the transform clamps
-        // to `f64::EPSILON` for mapping anyway, which spans ~16 decades
-        // of empty space below any real data. When the user passes
-        // `y_axis_bounds(0.0, …)` on a log-scaled chart, clamp y_min to
-        // a sane positive default derived from y_max so the rendered
-        // range matches what tick generation produces.
-        if matches!(y_transform, crate::scale::Transform::Log) && y_min <= 0.0 && y_max > 0.0 {
-            y_min = y_max / 1e4;
-        }
+        let (x_min, x_max, y_min, y_max) = axis_bounds.unwrap_or_else(|| self.compute_data_bounds());
 
         let plot_rect = content_rect(size, insets);
 
-        let domain = Domain {
-            x: Range { min: x_min, max: x_max },
-            y: Range { min: y_min, max: y_max },
-            y_transform,
-        };
+        let domain = Domain::new(
+            log_safe_range(x_min, x_max, mappings.x),
+            log_safe_range(y_min, y_max, mappings.y),
+            mappings,
+        );
 
         // Build a secondary domain when the scene provides secondary axis
         // bounds. If not provided but secondary marks exist, fall back to
@@ -860,21 +926,12 @@ where
         // shared `plot_rect`.
         let has_secondary_marks = self.axis_side.contains(&AxisSide::Secondary);
         let secondary_domain = if has_secondary_marks {
-            let (sx_min, sx_max, mut sy_min, sy_max) = secondary_axis_bounds.unwrap_or((x_min, x_max, y_min, y_max));
-            if matches!(secondary_y_transform, crate::scale::Transform::Log) && sy_min <= 0.0 && sy_max > 0.0 {
-                sy_min = sy_max / 1e4;
-            }
-            Some(Domain {
-                x: Range {
-                    min: sx_min,
-                    max: sx_max,
-                },
-                y: Range {
-                    min: sy_min,
-                    max: sy_max,
-                },
-                y_transform: secondary_y_transform,
-            })
+            let (sx_min, sx_max, sy_min, sy_max) = secondary_axis_bounds.unwrap_or((x_min, x_max, y_min, y_max));
+            Some(Domain::new(
+                log_safe_range(sx_min, sx_max, secondary_mappings.x),
+                log_safe_range(sy_min, sy_max, secondary_mappings.y),
+                secondary_mappings,
+            ))
         } else {
             None
         };
@@ -1006,6 +1063,60 @@ where
         tree.size = size;
     }
 
+    /// The plot-local shift that carries `axis` from its own edge of the
+    /// data rect to its [`crate::axis::Crossing`] value.
+    ///
+    /// Bottom and left axes cross the primary plane; top and right axes the
+    /// secondary plane (or the primary when there's none). The crossing
+    /// clamps into the data rect, so a value outside the perpendicular
+    /// domain pins the axis to the nearer edge. Zero for edge axes and
+    /// before the first layout.
+    pub fn crossing_offset(&self, tree: &Tree, axis: &crate::data::Axis) -> crate::core::Vector {
+        use crate::data::axis::{Crossing, Orientation};
+
+        let Crossing::Value(value) = axis.crossing() else {
+            return crate::core::Vector::ZERO;
+        };
+        let state = tree.state.downcast_ref::<State>();
+        let domain = match axis.orientation() {
+            Orientation::Bottom | Orientation::Left => state.domain.as_ref(),
+            Orientation::Top | Orientation::Right => state.secondary_domain.as_ref().or(state.domain.as_ref()),
+        };
+        let Some(domain) = domain else {
+            return crate::core::Vector::ZERO;
+        };
+        if !value.is_finite() {
+            return crate::core::Vector::ZERO;
+        }
+        let rect = state.content_rect;
+        let (top, bottom) = (rect.y, rect.y + rect.height);
+        let (left, right) = (rect.x, rect.x + rect.width);
+        match axis.orientation() {
+            Orientation::Bottom | Orientation::Top => {
+                let y = to_pixel(domain, rect, Datum::new(domain.x.min, value))
+                    .y
+                    .clamp(top, bottom);
+                let edge = if axis.orientation() == Orientation::Bottom {
+                    bottom
+                } else {
+                    top
+                };
+                crate::core::Vector::new(0.0, y - edge)
+            }
+            Orientation::Left | Orientation::Right => {
+                let x = to_pixel(domain, rect, Datum::new(value, domain.y.min))
+                    .x
+                    .clamp(left, right);
+                let edge = if axis.orientation() == Orientation::Left {
+                    left
+                } else {
+                    right
+                };
+                crate::core::Vector::new(x - edge, 0.0)
+            }
+        }
+    }
+
     /// Draws major and minor gridlines into the plot area.
     ///
     /// Called before `draw()` so marks render on top of gridlines. The tick
@@ -1091,17 +1202,12 @@ where
             let y0 = snap_v(top);
             let y1 = snap_v(bottom);
             let path = Path::new(|b| {
-                for w in x_ticks.windows(2) {
-                    let (t0, t1) = (w[0], w[1]);
-                    let step = (t1 - t0) / minor_subdivs as f64;
-                    for k in 1..minor_subdivs {
-                        let t = t0 + step * k as f64;
-                        let px = to_pixel(domain, rect, crate::data::Datum::new(t, 0.0)).x;
-                        if px >= left && px <= right {
-                            let px = snap_h(px);
-                            b.move_to(crate::core::Point::new(px, y0));
-                            b.line_to(crate::core::Point::new(px, y1));
-                        }
+                for t in minor_ticks(x_ticks, domain.x_mapping.transform, minor_subdivs) {
+                    let px = to_pixel(domain, rect, crate::data::Datum::new(t, 0.0)).x;
+                    if px >= left && px <= right {
+                        let px = snap_h(px);
+                        b.move_to(crate::core::Point::new(px, y0));
+                        b.line_to(crate::core::Point::new(px, y1));
                     }
                 }
             });
@@ -1116,17 +1222,12 @@ where
             let x0 = snap_h(left);
             let x1 = snap_h(right);
             let path = Path::new(|b| {
-                for w in y_ticks.windows(2) {
-                    let (t0, t1) = (w[0], w[1]);
-                    let step = (t1 - t0) / minor_subdivs as f64;
-                    for k in 1..minor_subdivs {
-                        let t = t0 + step * k as f64;
-                        let py = to_pixel(domain, rect, crate::data::Datum::new(0.0, t)).y;
-                        if py >= top && py <= bottom {
-                            let py = snap_v(py);
-                            b.move_to(crate::core::Point::new(x0, py));
-                            b.line_to(crate::core::Point::new(x1, py));
-                        }
+                for t in minor_ticks(y_ticks, domain.y_mapping.transform, minor_subdivs) {
+                    let py = to_pixel(domain, rect, crate::data::Datum::new(0.0, t)).y;
+                    if py >= top && py <= bottom {
+                        let py = snap_v(py);
+                        b.move_to(crate::core::Point::new(x0, py));
+                        b.line_to(crate::core::Point::new(x1, py));
                     }
                 }
             });
@@ -1269,18 +1370,28 @@ where
         let y_top = snap_v(top);
         let y_bottom = snap_v(bottom);
 
+        // Spines that cross the plot at a data value move off their edge;
+        // the extents they span stay the full data rect.
+        let shift = |axis: Option<&crate::data::Axis>| {
+            axis.map_or(crate::core::Vector::ZERO, |axis| self.crossing_offset(tree, axis))
+        };
+        let spine_left = snap_h(left + shift(left_axis).x);
+        let spine_right = snap_h(right + shift(right_axis).x);
+        let spine_top = snap_v(top + shift(top_axis).y);
+        let spine_bottom = snap_v(bottom + shift(bottom_axis).y);
+
         if draws_left {
             let path = Path::line(
-                crate::core::Point::new(x_left, y_top),
-                crate::core::Point::new(x_left, y_bottom),
+                crate::core::Point::new(spine_left, y_top),
+                crate::core::Point::new(spine_left, y_bottom),
             );
             frame.stroke(&path, Stroke::default().with_width(1.0).with_color(resolve(left_axis)));
         }
 
         if draws_bottom {
             let path = Path::line(
-                crate::core::Point::new(x_left, y_bottom),
-                crate::core::Point::new(x_right, y_bottom),
+                crate::core::Point::new(x_left, spine_bottom),
+                crate::core::Point::new(x_right, spine_bottom),
             );
             frame.stroke(
                 &path,
@@ -1290,16 +1401,16 @@ where
 
         if draws_top {
             let path = Path::line(
-                crate::core::Point::new(x_left, y_top),
-                crate::core::Point::new(x_right, y_top),
+                crate::core::Point::new(x_left, spine_top),
+                crate::core::Point::new(x_right, spine_top),
             );
             frame.stroke(&path, Stroke::default().with_width(1.0).with_color(resolve(top_axis)));
         }
 
         if draws_right {
             let path = Path::line(
-                crate::core::Point::new(x_right, y_top),
-                crate::core::Point::new(x_right, y_bottom),
+                crate::core::Point::new(spine_right, y_top),
+                crate::core::Point::new(spine_right, y_bottom),
             );
             frame.stroke(&path, Stroke::default().with_width(1.0).with_color(resolve(right_axis)));
         }
@@ -1682,5 +1793,72 @@ mod tests {
         let rect = content_rect(size, insets(80.0, 80.0, 70.0, 70.0));
         assert_eq!(rect.width, 0.0);
         assert_eq!(rect.height, 0.0);
+    }
+
+    fn log_x_reversed_y() -> Domain {
+        Domain::new(
+            Range { min: 1.0, max: 1000.0 },
+            Range { min: 0.0, max: 100.0 },
+            Mappings {
+                x: crate::scale::Mapping::new(crate::scale::Transform::Log, crate::axis::Order::Forward),
+                y: crate::scale::Mapping::new(crate::scale::Transform::Linear, crate::axis::Order::Reverse),
+            },
+        )
+    }
+
+    #[test]
+    fn to_pixel_honors_log_x_and_reversed_y() {
+        let domain = log_x_reversed_y();
+        let rect = Rectangle::new(crate::core::Point::new(10.0, 20.0), Size::new(300.0, 200.0));
+        let p = to_pixel(&domain, rect, Datum::new(10.0, 0.0));
+        // 10 sits one third along a three-decade axis.
+        assert!((p.x - 110.0).abs() < 1e-3, "x was {}", p.x);
+        // Reversed y: the minimum sits at the top edge.
+        assert!((p.y - 20.0).abs() < 1e-3, "y was {}", p.y);
+        let p = to_pixel(&domain, rect, Datum::new(1000.0, 100.0));
+        assert!((p.x - 310.0).abs() < 1e-3);
+        assert!((p.y - 220.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn to_data_x_inverts_log_x() {
+        let domain = log_x_reversed_y();
+        let rect = Rectangle::new(crate::core::Point::new(10.0, 20.0), Size::new(300.0, 200.0));
+        for x in [1.0, 4.0, 10.0, 250.0, 1000.0] {
+            let px = to_pixel(&domain, rect, Datum::new(x, 50.0)).x;
+            let back = to_data_x(&domain, rect, px);
+            assert!((back - x).abs() < 1e-3 * x, "{x} -> {px} -> {back}");
+        }
+    }
+
+    #[test]
+    fn log_safe_range_lifts_nonpositive_minimum() {
+        let log = crate::scale::Mapping::new(crate::scale::Transform::Log, crate::axis::Order::Forward);
+        let r = log_safe_range(0.0, 500.0, log);
+        assert_eq!((r.min, r.max), (0.05, 500.0));
+        let r = log_safe_range(0.0, 500.0, crate::scale::Mapping::default());
+        assert_eq!((r.min, r.max), (0.0, 500.0));
+    }
+
+    #[test]
+    fn minor_ticks_rule_log_decades() {
+        let minors = minor_ticks(&[1.0, 10.0, 100.0], crate::scale::Transform::Log, 4);
+        let expected: Vec<f64> = (2..=9)
+            .map(f64::from)
+            .chain((2..=9).map(|k| f64::from(k) * 10.0))
+            .collect();
+        assert_eq!(minors.len(), expected.len());
+        for (m, e) in minors.iter().zip(&expected) {
+            assert!((m - e).abs() < 1e-9, "{m} vs {e}");
+        }
+        // A strided major sequence keeps the skipped decade as a minor.
+        let minors = minor_ticks(&[1.0, 100.0], crate::scale::Transform::Log, 4);
+        assert!(minors.iter().any(|m| (m - 10.0).abs() < 1e-9));
+    }
+
+    #[test]
+    fn minor_ticks_split_linear_intervals() {
+        let minors = minor_ticks(&[0.0, 4.0], crate::scale::Transform::Linear, 4);
+        assert_eq!(minors, vec![1.0, 2.0, 3.0]);
     }
 }
