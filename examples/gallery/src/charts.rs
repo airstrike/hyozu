@@ -1,5 +1,6 @@
 mod area_basic;
 mod area_stacked;
+mod axes;
 mod bar_basic;
 mod bar_horizontal;
 mod bar_labels;
@@ -957,6 +958,17 @@ pub fn variants() -> Vec<Variant> {
             summaries::error_amounts,
             "charts/summaries.rs"
         ),
+        variant!(138, "Log–log", Scatter, Flat, axes::log_log, "charts/axes.rs"),
+        variant!(
+            139,
+            "Reversed depth",
+            Line,
+            Flat,
+            axes::reversed_depth,
+            "charts/axes.rs"
+        ),
+        variant!(140, "Rotated labels", Bar, Flat, axes::rotated_labels, "charts/axes.rs"),
+        variant!(141, "Origin axes", Line, Flat, axes::origin_axes, "charts/axes.rs"),
     ]
 }
 

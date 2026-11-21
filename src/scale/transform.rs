@@ -1,5 +1,7 @@
 //! Numeric-axis transform: how values map to screen position.
 
+pub mod log;
+
 /// Compute a "nice" step size for `span` divided into roughly `max_ticks`
 /// intervals. Implements the Heckbert algorithm: snap the raw step to the
 /// nearest of `{1, 2, 5, 10} × 10^k`, where `k` is chosen from the order
@@ -134,6 +136,45 @@ impl Transform {
             }
         }
     }
+
+    /// Inverse of [`Self::map_to_unit`]: maps a unit position back onto
+    /// the domain `[min, max]`.
+    ///
+    /// Round-trips every in-domain value. Positions outside `[0, 1]`
+    /// extrapolate for [`Self::Linear`] and [`Self::Log`]; for
+    /// [`Self::Sqrt`] negative positions return `min`, mirroring the
+    /// below-domain clamp of the forward map. Degenerate domains return
+    /// `min`. [`Self::Log`] applies the same [`f64::EPSILON`] clamp to the
+    /// domain ends as the forward map.
+    pub fn unit_to_value(&self, unit: f64, min: f64, max: f64) -> f64 {
+        match self {
+            Self::Linear => {
+                if (max - min).abs() < f64::EPSILON {
+                    min
+                } else {
+                    min + unit * (max - min)
+                }
+            }
+            Self::Log => {
+                let lo = min.max(f64::EPSILON).log10();
+                let hi = max.max(f64::EPSILON).log10();
+                if (hi - lo).abs() < f64::EPSILON {
+                    min
+                } else {
+                    10f64.powf(lo + unit * (hi - lo))
+                }
+            }
+            Self::Sqrt => {
+                let span = (max - min).max(0.0);
+                if span <= f64::EPSILON {
+                    min
+                } else {
+                    let root = unit.max(0.0) * span.sqrt();
+                    min + root * root
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -236,6 +277,47 @@ mod tests {
         let t = Transform::Sqrt;
         assert!(close(t.map_to_unit(-10.0, 0.0, 100.0), 0.0));
         assert!(close(t.map_to_unit(-1.0, 5.0, 25.0), 0.0));
+    }
+
+    #[test]
+    fn unit_to_value_inverts_every_transform() {
+        let domains = [(0.0, 10.0), (-4.0, 8.0), (1.0, 1000.0), (0.5, 64.0)];
+        for transform in [Transform::Linear, Transform::Log, Transform::Sqrt] {
+            for (min, max) in domains {
+                if transform == Transform::Log && min <= 0.0 {
+                    continue;
+                }
+                for k in 0..=8 {
+                    let value = min + (max - min) * k as f64 / 8.0;
+                    let unit = transform.map_to_unit(value, min, max);
+                    let back = transform.unit_to_value(unit, min, max);
+                    assert!(
+                        (back - value).abs() < 1e-9 * value.abs().max(1.0),
+                        "{transform:?} [{min}, {max}]: {value} -> {unit} -> {back}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn unit_to_value_log_lands_on_decades() {
+        let t = Transform::Log;
+        assert!(close(t.unit_to_value(0.0, 1.0, 1000.0), 1.0));
+        assert!(close(t.unit_to_value(1.0 / 3.0, 1.0, 1000.0), 10.0));
+        assert!(close(t.unit_to_value(1.0, 1.0, 1000.0), 1000.0));
+    }
+
+    #[test]
+    fn unit_to_value_degenerate_domain_returns_min() {
+        for t in [Transform::Linear, Transform::Log, Transform::Sqrt] {
+            assert!(close(t.unit_to_value(0.3, 5.0, 5.0), 5.0));
+        }
+    }
+
+    #[test]
+    fn unit_to_value_sqrt_clamps_below_domain() {
+        assert!(close(Transform::Sqrt.unit_to_value(-0.5, 2.0, 18.0), 2.0));
     }
 
     #[test]

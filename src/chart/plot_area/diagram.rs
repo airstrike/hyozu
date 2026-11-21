@@ -349,11 +349,7 @@ mod tests {
         let mut tree = state::<Paragraph>();
         let size = Size::new(200., 200.);
         let unit = super::super::Range { min: 0., max: 1. };
-        let domain = super::super::Domain {
-            x: unit,
-            y: unit,
-            y_transform: crate::Transform::default(),
-        };
+        let domain = super::super::Domain::linear(unit, unit);
         layout(
             &d,
             &mut tree,
@@ -380,11 +376,7 @@ mod tests {
         let mut tree = state::<Paragraph>();
         let size = Size::new(400., 280.);
         let unit = super::super::Range { min: 0., max: 1. };
-        let domain = super::super::Domain {
-            x: unit,
-            y: unit,
-            y_transform: crate::Transform::default(),
-        };
+        let domain = super::super::Domain::linear(unit, unit);
         layout(
             &d,
             &mut tree,

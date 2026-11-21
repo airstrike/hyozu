@@ -3020,14 +3020,7 @@ fn draw_cartesian_tooltip_overlay<Message>(
     let text_color = design.text_color().resolve(background, text_pair, &seed, None);
 
     // Compute the tracking pixel x from data_x
-    let tracking_pixel_x = {
-        let t = if domain.x.max > domain.x.min {
-            ((data_x - domain.x.min) / (domain.x.max - domain.x.min)) as f32
-        } else {
-            0.5
-        };
-        content_rect.x + t * content_rect.width
-    };
+    let tracking_pixel_x = plot_area::to_pixel(domain, content_rect, crate::data::Datum::x(data_x)).x;
 
     let entries = cartesian_rows(
         design,
@@ -4047,11 +4040,7 @@ mod tests {
                 Rectangle::new(Point::new(140.0, 40.0), Size::new(20.0, 60.0)),
             ],
         ];
-        let domain = Domain {
-            x: Range { min: 0.0, max: 1.0 },
-            y: Range { min: 0.0, max: 40.0 },
-            y_transform: crate::Transform::default(),
-        };
+        let domain = Domain::linear(Range { min: 0.0, max: 1.0 }, Range { min: 0.0, max: 40.0 });
         let rect = Rectangle::with_size(Size::new(200.0, 100.0));
         let targets = navigation::targets(&plot, &tree);
         assert_eq!(targets.len(), 2, "one keyboard stop per category, not per series");

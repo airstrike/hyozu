@@ -69,6 +69,11 @@ pub struct Data {
     /// Format + transform for the y channel.
     pub(crate) y_scale: crate::scale::Scale<f64>,
 
+    /// Transform + nice flag for the secondary (right) y axis. Independent
+    /// of [`Data::y_scale`]: a log primary axis leaves a secondary margin
+    /// axis linear, as in Excel and Matplotlib's `twinx`.
+    pub(crate) secondary_y_scale: crate::scale::Scale<f64>,
+
     /// Format + transform for the size channel (bubble radius, etc.).
     pub(crate) size_scale: crate::scale::Scale<f64>,
 
@@ -123,6 +128,7 @@ impl Default for Data {
             tooltip: Some(tooltip::Tooltip::default()),
             value_scale: crate::scale::Scale::default(),
             y_scale: crate::scale::Scale::default(),
+            secondary_y_scale: crate::scale::Scale::default(),
             size_scale: crate::scale::Scale::default(),
             color_scale: crate::scale::Scale::default(),
             x_scale: crate::scale::XScale::default(),
@@ -596,6 +602,54 @@ impl Data {
         self.y_scale = self.y_scale.log();
         self.invalidate();
         self
+    }
+
+    /// Sets the transform on the x channel (log or sqrt x). The x-axis
+    /// must be numeric to carry one, so a category or time [`XScale`]
+    /// becomes a default numeric scale; see [`XScale::with_transform`].
+    /// Applies to the bottom axis and, when present, the top axis.
+    ///
+    /// Bumps [`Self::generation`] so a chart rebuilt with this transform
+    /// animates between layouts.
+    ///
+    /// [`XScale`]: crate::scale::XScale
+    /// [`XScale::with_transform`]: crate::scale::XScale::with_transform
+    pub fn x_transform(mut self, transform: crate::scale::Transform) -> Self {
+        self.x_scale = self.x_scale.with_transform(transform);
+        self.invalidate();
+        self
+    }
+
+    /// Switches the x channel to a logarithmic transform. Sugar for
+    /// `x_transform(Transform::Log)`.
+    ///
+    /// Auto-derived bounds come from the smallest positive x; nonpositive
+    /// samples can't sit on a log axis and render clamped past the left
+    /// edge (see [`crate::scale::Transform::Log`]).
+    pub fn x_log(self) -> Self {
+        self.x_transform(crate::scale::Transform::Log)
+    }
+
+    /// Sets the secondary (right) y axis scale wholesale. Only its
+    /// transform and nice flag are read; the right axis formats through
+    /// its own [`Axis::labels`].
+    pub fn secondary_y_scale(mut self, scale: crate::scale::Scale<f64>) -> Self {
+        self.secondary_y_scale = scale;
+        self.invalidate();
+        self
+    }
+
+    /// Switches the secondary (right) y axis to a logarithmic transform,
+    /// independent of the primary y axis.
+    pub fn secondary_y_log(mut self) -> Self {
+        self.secondary_y_scale = self.secondary_y_scale.log();
+        self.invalidate();
+        self
+    }
+
+    /// Returns the secondary (right) y axis scale.
+    pub fn secondary_y_scale_ref(&self) -> &crate::scale::Scale<f64> {
+        &self.secondary_y_scale
     }
 
     /// Returns the value channel's scale.

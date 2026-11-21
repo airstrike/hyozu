@@ -38,6 +38,57 @@ pub enum Overflow {
     Wrap,
 }
 
+/// Tick-label rotation in degrees, counterclockwise-positive, clamped to
+/// `[-90, 90]`.
+///
+/// Positive angles rise toward the tick (the text ends at its tick on a
+/// bottom axis); negative angles fall away from it (the text starts at its
+/// tick). Beyond ±90° text would read upside down, so [`Angle::degrees`]
+/// clamps there; NaN becomes `0`.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Angle(f32);
+
+impl Angle {
+    /// Unrotated labels.
+    pub const ZERO: Self = Self(0.0);
+
+    /// Builds an angle from degrees, clamping into `[-90, 90]`.
+    pub fn degrees(degrees: f32) -> Self {
+        if degrees.is_nan() {
+            Self::ZERO
+        } else {
+            Self(degrees.clamp(-90.0, 90.0))
+        }
+    }
+
+    /// The angle in degrees.
+    pub fn as_degrees(self) -> f32 {
+        self.0
+    }
+
+    /// The angle in radians.
+    pub fn as_radians(self) -> f32 {
+        self.0.to_radians()
+    }
+
+    /// Whether labels are drawn unrotated.
+    pub fn is_zero(self) -> bool {
+        self.0 == 0.0
+    }
+}
+
+impl From<f32> for Angle {
+    fn from(degrees: f32) -> Self {
+        Self::degrees(degrees)
+    }
+}
+
+impl From<f64> for Angle {
+    fn from(degrees: f64) -> Self {
+        Self::degrees(degrees as f32)
+    }
+}
+
 /// Axis labels configuration containing placement, values, and formatting
 #[derive(Clone, Default)]
 pub struct Labels {
@@ -56,6 +107,10 @@ pub struct Labels {
     /// What to do when a label's intrinsic width exceeds its column.
     pub overflow: Overflow,
 
+    /// Rotation of tick labels on horizontal axes. `None` draws them
+    /// unrotated.
+    pub angle: Option<Angle>,
+
     /// Typography override for tick labels.
     pub text: crate::text::Style,
 }
@@ -68,6 +123,7 @@ impl std::fmt::Debug for Labels {
             .field("format", &self.format.as_ref().map(|_| "<function>"))
             .field("align", &self.align)
             .field("overflow", &self.overflow)
+            .field("angle", &self.angle)
             .field("text", &self.text)
             .finish()
     }
@@ -109,6 +165,12 @@ impl Labels {
     /// Set the overflow strategy for labels that exceed their column width.
     pub fn with_overflow(mut self, overflow: Overflow) -> Self {
         self.overflow = overflow;
+        self
+    }
+
+    /// Rotates the labels by `angle` degrees. See [`Angle`].
+    pub fn with_angle(mut self, angle: impl Into<Angle>) -> Self {
+        self.angle = Some(angle.into());
         self
     }
 
@@ -344,5 +406,19 @@ mod tests {
     fn labels_with_overflow_builder_sets_field() {
         let labels = Labels::new().with_overflow(Overflow::Wrap);
         assert_eq!(labels.overflow, Overflow::Wrap);
+    }
+
+    #[test]
+    fn angle_clamps_to_upright_range() {
+        assert_eq!(Angle::degrees(135.0).as_degrees(), 90.0);
+        assert_eq!(Angle::degrees(-200.0).as_degrees(), -90.0);
+        assert_eq!(Angle::degrees(f32::NAN), Angle::ZERO);
+        assert_eq!(Angle::from(30.0).as_degrees(), 30.0);
+    }
+
+    #[test]
+    fn labels_with_angle_builder_sets_field() {
+        let labels = Labels::new().with_angle(-45.0);
+        assert_eq!(labels.angle, Some(Angle::degrees(-45.0)));
     }
 }

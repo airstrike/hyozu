@@ -108,16 +108,6 @@ fn target_tick_count(axis_length: Option<f32>, kind: Kind, orientation: Orientat
     raw.clamp(MIN as i64, MAX as i64) as usize
 }
 
-/// Snap a numeric domain outward to decade boundaries for log-axis use.
-/// Non-positive bounds clamp to `f64::EPSILON` first.
-fn log_nice_bounds(min: f64, max: f64) -> (f64, f64) {
-    let lo = min.max(f64::EPSILON);
-    let hi = max.max(lo * 10.0);
-    let lo_dec = 10_f64.powi(lo.log10().floor() as i32);
-    let hi_dec = 10_f64.powi(hi.log10().ceil() as i32);
-    (lo_dec, hi_dec)
-}
-
 /// Generate log-axis ticks at integer powers of 10 within `[min, max]`.
 ///
 /// Non-positive lower bounds are nonsensical on a log axis (the
@@ -149,6 +139,109 @@ fn log_ticks(min: f64, max: f64) -> Vec<f64> {
     let count = (hi_exp - lo_exp + 1) as usize;
     let stride = count.div_ceil(MAX_TICKS).max(1);
     (lo_exp..=hi_exp).step_by(stride).map(|k| 10_f64.powi(k)).collect()
+}
+
+/// Running extent of the data values an axis must show.
+///
+/// Tracks the smallest positive value alongside the plain minimum so a log
+/// axis can derive its range from the data it can actually place, the way
+/// Matplotlib autoscales log axes from `minpos`.
+#[derive(Debug, Clone, Copy)]
+struct Extent {
+    min: f64,
+    max: f64,
+    min_positive: f64,
+}
+
+impl Extent {
+    const EMPTY: Self = Self {
+        min: f64::INFINITY,
+        max: f64::NEG_INFINITY,
+        min_positive: f64::INFINITY,
+    };
+
+    /// Widens the extent to cover `value`. NaN is ignored.
+    fn include(&mut self, value: f64) {
+        if value.is_nan() {
+            return;
+        }
+        self.min = self.min.min(value);
+        self.max = self.max.max(value);
+        if value > 0.0 {
+            self.min_positive = self.min_positive.min(value);
+        }
+    }
+
+    /// The `(min, max)` range, or `(0, 1)` when nothing finite was seen.
+    fn range(&self) -> (f64, f64) {
+        if self.min.is_infinite() || self.max.is_infinite() {
+            (0.0, 1.0)
+        } else {
+            (self.min, self.max)
+        }
+    }
+}
+
+/// Placement of one rotated tick label relative to its tick.
+///
+/// The label's unrotated text box has its origin at the top-left. `pivot`
+/// is the point of that box pinned to the tick: the text's end for labels
+/// that rise toward the tick, its start for labels that fall away from it,
+/// both at mid-height. `bounds` is the rotated text box's axis-aligned
+/// bounding box with the pivot at the origin, so `-bounds.x` is how far the
+/// label reaches before its tick, `bounds.x + bounds.width` how far after,
+/// and `bounds.height` how deep it reaches away from the axis.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Footprint {
+    pivot: Point,
+    bounds: Rectangle,
+}
+
+impl Footprint {
+    /// Footprint of a `size` label rotated by `angle` on a horizontal axis
+    /// of `orientation`.
+    fn rotated(size: Size, angle: crate::axis::Angle, orientation: Orientation) -> Self {
+        let theta = angle.as_radians();
+        let rises = theta >= 0.0;
+        // Bottom labels hang below the axis, so a label that rises toward
+        // its tick ends there; top labels sit above it, so a rising label
+        // starts there.
+        let ends_at_tick = match orientation {
+            Orientation::Top => !rises,
+            Orientation::Bottom | Orientation::Left | Orientation::Right => rises,
+        };
+        let pivot = Point::new(if ends_at_tick { size.width } else { 0.0 }, size.height / 2.0);
+        let (sin, cos) = theta.sin_cos();
+        let mut min = Point::new(f32::INFINITY, f32::INFINITY);
+        let mut max = Point::new(f32::NEG_INFINITY, f32::NEG_INFINITY);
+        for (cx, cy) in [
+            (0.0, 0.0),
+            (size.width, 0.0),
+            (0.0, size.height),
+            (size.width, size.height),
+        ] {
+            let (dx, dy) = (cx - pivot.x, cy - pivot.y);
+            // Counterclockwise on screen (y grows downward).
+            let x = dx * cos + dy * sin;
+            let y = -dx * sin + dy * cos;
+            min = Point::new(min.x.min(x), min.y.min(y));
+            max = Point::new(max.x.max(x), max.y.max(y));
+        }
+        Self {
+            pivot,
+            bounds: Rectangle::new(min, Size::new(max.x - min.x, max.y - min.y)),
+        }
+    }
+
+    /// Pixels the label reaches before (left of) its tick.
+    fn before(&self) -> f32 {
+        -self.bounds.x
+    }
+
+    /// Pixels the label reaches after (right of) its tick.
+    fn after(&self) -> f32 {
+        self.bounds.x + self.bounds.width
+    }
 }
 
 use jiff::Timestamp;
@@ -432,6 +525,11 @@ where
     pub label_insets: (f32, f32),
     pub tick_space: f32,
     pub label_offset: f32,
+    /// Resolved tick-label font, cached at layout for rotated labels,
+    /// which draw through canvas text instead of the shaped paragraphs.
+    pub label_font: crate::core::Font,
+    /// Resolved tick-label size, cached alongside [`State::label_font`].
+    pub label_size: crate::core::Pixels,
 }
 
 /// A Guide wraps an Axis and handles UI layout with proper text measurement.
@@ -445,10 +543,11 @@ where
 {
     axis: &'a Axis,
     marks: &'a [crate::Mark],
-    /// Transform applied to the numeric domain when generating ticks.
-    /// Categorical and time axes ignore this; only Scalar axes route
-    /// through it.
-    transform: crate::scale::Transform,
+    /// Transform and direction of the numeric domain. The transform drives
+    /// tick generation for scalar axes (categorical and time axes keep
+    /// their own tick logic); the direction comes from [`Axis::order`].
+    /// Tick and label positions map through it, matching the plot area.
+    mapping: crate::scale::Mapping,
     /// Whether numeric-axis bounds should round outward to nice numbers
     /// when no explicit bounds are set on the axis. `true` matches
     /// historical behavior (`Kind::Scalar.bounds()`); `false` keeps the
@@ -470,7 +569,7 @@ where
         Self {
             axis,
             marks,
-            transform: crate::scale::Transform::default(),
+            mapping: crate::scale::Mapping::new(crate::scale::Transform::default(), axis.order()),
             nice: true,
             _renderer: std::marker::PhantomData,
         }
@@ -480,8 +579,13 @@ where
     /// [`crate::scale::Transform::Log`], ticks land on integer powers of
     /// 10 within the domain.
     pub fn with_transform(mut self, transform: crate::scale::Transform) -> Self {
-        self.transform = transform;
+        self.mapping.transform = transform;
         self
+    }
+
+    /// Returns the transform and direction ticks are placed with.
+    pub fn mapping(&self) -> crate::scale::Mapping {
+        self.mapping
     }
 
     /// Sets whether the auto-derived axis bounds should round outward to
@@ -501,49 +605,60 @@ where
     /// Compute the axis bounds (visual range) for this axis.
     ///
     /// Uses `Kind::bounds()` to apply kind-appropriate normalization (padding,
-    /// nice numbers, zero-anchoring) based on the axis kind. For log-transformed
-    /// axes, falls back to decade-aligned bounds instead so the nice-step path
+    /// nice numbers, zero-anchoring) based on the axis kind. Log-transformed
+    /// axes go through [`Self::log_bounds`] instead, so the nice-step path
     /// doesn't snap the lower bound to zero (which has no place on a log axis).
     fn compute_axis_bounds(&self) -> Bounds {
         let is_x_axis = matches!(self.axis.orientation(), Orientation::Bottom | Orientation::Top);
+        let extent = self.find_range(is_x_axis);
 
-        // Get data range
-        let (data_min, data_max) = self.find_range(is_x_axis);
+        if matches!(self.mapping.transform, crate::scale::Transform::Log) {
+            return self.log_bounds(extent);
+        }
 
-        // Check for explicit user bounds
-        let has_explicit_bounds = self.axis.lower_bound.is_some() && self.axis.upper_bound.is_some();
-
-        if has_explicit_bounds {
-            let lower = self.axis.lower_bound.unwrap();
-            let upper = self.axis.upper_bound.unwrap();
-            // Log axes can't show non-positive values; the transform
-            // clamps to `f64::EPSILON` for mapping anyway, which spans
-            // ~16 decades of empty space below any real data. Clamp the
-            // user's lower to a positive default derived from `upper`
-            // so tick positioning, gridlines, and the rendered plane
-            // all agree on the same range.
-            if matches!(self.transform, crate::scale::Transform::Log) && lower <= 0.0 && upper > 0.0 {
-                Bounds::exact(upper / 1e4, upper)
-            } else {
-                Bounds::exact(lower, upper)
-            }
-        } else {
-            // Apply partial overrides if any, then let Kind compute proper bounds
-            let min = self.axis.lower_bound.unwrap_or(data_min);
-            let max = self.axis.upper_bound.unwrap_or(data_max);
-            if matches!(self.transform, crate::scale::Transform::Log) {
+        let (data_min, data_max) = extent.range();
+        match (self.axis.lower_bound, self.axis.upper_bound) {
+            (Some(lower), Some(upper)) => Bounds::exact(lower, upper),
+            (lower, upper) => {
+                // Apply partial overrides if any, then let Kind compute proper bounds
+                let min = lower.unwrap_or(data_min);
+                let max = upper.unwrap_or(data_max);
                 if self.nice {
-                    let (lo, hi) = log_nice_bounds(min, max);
-                    Bounds::exact(lo, hi)
+                    self.axis.kind().bounds(min, max)
                 } else {
                     Bounds::exact(min, max)
                 }
-            } else if self.nice {
-                self.axis.kind().bounds(min, max)
-            } else {
-                Bounds::exact(min, max)
             }
         }
+    }
+
+    /// Bounds for a log axis, validated through [`log::Domain`].
+    ///
+    /// Auto-derived lower bounds come from the smallest *positive* datum, so
+    /// a zero or negative sample doesn't stretch the axis across sixteen
+    /// empty decades. A nonpositive lower bound can still arrive explicitly
+    /// (`axis_bounds(0.0, …)`); that case keeps the upper bound and shows
+    /// four decades beneath it, matching the plot area's clamp. An axis
+    /// with nothing positive to show falls back to [`log::Domain::unit_decade`].
+    /// Auto-derived ends round out to decades when `nice` is on; explicit
+    /// bounds are kept as given.
+    ///
+    /// [`log::Domain`]: crate::scale::transform::log::Domain
+    /// [`log::Domain::unit_decade`]: crate::scale::transform::log::Domain::unit_decade
+    fn log_bounds(&self, extent: Extent) -> Bounds {
+        use crate::scale::transform::log;
+
+        let explicit = self.axis.lower_bound.is_some() && self.axis.upper_bound.is_some();
+        let lo = self.axis.lower_bound.unwrap_or(extent.min_positive);
+        let hi = self.axis.upper_bound.unwrap_or(extent.max);
+        let domain = log::Domain::new(lo, hi)
+            .or_else(|error| match error {
+                log::Error::NonPositive { .. } => log::Domain::new(hi / 1e4, hi),
+                other => Err(other),
+            })
+            .unwrap_or_else(|_| log::Domain::unit_decade());
+        let domain = if self.nice && !explicit { domain.nice() } else { domain };
+        Bounds::exact(domain.lo(), domain.hi())
     }
 
     /// Derive tick positions, label positions, and label text from data
@@ -640,7 +755,7 @@ where
                     },
                     None,
                 )
-            } else if matches!(self.transform, crate::scale::Transform::Log) {
+            } else if matches!(self.mapping.transform, crate::scale::Transform::Log) {
                 // Log axes use decade-boundary ticks. The label format
                 // helper uses None precision so the value is rendered
                 // as a clean integer (10, 100, 1000…).
@@ -743,14 +858,13 @@ where
         (label_info, tick_positions)
     }
 
-    /// Find the min/max range for this axis dimension
-    fn find_range(&self, is_x_axis: bool) -> (f64, f64) {
+    /// Find the extent of the values this axis dimension must show.
+    fn find_range(&self, is_x_axis: bool) -> Extent {
         use crate::bar::Layout;
         use crate::mark::area::Layout as AreaLayout;
         use std::collections::HashMap;
 
-        let mut min = f64::INFINITY;
-        let mut max = f64::NEG_INFINITY;
+        let mut extent = Extent::EMPTY;
 
         for mark in self.marks {
             match mark {
@@ -761,20 +875,17 @@ where
                             for point in &series.points {
                                 let x_key = (point.x * 1000.0).round() as i64;
                                 *sums.entry(x_key).or_insert(0.0) += point.y;
-                                min = min.min(point.x);
-                                max = max.max(point.x);
+                                extent.include(point.x);
                             }
                         }
                         for sum in sums.values() {
-                            max = max.max(*sum);
-                            min = min.min(*sum);
+                            extent.include(*sum);
                         }
                     } else {
                         for series in &area.series {
                             for point in &series.points {
                                 let val = if is_x_axis { point.x } else { point.y };
-                                min = min.min(val);
-                                max = max.max(val);
+                                extent.include(val);
                             }
                         }
                     }
@@ -804,23 +915,20 @@ where
 
                         // Update with stacked totals
                         for sum in sums.values() {
-                            max = max.max(*sum);
-                            min = min.min(*sum);
+                            extent.include(*sum);
                         }
                     } else if is_value_axis {
                         // Value axis (non-stacked): use point.y (the values)
                         for series in &bars.series {
                             for point in &series.points {
-                                min = min.min(point.y);
-                                max = max.max(point.y);
+                                extent.include(point.y);
                             }
                         }
                     } else {
                         // Category axis: use point.x (the category indices)
                         for series in &bars.series {
                             for point in &series.points {
-                                min = min.min(point.x);
-                                max = max.max(point.x);
+                                extent.include(point.x);
                             }
                         }
                     }
@@ -828,15 +936,13 @@ where
                 crate::Mark::Line(line) => {
                     for point in &line.points {
                         let val = if is_x_axis { point.x } else { point.y };
-                        min = min.min(val);
-                        max = max.max(val);
+                        extent.include(val);
                     }
                 }
                 crate::Mark::Waterfall(wf) => {
                     if is_x_axis {
                         for (i, _) in wf.entries.iter().enumerate() {
-                            min = min.min(i as f64);
-                            max = max.max(i as f64);
+                            extent.include(i as f64);
                         }
                     } else {
                         // Track the envelope of all running totals (steps + totals)
@@ -865,41 +971,39 @@ where
                             // Steps are small relative to the full 0-based range.
                             // Zoom in so the steps occupy ~50 % of the chart height.
                             let padding = envelope_range * 0.5;
-                            min = min.min(envelope_min - padding);
-                            max = max.max(envelope_max + padding);
+                            extent.include(envelope_min - padding);
+                            extent.include(envelope_max + padding);
                         } else {
                             // Steps are large enough — use normal 0-based range.
-                            min = min.min(envelope_min).min(0.0);
-                            max = max.max(envelope_max);
+                            extent.include(envelope_min);
+                            extent.include(0.0);
+                            extent.include(envelope_max);
                         }
                     }
                 }
                 crate::Mark::Xy(xy) => {
                     for point in &xy.points {
                         let val = if is_x_axis { point.x } else { point.y };
-                        min = min.min(val);
-                        max = max.max(val);
+                        extent.include(val);
                     }
                 }
                 crate::Mark::Rule(rule) => match rule.orientation {
                     crate::mark::rule::RuleOrientation::Horizontal if !is_x_axis => {
-                        min = min.min(rule.value);
-                        max = max.max(rule.value);
+                        extent.include(rule.value);
                     }
                     crate::mark::rule::RuleOrientation::Vertical if is_x_axis => {
-                        min = min.min(rule.value);
-                        max = max.max(rule.value);
+                        extent.include(rule.value);
                     }
                     _ => {}
                 },
                 crate::Mark::Band(band) => match band.orientation {
                     crate::mark::band::BandOrientation::Horizontal if !is_x_axis => {
-                        min = min.min(band.lower);
-                        max = max.max(band.upper);
+                        extent.include(band.lower);
+                        extent.include(band.upper);
                     }
                     crate::mark::band::BandOrientation::Vertical if is_x_axis => {
-                        min = min.min(band.lower);
-                        max = max.max(band.upper);
+                        extent.include(band.lower);
+                        extent.include(band.upper);
                     }
                     _ => {}
                 },
@@ -908,20 +1012,16 @@ where
                         match tick.orientation {
                             crate::mark::tick::Orientation::Vertical => {
                                 if is_x_axis {
-                                    min = min.min(point.y);
-                                    max = max.max(point.y);
+                                    extent.include(point.y);
                                 } else {
-                                    min = min.min(point.x);
-                                    max = max.max(point.x);
+                                    extent.include(point.x);
                                 }
                             }
                             crate::mark::tick::Orientation::Horizontal => {
                                 if is_x_axis {
-                                    min = min.min(point.x);
-                                    max = max.max(point.x);
+                                    extent.include(point.x);
                                 } else {
-                                    min = min.min(point.y);
-                                    max = max.max(point.y);
+                                    extent.include(point.y);
                                 }
                             }
                         }
@@ -929,27 +1029,25 @@ where
                 }
                 crate::Mark::Heatmap(hm) => {
                     if is_x_axis {
-                        min = min.min(0.0);
-                        max = max.max((hm.cols() as f64 - 1.0).max(0.0));
+                        extent.include(0.0);
+                        extent.include((hm.cols() as f64 - 1.0).max(0.0));
                     } else {
-                        min = min.min(0.0);
-                        max = max.max((hm.rows() as f64 - 1.0).max(0.0));
+                        extent.include(0.0);
+                        extent.include((hm.rows() as f64 - 1.0).max(0.0));
                     }
                 }
                 crate::Mark::BoxPlot(bp) => match bp.direction {
                     crate::mark::boxplot::Direction::Vertical => {
                         if is_x_axis {
                             for (i, _) in bp.entries.iter().enumerate() {
-                                min = min.min(i as f64);
-                                max = max.max(i as f64);
+                                extent.include(i as f64);
                             }
                         } else {
                             for e in &bp.entries {
-                                min = min.min(e.min);
-                                max = max.max(e.max);
+                                extent.include(e.min);
+                                extent.include(e.max);
                                 for &o in &e.outliers {
-                                    min = min.min(o);
-                                    max = max.max(o);
+                                    extent.include(o);
                                 }
                             }
                         }
@@ -957,17 +1055,15 @@ where
                     crate::mark::boxplot::Direction::Horizontal => {
                         if is_x_axis {
                             for e in &bp.entries {
-                                min = min.min(e.min);
-                                max = max.max(e.max);
+                                extent.include(e.min);
+                                extent.include(e.max);
                                 for &o in &e.outliers {
-                                    min = min.min(o);
-                                    max = max.max(o);
+                                    extent.include(o);
                                 }
                             }
                         } else {
                             for (i, _) in bp.entries.iter().enumerate() {
-                                min = min.min(i as f64);
-                                max = max.max(i as f64);
+                                extent.include(i as f64);
                             }
                         }
                     }
@@ -976,14 +1072,12 @@ where
                     crate::mark::violin::Direction::Vertical => {
                         if is_x_axis {
                             for (i, _) in v.entries.iter().enumerate() {
-                                min = min.min(i as f64);
-                                max = max.max(i as f64);
+                                extent.include(i as f64);
                             }
                         } else {
                             for e in &v.entries {
                                 for &(val, _) in &e.density {
-                                    min = min.min(val);
-                                    max = max.max(val);
+                                    extent.include(val);
                                 }
                             }
                         }
@@ -992,14 +1086,12 @@ where
                         if is_x_axis {
                             for e in &v.entries {
                                 for &(val, _) in &e.density {
-                                    min = min.min(val);
-                                    max = max.max(val);
+                                    extent.include(val);
                                 }
                             }
                         } else {
                             for (i, _) in v.entries.iter().enumerate() {
-                                min = min.min(i as f64);
-                                max = max.max(i as f64);
+                                extent.include(i as f64);
                             }
                         }
                     }
@@ -1011,8 +1103,8 @@ where
                         } else {
                             (b.y_min, b.y_max)
                         };
-                        min = min.min(lo);
-                        max = max.max(hi);
+                        extent.include(lo);
+                        extent.include(hi);
                     }
                 }
                 crate::Mark::Pie(_)
@@ -1038,16 +1130,11 @@ where
 
             let should_include_zero = (!is_x_axis && has_vertical_bars) || (is_x_axis && has_horizontal_bars);
             if should_include_zero {
-                min = min.min(0.0);
+                extent.include(0.0);
             }
         }
 
-        // Ensure valid range
-        if min.is_infinite() || max.is_infinite() {
-            (0.0, 1.0)
-        } else {
-            (min, max)
-        }
+        extent
     }
 
     /// Generate nice tick positions within [min, max].
@@ -1105,6 +1192,8 @@ where
                 label_insets: (0.0, 0.0),
                 tick_space: 0.0,
                 label_offset: 0.0,
+                label_font: crate::core::Font::DEFAULT,
+                label_size: crate::core::Pixels(12.0),
             }),
             children,
             ..Tree::empty()
@@ -1218,6 +1307,22 @@ where
         }
     }
 
+    /// Indices of the labels nearest the start (unit `0`) and end (unit
+    /// `1`) of the axis. Ticks are generated in ascending value order, so
+    /// these are the first and last labels, swapped on a reversed axis.
+    fn edge_label_indices(&self, labels: &[(f64, String)], min_value: f64, max_value: f64) -> (usize, usize) {
+        let last = labels.len().saturating_sub(1);
+        match (labels.first(), labels.last()) {
+            (Some(first), Some(end))
+                if self.mapping.map_to_unit(end.0, min_value, max_value)
+                    < self.mapping.map_to_unit(first.0, min_value, max_value) =>
+            {
+                (last, 0)
+            }
+            _ => (0, last),
+        }
+    }
+
     /// Layout a vertical axis (left/right)
     #[allow(clippy::too_many_arguments)]
     fn layout_vertical(
@@ -1254,6 +1359,8 @@ where
         let axis_text = self.axis.labels.text.or(self.axis.text());
         let label_font = axis_text.resolved_font(base_font);
         let label_size_px: crate::core::Pixels = axis_text.resolved_size(base_size).into();
+        state.label_font = label_font;
+        state.label_size = label_size_px;
         for (i, (_pos, label)) in label_data.iter().enumerate() {
             let paragraph = &mut state.labels[i];
 
@@ -1292,23 +1399,27 @@ where
         // don't needlessly shrink the chart. For scalar axes the ticks sit at
         // the data extrema (`k_* == 0`), so the formula collapses to the
         // previous behavior.
+        //
+        // A reversed axis puts the first label at the top, so the edge labels
+        // are picked by mapped position rather than by index.
         let n = label_data.len();
+        let (bottom_index, top_index) = self.edge_label_indices(label_data, min_value, max_value);
         let top_half = if n > 0 {
-            state.labels[n - 1].min_bounds().height / 2.0
+            state.labels[top_index].min_bounds().height / 2.0
         } else {
             0.0
         };
         let bottom_half = if n > 0 {
-            state.labels[0].min_bounds().height / 2.0
+            state.labels[bottom_index].min_bounds().height / 2.0
         } else {
             0.0
         };
         let (k_top, k_bottom) = if value_range > 0.0 && n > 0 {
-            let bottom_tick = label_data[0].0;
-            let top_tick = label_data[n - 1].0;
+            let bottom_tick = label_data[bottom_index].0;
+            let top_tick = label_data[top_index].0;
             (
-                (1.0 - self.transform.map_to_unit(top_tick, min_value, max_value)) as f32,
-                self.transform.map_to_unit(bottom_tick, min_value, max_value) as f32,
+                (1.0 - self.mapping.map_to_unit(top_tick, min_value, max_value)) as f32,
+                self.mapping.map_to_unit(bottom_tick, min_value, max_value) as f32,
             )
         } else {
             (0.0, 0.0)
@@ -1332,7 +1443,7 @@ where
 
             let tick_value = *pos;
             let y = if value_range > 0.0 {
-                let normalized = self.transform.map_to_unit(tick_value, min_value, max_value) as f32;
+                let normalized = self.mapping.map_to_unit(tick_value, min_value, max_value) as f32;
                 top_inset + usable_height - normalized * usable_height
             } else {
                 max_size.height / 2.0
@@ -1371,6 +1482,7 @@ where
         // Use cached label info from state
         let label_data = &state.label_info;
         let value_range = max_value - min_value;
+        let angle = self.axis.labels.angle.filter(|angle| !angle.is_zero());
 
         // Ensure we have enough paragraphs for all labels
         while state.labels.len() < label_data.len() {
@@ -1384,37 +1496,45 @@ where
         // First pass: measure all labels.
         //
         // Compute the allotted column width per label: the pixel distance
-        // between adjacent ticks in the axis's natural domain. The overflow
-        // strategy constrains labels to this width so they don't crowd each
-        // other. Using `max_size.width` (not post-inset `usable_width`) is a
-        // slight over-allocation when insets end up non-zero, but it lets us
-        // avoid a fixed-point iteration between label widths and inset sizes.
-        let tick_stride: f64 = if n >= 2 {
-            let mut min_stride = f64::INFINITY;
-            for pair in label_data.windows(2) {
-                let s = pair[1].0 - pair[0].0;
-                if s > 0.0 && s < min_stride {
-                    min_stride = s;
-                }
-            }
-            if min_stride.is_finite() {
-                min_stride
+        // between adjacent ticks, measured in mapped (unit) space so log and
+        // sqrt axes get their real on-screen spacing. The overflow strategy
+        // constrains labels to this width so they don't crowd each other.
+        // Using `max_size.width` (not post-inset `usable_width`) is a slight
+        // over-allocation when insets end up non-zero, but it lets us avoid a
+        // fixed-point iteration between label widths and inset sizes.
+        let column_width: f32 = if value_range > 0.0 && n >= 2 {
+            let stride = label_data
+                .windows(2)
+                .map(|pair| {
+                    (self.mapping.map_to_unit(pair[1].0, min_value, max_value)
+                        - self.mapping.map_to_unit(pair[0].0, min_value, max_value))
+                    .abs()
+                })
+                .filter(|stride| *stride > 0.0)
+                .fold(f64::INFINITY, f64::min);
+            if stride.is_finite() {
+                (max_size.width as f64 * stride) as f32
             } else {
-                value_range.max(1.0)
+                max_size.width
             }
-        } else {
-            value_range.max(1.0)
-        };
-        let column_width: f32 = if value_range > 0.0 {
-            (max_size.width as f64 * tick_stride / value_range) as f32
         } else {
             max_size.width
         };
 
-        // Pick wrapping + ellipsis from the overflow strategy.
-        let (wrapping, ellipsis) = match self.axis.labels.overflow {
-            crate::data::axis::label::Overflow::Ellipsize => (text::Wrapping::None, text::Ellipsis::End),
-            crate::data::axis::label::Overflow::Wrap => (text::Wrapping::Word, text::Ellipsis::None),
+        // Pick wrapping + ellipsis from the overflow strategy. Rotated labels
+        // turn to fit instead, so they keep their full single-line text.
+        let (bounds, wrapping, ellipsis) = match (angle, self.axis.labels.overflow) {
+            (Some(_), _) => (Size::INFINITE, text::Wrapping::None, text::Ellipsis::None),
+            (None, crate::data::axis::label::Overflow::Ellipsize) => (
+                Size::new(column_width, f32::INFINITY),
+                text::Wrapping::None,
+                text::Ellipsis::End,
+            ),
+            (None, crate::data::axis::label::Overflow::Wrap) => (
+                Size::new(column_width, f32::INFINITY),
+                text::Wrapping::Word,
+                text::Ellipsis::None,
+            ),
         };
 
         // Measure all labels with bounds constrained to the column width so
@@ -1430,13 +1550,15 @@ where
         let axis_text = self.axis.labels.text.or(self.axis.text());
         let label_font = axis_text.resolved_font(base_font);
         let label_size_px: crate::core::Pixels = axis_text.resolved_size(base_size).into();
+        state.label_font = label_font;
+        state.label_size = label_size_px;
         for (i, (_pos, label)) in label_data.iter().enumerate() {
             let paragraph = &mut state.labels[i];
 
             use crate::core::alignment;
             let _ = paragraph.update(text::Text {
                 content: label,
-                bounds: Size::new(column_width, f32::INFINITY),
+                bounds,
                 size: label_size_px,
                 line_height: text::LineHeight::default(),
                 font: label_font,
@@ -1453,61 +1575,89 @@ where
             });
         }
 
-        // Compute edge label insets (half-width of first/last center-aligned labels),
-        // reduced by the overflow budget available on each side, floored by min_inset.
+        let units: Vec<f32> = label_data
+            .iter()
+            .map(|(pos, _)| {
+                if value_range > 0.0 {
+                    self.mapping.map_to_unit(*pos, min_value, max_value) as f32
+                } else {
+                    0.5
+                }
+            })
+            .collect();
+
+        // Compute edge label insets, reduced by the overflow budget available
+        // on each side and floored by min_inset.
         //
         // The first/last tick is not necessarily at the plot's outer edge: a
         // categorical axis with OnTicks placement and `Kind::Categorical` bounds
         // (±0.5 padding) sits the first tick at `k_left * usable_width` inside
         // the plot's left edge, giving the first label that much free space to
         // extend leftward before any inset is needed. We credit that natural
-        // space against the half-label overhang so short categorical labels
-        // don't needlessly shrink the chart. For scalar axes the ticks sit at
-        // the data extrema (`k_* == 0`), so the formula collapses to the
-        // previous behavior.
-        let left_half = state.labels.first().map(|p| p.min_bounds().width / 2.0).unwrap_or(0.0);
-        let right_half = state
-            .labels
-            .get(label_data.len().saturating_sub(1))
-            .map(|p| p.min_bounds().width / 2.0)
-            .unwrap_or(0.0);
-        let (k_left, k_right) = if value_range > 0.0 && n > 0 {
-            let first_tick = label_data[0].0;
-            let last_tick = label_data[n - 1].0;
-            (
-                self.transform.map_to_unit(first_tick, min_value, max_value) as f32,
-                (1.0 - self.transform.map_to_unit(last_tick, min_value, max_value)) as f32,
-            )
-        } else {
-            (0.0, 0.0)
+        // space against the overhang so short categorical labels don't
+        // needlessly shrink the chart. For scalar axes the ticks sit at the
+        // data extrema (`k_* == 0`).
+        let (left_need, right_need) = match angle {
+            // Centered labels: only the outermost labels can overhang, each
+            // by half its width. A reversed axis swaps which label is which.
+            None => {
+                let (start, end) = self.edge_label_indices(label_data, min_value, max_value);
+                let half = |i: usize| state.labels.get(i).map(|p| p.min_bounds().width / 2.0).unwrap_or(0.0);
+                let (k_left, k_right) = if value_range > 0.0 && n > 0 {
+                    (units[start], 1.0 - units[end])
+                } else {
+                    (0.0, 0.0)
+                };
+                (
+                    half(start) - k_left * max_size.width,
+                    half(end) - k_right * max_size.width,
+                )
+            }
+            // Rotated labels reach well past their tick on one side, so any
+            // of them can set the inset; take the worst.
+            Some(angle) => {
+                units
+                    .iter()
+                    .zip(&state.labels)
+                    .fold((0.0f32, 0.0f32), |(left, right), (unit, paragraph)| {
+                        let footprint = Footprint::rotated(paragraph.min_bounds(), angle, self.axis.orientation());
+                        (
+                            left.max(footprint.before() - unit * max_size.width),
+                            right.max(footprint.after() - (1.0 - unit) * max_size.width),
+                        )
+                    })
+            }
         };
-        let natural_left = k_left * max_size.width;
-        let natural_right = k_right * max_size.width;
-        let left_inset = (left_half - natural_left - overflow.0).max(0.0).max(min_inset.0);
-        let right_inset = (right_half - natural_right - overflow.1).max(0.0).max(min_inset.1);
+        let left_inset = (left_need - overflow.0).max(0.0).max(min_inset.0);
+        let right_inset = (right_need - overflow.1).max(0.0).max(min_inset.1);
         let usable_width = (max_size.width - left_inset - right_inset).max(0.0);
 
         state.label_insets = (left_inset, right_inset);
 
         // Track the tallest label so the axis area can grow vertically when
-        // `Wrap` produces multi-line labels. Single-line (Ellipsize) keeps the
-        // historical height (label_size + tick_length + label_offset).
+        // `Wrap` produces multi-line labels or rotation stands labels up.
+        // Single-line (Ellipsize) keeps the historical height
+        // (label_size + tick_length + label_offset).
         let mut max_label_height: f32 = label_size_px.0;
 
         // Second pass: position labels within the inset range
-        for (i, (pos, _label)) in label_data.iter().enumerate() {
-            let label_width = state.labels[i].min_bounds().width;
-            let label_height = state.labels[i].min_bounds().height;
-            max_label_height = max_label_height.max(label_height);
+        for (i, unit) in units.iter().enumerate() {
+            let measured = state.labels[i].min_bounds();
+            let size = match angle {
+                Some(angle) => Footprint::rotated(measured, angle, self.axis.orientation())
+                    .bounds
+                    .size(),
+                None => measured,
+            };
+            max_label_height = max_label_height.max(size.height);
 
-            let tick_value = *pos;
             let x = if value_range > 0.0 {
-                left_inset + (self.transform.map_to_unit(tick_value, min_value, max_value) * usable_width as f64) as f32
+                left_inset + unit * usable_width
             } else {
                 max_size.width / 2.0
             };
 
-            children.push(Rectangle::new(Point::new(x, 0.0), Size::new(label_width, label_height)));
+            children.push(Rectangle::new(Point::new(x, 0.0), size));
         }
 
         let tick_space = if self.axis.shows_ticks() { tick_length } else { 0.0 };
@@ -1580,7 +1730,7 @@ where
             let path = Path::new(|builder| {
                 for &tick_pos in tick_positions {
                     let normalized = if value_range > 0.0 {
-                        self.transform.map_to_unit(tick_pos, min_value, max_value) as f32
+                        self.mapping.map_to_unit(tick_pos, min_value, max_value) as f32
                     } else {
                         0.5
                     };
@@ -1640,6 +1790,19 @@ where
             renderer.with_translation(crate::core::Vector::new(bounds.x, bounds.y), |renderer| {
                 renderer.draw_geometry(geometry);
             });
+        }
+
+        // Rotated labels on horizontal axes draw as canvas text, which can
+        // turn; shaped paragraphs can't.
+        let rotation = match self.axis.orientation() {
+            Orientation::Bottom | Orientation::Top => self.axis.labels.angle.filter(|angle| !angle.is_zero()),
+            Orientation::Left | Orientation::Right => None,
+        };
+        if let Some(angle) = rotation {
+            if self.axis.has_labels() {
+                self.draw_rotated_labels(tree, renderer, layout, angle, label_color);
+            }
+            return;
         }
 
         // Then, draw labels at their positions from layout
@@ -1708,11 +1871,254 @@ where
             }
         }
     }
+
+    /// Draws rotated tick labels on a horizontal axis.
+    ///
+    /// Each label's [`Footprint`] pivot is pinned below (bottom axis) or
+    /// above (top axis) its tick, offset so the rotated bounding box starts
+    /// at the same distance from the axis as unrotated labels do.
+    fn draw_rotated_labels(
+        &self,
+        tree: &crate::core::widget::Tree,
+        renderer: &mut Renderer,
+        layout: crate::core::Layout,
+        angle: crate::axis::Angle,
+        color: crate::core::Color,
+    ) where
+        Renderer: crate::widget::renderer::geometry::Renderer,
+    {
+        use crate::widget::canvas::{Frame, Text};
+
+        let state = tree.state.downcast_ref::<State<Renderer::Paragraph>>();
+        let bounds = layout.bounds();
+        let orientation = self.axis.orientation();
+        let gap = state.tick_space + state.label_offset;
+        // A canvas frame clips to its own size, but edge labels may overhang
+        // the guide into the sibling axis gutters (the overflow budget the
+        // layout granted), so widen the frame to cover every footprint.
+        let footprints: Vec<Footprint> = state
+            .labels
+            .iter()
+            .take(state.label_info.len())
+            .map(|paragraph| Footprint::rotated(paragraph.min_bounds(), angle, orientation))
+            .collect();
+        let reach = footprints.iter().fold(0.0f32, |reach, footprint| {
+            reach.max(footprint.before()).max(footprint.after())
+        });
+        let origin = Vector::new(bounds.x - reach, bounds.y);
+        let mut frame = Frame::new(renderer, Size::new(bounds.width + 2.0 * reach, bounds.height));
+
+        for (((_pos, label), footprint), (child_layout, _)) in state
+            .label_info
+            .iter()
+            .zip(&footprints)
+            .zip(layout.iter(&tree.children))
+        {
+            let tick_x = child_layout.bounds().x - origin.x;
+            let pivot_y = match orientation {
+                Orientation::Top => bounds.height - gap - (footprint.bounds.y + footprint.bounds.height),
+                Orientation::Bottom | Orientation::Left | Orientation::Right => gap - footprint.bounds.y,
+            };
+            frame.with_save(|frame| {
+                frame.translate(Vector::new(tick_x, pivot_y));
+                // `Frame::rotate` turns clockwise on screen; label angles
+                // are counterclockwise-positive.
+                frame.rotate(-angle.as_radians());
+                frame.fill_text(Text {
+                    content: label.clone(),
+                    position: Point::new(-footprint.pivot.x, -footprint.pivot.y),
+                    color,
+                    size: state.label_size,
+                    line_height: text::LineHeight::default(),
+                    font: state.label_font,
+                    align_x: text::Alignment::Left,
+                    align_y: crate::core::alignment::Vertical::Top,
+                    shaping: text::Shaping::Basic,
+                    ..Text::default()
+                });
+            });
+        }
+
+        let geometry = frame.into_geometry();
+        renderer.with_translation(origin, |renderer| {
+            renderer.draw_geometry(geometry);
+        });
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    type TestGuide<'a> = Guide<'a, (), crate::widget::Renderer>;
+
+    fn near(a: f32, b: f32) -> bool {
+        (a - b).abs() < 1e-3
+    }
+
+    #[test]
+    fn rotated_footprint_stands_upright_at_ninety_degrees() {
+        let fp = Footprint::rotated(
+            Size::new(100.0, 20.0),
+            crate::axis::Angle::degrees(90.0),
+            Orientation::Bottom,
+        );
+        // The text's end sits at the tick and the label hangs straight down,
+        // centered on it.
+        assert!(near(fp.before(), 10.0) && near(fp.after(), 10.0), "{fp:?}");
+        assert!(near(fp.bounds.y, 0.0) && near(fp.bounds.height, 100.0), "{fp:?}");
+    }
+
+    #[test]
+    fn rotated_footprint_rising_label_reaches_back_from_its_tick() {
+        let fp = Footprint::rotated(
+            Size::new(100.0, 20.0),
+            crate::axis::Angle::degrees(45.0),
+            Orientation::Bottom,
+        );
+        let c = std::f32::consts::FRAC_1_SQRT_2;
+        assert_eq!(fp.pivot, Point::new(100.0, 10.0));
+        assert!(near(fp.before(), 110.0 * c), "before {}", fp.before());
+        assert!(near(fp.after(), 10.0 * c), "after {}", fp.after());
+        assert!(near(fp.bounds.height, 120.0 * c), "depth {}", fp.bounds.height);
+        // The corner nearest the tick pokes slightly above the pivot.
+        assert!(near(fp.bounds.y, -10.0 * c));
+    }
+
+    #[test]
+    fn rotated_footprint_falling_label_mirrors_the_rising_one() {
+        let rising = Footprint::rotated(
+            Size::new(100.0, 20.0),
+            crate::axis::Angle::degrees(45.0),
+            Orientation::Bottom,
+        );
+        let falling = Footprint::rotated(
+            Size::new(100.0, 20.0),
+            crate::axis::Angle::degrees(-45.0),
+            Orientation::Bottom,
+        );
+        assert_eq!(falling.pivot, Point::new(0.0, 10.0));
+        assert!(near(falling.before(), rising.after()));
+        assert!(near(falling.after(), rising.before()));
+        assert!(near(falling.bounds.height, rising.bounds.height));
+    }
+
+    #[test]
+    fn rotated_footprint_on_top_axis_rises_away_from_the_plot() {
+        let fp = Footprint::rotated(
+            Size::new(100.0, 20.0),
+            crate::axis::Angle::degrees(45.0),
+            Orientation::Top,
+        );
+        let c = std::f32::consts::FRAC_1_SQRT_2;
+        // Starts at the tick and climbs up and to the right.
+        assert_eq!(fp.pivot, Point::new(0.0, 10.0));
+        assert!(near(fp.after(), 110.0 * c));
+        assert!(near(fp.bounds.y + fp.bounds.height, 10.0 * c));
+        assert!(near(fp.bounds.y, -110.0 * c));
+    }
+
+    #[test]
+    fn rotated_footprint_box_matches_the_rotated_extent() {
+        let size = Size::new(84.0, 17.0);
+        for degrees in [-90.0f32, -60.0, -30.0, -5.0, 10.0, 33.0, 75.0, 90.0] {
+            let fp = Footprint::rotated(size, crate::axis::Angle::degrees(degrees), Orientation::Bottom);
+            let (sin, cos) = degrees.to_radians().sin_cos();
+            let width = size.width * cos.abs() + size.height * sin.abs();
+            let height = size.width * sin.abs() + size.height * cos.abs();
+            assert!(near(fp.bounds.width, width), "{degrees}°: width {}", fp.bounds.width);
+            assert!(
+                near(fp.bounds.height, height),
+                "{degrees}°: height {}",
+                fp.bounds.height
+            );
+            // The pivot (on the tick) always lies inside the box.
+            assert!(fp.before() >= -1e-3 && fp.after() >= -1e-3, "{degrees}°: {fp:?}");
+        }
+    }
+
+    #[test]
+    fn extent_tracks_smallest_positive_value() {
+        let mut extent = Extent::EMPTY;
+        for v in [0.0, -3.0, 4.0, f64::NAN, 0.25, 90.0] {
+            extent.include(v);
+        }
+        assert_eq!(extent.range(), (-3.0, 90.0));
+        assert_eq!(extent.min_positive, 0.25);
+        assert_eq!(Extent::EMPTY.range(), (0.0, 1.0));
+    }
+
+    fn scatter(points: &[(f64, f64)]) -> Vec<crate::Mark> {
+        vec![crate::Mark::from(crate::xy(points.to_vec()))]
+    }
+
+    #[test]
+    fn log_x_nice_domain_ignores_nonpositive_samples() {
+        let marks = scatter(&[(0.0, 1.0), (-2.0, 1.0), (3.0, 1.0), (450.0, 2.0)]);
+        let axis = Axis::new(Orientation::Bottom);
+        let guide = TestGuide::new(&axis, &marks).with_transform(crate::Transform::Log);
+        let bounds = guide.compute_axis_bounds();
+        assert_eq!(bounds.as_tuple(), (1.0, 1000.0));
+    }
+
+    #[test]
+    fn log_x_without_nice_keeps_the_positive_data_range() {
+        let marks = scatter(&[(0.0, 1.0), (3.0, 1.0), (450.0, 2.0)]);
+        let axis = Axis::new(Orientation::Bottom);
+        let guide = TestGuide::new(&axis, &marks)
+            .with_transform(crate::Transform::Log)
+            .with_nice(false);
+        assert_eq!(guide.compute_axis_bounds().as_tuple(), (3.0, 450.0));
+    }
+
+    #[test]
+    fn log_x_explicit_zero_lower_bound_clamps_to_four_decades() {
+        let marks = scatter(&[(3.0, 1.0), (450.0, 2.0)]);
+        let axis = Axis::new(Orientation::Bottom).with_bounds(0.0, 1000.0);
+        let guide = TestGuide::new(&axis, &marks).with_transform(crate::Transform::Log);
+        assert_eq!(guide.compute_axis_bounds().as_tuple(), (0.1, 1000.0));
+    }
+
+    #[test]
+    fn log_axis_without_positive_data_falls_back_to_one_decade() {
+        let marks = scatter(&[(-5.0, 1.0), (0.0, 2.0)]);
+        let axis = Axis::new(Orientation::Bottom);
+        let guide = TestGuide::new(&axis, &marks).with_transform(crate::Transform::Log);
+        assert_eq!(guide.compute_axis_bounds().as_tuple(), (1.0, 10.0));
+    }
+
+    #[test]
+    fn log_x_ticks_land_on_decades() {
+        let marks = scatter(&[(0.02, 1.0), (4000.0, 2.0)]);
+        let axis = Axis::new(Orientation::Bottom);
+        let guide = TestGuide::new(&axis, &marks).with_transform(crate::Transform::Log);
+        let bounds = guide.compute_axis_bounds();
+        assert_eq!(bounds.as_tuple(), (0.01, 10_000.0));
+        let (labels, ticks) = guide.ticks_and_labels(bounds, Some(600.0));
+        assert_eq!(ticks.len(), 7);
+        let texts: Vec<&str> = labels.iter().map(|(_, text)| text.as_str()).collect();
+        assert_eq!(texts, ["0.01", "0.1", "1", "10", "100", "1000", "10000"]);
+    }
+
+    #[test]
+    fn reversed_axis_swaps_edge_labels() {
+        let marks = scatter(&[(0.0, 0.0), (10.0, 10.0)]);
+        let labels: Vec<(f64, String)> = [0.0, 5.0, 10.0].iter().map(|v| (*v, v.to_string())).collect();
+        let forward = Axis::new(Orientation::Left);
+        let reversed = Axis::new(Orientation::Left).reverse();
+        assert_eq!(
+            TestGuide::new(&forward, &marks).edge_label_indices(&labels, 0.0, 10.0),
+            (0, 2)
+        );
+        assert_eq!(
+            TestGuide::new(&reversed, &marks).edge_label_indices(&labels, 0.0, 10.0),
+            (2, 0)
+        );
+        assert_eq!(
+            TestGuide::new(&reversed, &marks).mapping().order,
+            crate::axis::Order::Reverse
+        );
+    }
 
     /// Helper to create a timestamp from date components using jiff
     fn ymd_to_timestamp(year: i16, month: i8, day: i8) -> i64 {

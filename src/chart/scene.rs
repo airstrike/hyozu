@@ -112,15 +112,16 @@ where
     /// reads this when [`Tooltip::format_is_default`] is true so the
     /// hover string stays consistent with the legend column.
     primary_mark_value_format: Vec<Option<crate::scale::Format<f64>>>,
-    /// Y-axis transform from `Data::y_scale.transform`, threaded into the
-    /// primary plane and the y-axis tick generator. Defaults to
-    /// [`crate::scale::Transform::Linear`] so existing charts render
-    /// identically.
-    y_transform: crate::scale::Transform,
-    /// Y-axis transform for the secondary (right) axis. Currently
-    /// mirrors the primary transform — a per-area scale slot is a
-    /// follow-up.
-    secondary_y_transform: crate::scale::Transform,
+    /// Per-axis transform and direction of the primary plane: x from
+    /// `Data::x_scale` and the bottom axis's order, y from `Data::y_scale`
+    /// and the left axis's order. The matching guides carry the same
+    /// mappings, so ticks and marks agree.
+    mappings: crate::chart::plot_area::Mappings,
+    /// Per-axis mappings of the secondary plane: y from
+    /// `Data::secondary_y_scale` and the right axis, x shared with the
+    /// primary transform and the top axis's order. An absent secondary
+    /// axis falls back to the primary mapping, as its bounds do.
+    secondary_mappings: crate::chart::plot_area::Mappings,
     /// Chart-level geographic configuration sourced from
     /// [`crate::Data`]'s `geo_data` / `geo_scope` / `geo_projection` /
     /// `geo_basemap` fields. Threaded into `PlotArea::layout` for
@@ -328,34 +329,53 @@ where
 
         let y_transform = data.y_scale().transform;
         let y_nice = data.y_scale().nice;
-        // X-axis nicing flows from whichever `Scale` the x-axis is
-        // tagged with. Categorical x-axes don't route through the
-        // nice-step path at all (positions come from data values), and
-        // Time uses its own tick alignment — but the flag still travels
-        // for symmetry, in case those paths gain nice-aware code later.
-        let x_nice = match data.x_scale_ref() {
-            crate::scale::XScale::Category(scale) => scale.nice,
-            crate::scale::XScale::Linear(scale) => scale.nice,
-            crate::scale::XScale::Time(scale) => scale.nice,
+        let secondary_y_transform = data.secondary_y_scale_ref().transform;
+        let secondary_y_nice = data.secondary_y_scale_ref().nice;
+        // X-axis transform and nicing flow from whichever `Scale` the x-axis
+        // is tagged with. Only numeric x scales carry a transform; category
+        // and time axes map linearly and keep their own tick alignment.
+        let x_transform = data.x_scale_ref().transform();
+        let x_nice = data.x_scale_ref().nice();
+
+        let mapping = |transform, axis: Option<&crate::Axis>| {
+            crate::scale::Mapping::new(transform, axis.map(crate::Axis::order).unwrap_or_default())
+        };
+        let primary_x = mapping(x_transform, data.primary.x_axis.as_ref());
+        let primary_y = mapping(y_transform, data.primary.y_axis.as_ref());
+        let mappings = crate::chart::plot_area::Mappings {
+            x: primary_x,
+            y: primary_y,
+        };
+        let secondary_mappings = crate::chart::plot_area::Mappings {
+            x: data
+                .secondary
+                .x_axis
+                .as_ref()
+                .map_or(primary_x, |axis| mapping(x_transform, Some(axis))),
+            y: data
+                .secondary
+                .y_axis
+                .as_ref()
+                .map_or(primary_y, |axis| mapping(secondary_y_transform, Some(axis))),
         };
         Self {
             title: data.title.as_deref().map(|t| Title::new(t, data.title_text)),
             legend,
-            top_axis: data
-                .secondary
-                .x_axis
-                .as_ref()
-                .map(|axis| Guide::new(axis, data.secondary.marks()).with_nice(x_nice)),
+            top_axis: data.secondary.x_axis.as_ref().map(|axis| {
+                Guide::new(axis, data.secondary.marks())
+                    .with_transform(x_transform)
+                    .with_nice(x_nice)
+            }),
             right_axis: data.secondary.y_axis.as_ref().map(|axis| {
                 Guide::new(axis, data.secondary.marks())
-                    .with_transform(y_transform)
-                    .with_nice(y_nice)
+                    .with_transform(secondary_y_transform)
+                    .with_nice(secondary_y_nice)
             }),
-            bottom_axis: data
-                .primary
-                .x_axis
-                .as_ref()
-                .map(|axis| Guide::new(axis, data.primary.marks()).with_nice(x_nice)),
+            bottom_axis: data.primary.x_axis.as_ref().map(|axis| {
+                Guide::new(axis, data.primary.marks())
+                    .with_transform(x_transform)
+                    .with_nice(x_nice)
+            }),
             left_axis: data.primary.y_axis.as_ref().map(|axis| {
                 Guide::new(axis, data.primary.marks())
                     .with_transform(y_transform)
@@ -424,8 +444,8 @@ where
                 .iter()
                 .map(|mark| mark_value_format(mark).or_else(|| data.value_scale().format.clone()))
                 .collect(),
-            y_transform,
-            secondary_y_transform: y_transform,
+            mappings,
+            secondary_mappings,
             geo_config: crate::chart::plot_area::GeoConfig {
                 geo: data.geo_data.clone(),
                 scope: data.geo_scope,
@@ -857,8 +877,8 @@ where
             secondary_bounds,
             plot_insets,
             &axis_obstacles,
-            self.y_transform,
-            self.secondary_y_transform,
+            self.mappings,
+            self.secondary_mappings,
             &self.geo_config,
             design,
         );
@@ -1134,24 +1154,33 @@ where
             );
         }
 
+        // Axes that cross the plot at a data value (`Axis::crosses_at`)
+        // draw their ticks and labels shifted from their gutter onto the
+        // crossing, the same offset the plot area applies to their spine.
+        let plot_tree = &tree.children[6];
+        let draw_guide = |guide: &Guide<'a, Message, Renderer>, index: usize, renderer: &mut Renderer| {
+            let offset = self.plot_area.crossing_offset(plot_tree, guide.axis());
+            renderer.with_translation(offset, |renderer| {
+                guide.draw(
+                    &tree.children[index],
+                    renderer,
+                    design,
+                    style,
+                    children_layouts[index],
+                    cursor,
+                    viewport,
+                );
+            });
+        };
+
         // Top axis (secondary X)
         if let Some(guide) = &self.top_axis {
-            let top_layout = children_layouts[2];
-            guide.draw(&tree.children[2], renderer, design, style, top_layout, cursor, viewport);
+            draw_guide(guide, 2, renderer);
         }
 
         // Left axis
         if let Some(guide) = &self.left_axis {
-            let left_layout = children_layouts[5];
-            guide.draw(
-                &tree.children[5],
-                renderer,
-                design,
-                style,
-                left_layout,
-                cursor,
-                viewport,
-            );
+            draw_guide(guide, 5, renderer);
         }
 
         // Plot area
@@ -1256,30 +1285,12 @@ where
 
         // Bottom axis (labels and ticks)
         if let Some(guide) = &self.bottom_axis {
-            let bottom_layout = children_layouts[4];
-            guide.draw(
-                &tree.children[4],
-                renderer,
-                design,
-                style,
-                bottom_layout,
-                cursor,
-                viewport,
-            );
+            draw_guide(guide, 4, renderer);
         }
 
         // Right axis (secondary Y)
         if let Some(guide) = &self.right_axis {
-            let right_layout = children_layouts[3];
-            guide.draw(
-                &tree.children[3],
-                renderer,
-                design,
-                style,
-                right_layout,
-                cursor,
-                viewport,
-            );
+            draw_guide(guide, 3, renderer);
         }
 
         // Axis border lines drawn last so they render on top of marks.
