@@ -73,7 +73,8 @@ pub fn origin_axes() -> hyozu::Data {
         .collect();
     hyozu::data(line(wave).with_name("2 sin x + 0.4x"))
         .x_axis(|axis| axis.crosses_at(0.0).show_grid(false))
-        .y_axis(|axis| axis.crosses_at(0.0).show_grid(false))
+        // Both axes label 0 at the origin; keep only the x-axis's.
+        .y_axis(|axis| axis.crosses_at(0.0).show_grid(false).show_origin_label(false))
         .title("Origin axes")
 }
 

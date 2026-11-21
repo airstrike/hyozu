@@ -399,21 +399,25 @@ where
                 Guide::new(axis, data.secondary.marks())
                     .with_transform(x_transform)
                     .with_nice(x_nice)
+                    .crossed_by(data.secondary.y_axis.as_ref())
             }),
             right_axis: data.secondary.y_axis.as_ref().map(|axis| {
                 Guide::new(axis, data.secondary.marks())
                     .with_transform(secondary_y_transform)
                     .with_nice(secondary_y_nice)
+                    .crossed_by(data.secondary.x_axis.as_ref())
             }),
             bottom_axis: data.primary.x_axis.as_ref().map(|axis| {
                 Guide::new(axis, data.primary.marks())
                     .with_transform(x_transform)
                     .with_nice(x_nice)
+                    .crossed_by(data.primary.y_axis.as_ref())
             }),
             left_axis: data.primary.y_axis.as_ref().map(|axis| {
                 Guide::new(axis, data.primary.marks())
                     .with_transform(y_transform)
                     .with_nice(y_nice)
+                    .crossed_by(data.primary.x_axis.as_ref())
             }),
             plot_area: {
                 // Per-series value-format vector mirrors the order

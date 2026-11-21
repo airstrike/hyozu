@@ -240,6 +240,9 @@ pub struct Axis {
     /// rare ticks-without-line or line-without-ticks cases.
     show_ticks: Option<bool>,
     show_labels: bool,
+    /// Whether to label the tick where the perpendicular axis crosses this
+    /// one at a value. See [`Axis::show_origin_label`].
+    show_origin_label: bool,
     show_grid: bool,
     show_minor_grid: bool,
 
@@ -287,6 +290,7 @@ impl Axis {
             show_line: true,
             show_ticks: None,
             show_labels: true,
+            show_origin_label: true,
             show_grid: true,
             show_minor_grid: false,
             axis_color: None,
@@ -525,6 +529,25 @@ impl Axis {
     pub fn show_labels(mut self, show: bool) -> Self {
         self.show_labels = show;
         self
+    }
+
+    /// Show or hide the tick label where the perpendicular axis crosses
+    /// this one at a value ([`Crossing::Value`]).
+    ///
+    /// Two axes that cross at the origin both label `0` there, on top of
+    /// each other and of the other axis's line. Hiding one keeps a single
+    /// origin label: `y_axis(|a| a.crosses_at(0.0).show_origin_label(false))`.
+    /// The tick mark and gridline stay. Has no effect while the
+    /// perpendicular axis sits on its edge.
+    pub fn show_origin_label(mut self, show: bool) -> Self {
+        self.show_origin_label = show;
+        self
+    }
+
+    /// Returns whether the tick label at the perpendicular axis's crossing
+    /// is shown.
+    pub fn shows_origin_label(&self) -> bool {
+        self.show_origin_label
     }
 
     /// Show or hide grid lines.

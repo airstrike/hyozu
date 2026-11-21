@@ -626,6 +626,10 @@ where
     /// Visible window over the full domain while the chart is zoomed.
     /// Categorical axes ignore it.
     window: Option<crate::chart::zoom::Window>,
+    /// The value along this axis where the perpendicular axis crosses it,
+    /// when that axis crosses at a value rather than sitting on its edge.
+    /// Its label is dropped when [`Axis::shows_origin_label`] is off.
+    origin: Option<f64>,
     _renderer: std::marker::PhantomData<(Message, Renderer)>,
 }
 
@@ -644,6 +648,7 @@ where
             mapping: crate::scale::Mapping::new(crate::scale::Transform::default(), axis.order()),
             nice: true,
             window: None,
+            origin: None,
             _renderer: std::marker::PhantomData,
         }
     }
@@ -667,6 +672,16 @@ where
     /// are explicit.
     pub fn with_nice(mut self, nice: bool) -> Self {
         self.nice = nice;
+        self
+    }
+
+    /// Records where the perpendicular `axis` crosses this one: its
+    /// [`crate::axis::Crossing::Value`], or nothing for an edge axis.
+    pub(crate) fn crossed_by(mut self, axis: Option<&Axis>) -> Self {
+        self.origin = match axis.map(Axis::crossing) {
+            Some(crate::axis::Crossing::Value(value)) if value.is_finite() => Some(value),
+            _ => None,
+        };
         self
     }
 
@@ -945,6 +960,14 @@ where
                 }
             }
         };
+
+        // The perpendicular axis's line runs through the origin label, and
+        // its own origin label sits beside it; the caller may drop ours.
+        let mut label_info = label_info;
+        if let Some(origin) = self.origin.filter(|_| !self.axis.shows_origin_label()) {
+            let tolerance = (axis_max - axis_min).abs() * 1e-9;
+            label_info.retain(|(position, _)| (position - origin).abs() > tolerance);
+        }
 
         (label_info, tick_positions)
     }
@@ -2285,6 +2308,33 @@ mod tests {
         deduped.dedup();
         assert_eq!(names, deduped, "repeated names: {names:?}");
         assert!(names.contains(&"Jan") && names.contains(&"Jun"));
+    }
+
+    #[test]
+    fn hidden_origin_label_drops_only_the_crossing_label() {
+        let marks = scatter(&[(-6.0, -3.0), (6.0, 3.0)]);
+        let crossing = Axis::new(Orientation::Left).crosses_at(0.0);
+        let labels = |axis: &Axis| {
+            let guide = Guide::<(), ()>::new(axis, &marks).crossed_by(Some(&crossing));
+            let (labels, ticks) = guide.ticks_and_labels(Bounds::exact(-6.0, 6.0), Some(400.0));
+            (labels.into_iter().map(|(at, _)| at).collect::<Vec<_>>(), ticks)
+        };
+        let (shown, ticks) = labels(&Axis::new(Orientation::Bottom));
+        assert!(shown.contains(&0.0));
+        let (hidden, kept) = labels(&Axis::new(Orientation::Bottom).show_origin_label(false));
+        assert!(!hidden.contains(&0.0));
+        assert_eq!(hidden.len(), shown.len() - 1);
+        assert_eq!(kept, ticks, "the tick itself stays");
+    }
+
+    #[test]
+    fn edge_axis_has_no_origin_to_hide() {
+        let marks = scatter(&[(-6.0, -3.0), (6.0, 3.0)]);
+        let edge = Axis::new(Orientation::Left);
+        let axis = Axis::new(Orientation::Bottom).show_origin_label(false);
+        let guide = Guide::<(), ()>::new(&axis, &marks).crossed_by(Some(&edge));
+        let (labels, _) = guide.ticks_and_labels(Bounds::exact(-6.0, 6.0), Some(400.0));
+        assert!(labels.iter().any(|(at, _)| *at == 0.0));
     }
 
     #[test]
