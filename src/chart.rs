@@ -3191,6 +3191,11 @@ fn draw_tooltip_overlay<Message>(
                             radius,
                             format!("{}°", crate::scale::default_f64_format(angle.to_degrees())),
                         ),
+                        crate::mark::diagram::Sample::Spoke { spoke, value } => (
+                            spoke as f64,
+                            value,
+                            d.data.spoke(spoke).map_or_else(|| spoke.to_string(), str::to_owned),
+                        ),
                     };
                     (pixel, x, y, format!("{} ({at})", e.name))
                 }

@@ -65,7 +65,10 @@ fn capped(name: &str, intervals: &[Interval], cap_width: f64) -> Diagram {
         0.
     };
     for &v in intervals.iter().filter(|v| v.valid()) {
-        d.path(id, vec![[v.x, v.low], [v.x, v.high]], false, 1.);
+        // Hover reports the end nearest the cursor, not the whole series.
+        let ends = [[v.x, v.low], [v.x, v.high]];
+        let samples = ends.map(|[x, y]| ([x, y], crate::mark::diagram::Sample::Cartesian { x, y }));
+        d.trace(id, ends.to_vec(), samples.to_vec());
         if half > 0. {
             for y in [v.low, v.high] {
                 d.path(id, vec![[v.x - half, y], [v.x + half, y]], false, 1.);

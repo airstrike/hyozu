@@ -21,6 +21,8 @@ pub enum Sample {
     Cartesian { x: f64, y: f64 },
     /// A data angle in radians and a radius in data units.
     Polar { angle: f64, radius: f64 },
+    /// A value on one of a radar's named spokes, by spoke index.
+    Spoke { spoke: usize, value: f64 },
 }
 
 #[derive(Clone, Debug)]
@@ -54,6 +56,8 @@ pub struct Diagram {
     pub(crate) entries: Vec<Entry>,
     pub(crate) shapes: Vec<Shape>,
     pub(crate) labels: Vec<Label>,
+    /// Names of a radar's spokes, which [`Sample::Spoke`] indexes.
+    pub(crate) spokes: Vec<String>,
     pub(crate) centered_labels: bool,
     pub(crate) entrance: Entrance,
     pub(crate) label_color: Option<crate::core::Color>,
@@ -119,11 +123,30 @@ impl Diagram {
     /// An open path whose hover snaps to `samples`, the observations it
     /// passes through. Samples share the coordinate space of `points`.
     pub(crate) fn trace(&mut self, index: usize, points: Vec<[f64; 2]>, samples: Vec<([f64; 2], Sample)>) {
-        if self.push_path(index, points, false, 1.)
+        self.sampled(index, points, false, 1., samples);
+    }
+
+    /// A path, open or closed, whose hover reports `samples`, the
+    /// observations at its vertices: a radar polygon's spoke values, or the
+    /// point a scatter disc stands for.
+    pub(crate) fn sampled(
+        &mut self,
+        index: usize,
+        points: Vec<[f64; 2]>,
+        closed: bool,
+        opacity: f32,
+        samples: Vec<([f64; 2], Sample)>,
+    ) {
+        if self.push_path(index, points, closed, opacity)
             && let Some(shape) = self.shapes.last_mut()
         {
             shape.samples = samples;
         }
+    }
+
+    /// The name of radar spoke `index`.
+    pub(crate) fn spoke(&self, index: usize) -> Option<&str> {
+        self.spokes.get(index).map(String::as_str)
     }
 
     /// A guide label aligned by its horizontal position.

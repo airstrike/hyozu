@@ -288,8 +288,11 @@ impl Axes {
         for (name, values) in groups {
             let id = d.series(name.as_ref());
             for &[angle, radius] in values.as_ref().iter().filter(|p| valid(p)) {
-                let [x, y] = self.place(angle, radius / scale.maximum);
-                d.path(id, disc([x, y], 0.008, 20), true, 1.);
+                let at = self.place(angle, radius / scale.maximum);
+                d.sampled(id, disc(at, 0.008, 20), true, 1., vec![(at, Sample::Polar {
+                    angle,
+                    radius,
+                })]);
             }
         }
         d
@@ -363,6 +366,7 @@ impl Axes {
             .map(|(i, s)| (i as f64 * TAU / spokes.len() as f64, s.as_ref().to_owned()))
             .collect();
         let mut d = self.frame(&scale, &angles, Rings::Polygons);
+        d.spokes = angles.iter().map(|(_, name)| name.clone()).collect();
         for (name, values) in series {
             let values = values.as_ref();
             if !complete(values) {
@@ -374,17 +378,25 @@ impl Axes {
                 .zip(&angles)
                 .map(|(v, (angle, _))| self.place(*angle, (v / scale.maximum).clamp(0., 1.)))
                 .collect();
+            // Hover reports the spoke value under the cursor rather than
+            // the whole series.
+            let samples: Vec<_> = points
+                .iter()
+                .zip(values)
+                .enumerate()
+                .map(|(spoke, (&at, &value))| (at, Sample::Spoke { spoke, value }))
+                .collect();
             if style == RadarStyle::Filled {
-                d.path(id, points, true, 0.33);
+                d.sampled(id, points, true, 0.33, samples);
                 continue;
             }
             if style == RadarStyle::Markers {
-                for &p in &points {
-                    d.path(id, disc(p, 0.009, 16), true, 1.);
+                for &(at, sample) in &samples {
+                    d.sampled(id, disc(at, 0.009, 16), true, 1., vec![(at, sample)]);
                 }
             }
             points.push(points[0]);
-            d.path(id, points, false, 1.);
+            d.trace(id, points, samples);
         }
         d
     }

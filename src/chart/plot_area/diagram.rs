@@ -157,19 +157,30 @@ impl<P: text::Paragraph> State<P> {
     /// The topmost entry under `point`. On an open path with observations the
     /// cursor also counts as touching when it is near one of them, and the
     /// hit carries the nearest observation.
+    ///
+    /// A closed region reports an observation only when the cursor is near
+    /// one, as at a radar polygon's corner, or when it stands for a single
+    /// one, as a scatter disc does; elsewhere inside it hits the entry.
     pub(crate) fn hit(&self, point: Point) -> Option<Hit> {
         self.regions.iter().rev().find_map(|region| {
             let entry = region.entry?;
-            if region.closed {
-                return region.contains(point).then_some(Hit { entry, vertex: None });
-            }
             let nearest = region
                 .samples
                 .iter()
                 .min_by(|a, b| a.pixel.distance(point).total_cmp(&b.pixel.distance(point)))
                 .copied();
-            let snapped = nearest.is_some_and(|v| v.pixel.distance(point) <= SNAP);
-            (snapped || region.touches(point)).then_some(Hit { entry, vertex: nearest })
+            let snapped = nearest.filter(|v| v.pixel.distance(point) <= SNAP);
+            if region.closed {
+                let sole = (region.samples.len() == 1).then_some(nearest).flatten();
+                return match snapped {
+                    Some(vertex) => Some(Hit {
+                        entry,
+                        vertex: Some(vertex),
+                    }),
+                    None => region.contains(point).then_some(Hit { entry, vertex: sole }),
+                };
+            }
+            (snapped.is_some() || region.touches(point)).then_some(Hit { entry, vertex: nearest })
         })
     }
 }
@@ -827,6 +838,67 @@ mod tests {
         let between = path.vertices[8];
         let vertex = st.hit(between).and_then(|h| h.vertex).expect("vertex");
         assert!(matches!(vertex.sample, Sample::Cartesian { x, .. } if x == 0. || x == 5.));
+    }
+
+    #[test]
+    fn radar_hover_reports_the_spoke_under_the_cursor() {
+        let d = crate::radar(&["Cost", "Reach", "Speed"], &[("North", [4., 2., 5.])], 5.);
+        let st = traced(&d);
+        let polygon = st
+            .regions
+            .iter()
+            .find(|r| r.entry == Some(0) && r.closed)
+            .expect("series polygon");
+        let corner = polygon.samples[2].pixel;
+        let hit = st.hit(corner).expect("on the corner");
+        assert_eq!(
+            hit.vertex.map(|v| v.sample),
+            Some(Sample::Spoke { spoke: 2, value: 5. })
+        );
+        assert_eq!(d.spoke(2), Some("Speed"));
+        // Inside the polygon, away from the corners, the series is hit.
+        let center = Point::new(50., 50.);
+        assert_eq!(st.hit(center), Some(Hit { entry: 0, vertex: None }));
+    }
+
+    #[test]
+    fn scatter_discs_and_error_bars_report_their_own_point() {
+        let d = crate::polar::scatter(&[("Gusts", [[0.0, 2.0], [std::f64::consts::PI, 4.0]])]);
+        let st = traced(&d);
+        let disc = st
+            .regions
+            .iter()
+            .filter(|r| r.entry.is_some())
+            .nth(1)
+            .expect("second disc");
+        let hit = st.hit(disc.samples[0].pixel).expect("on the disc");
+        assert_eq!(
+            hit.vertex.map(|v| v.sample),
+            Some(Sample::Polar {
+                angle: std::f64::consts::PI,
+                radius: 4.0,
+            })
+        );
+
+        let bars = crate::cartesian::error_bars(
+            &[crate::cartesian::Interval {
+                x: 5.,
+                low: 2.,
+                high: 8.,
+            }],
+            0.,
+        );
+        let st = traced(&bars);
+        let top = st
+            .hit(Point::new(50., 22.))
+            .and_then(|h| h.vertex)
+            .expect("near the top");
+        assert_eq!(top.sample, Sample::Cartesian { x: 5., y: 8. });
+        let bottom = st
+            .hit(Point::new(50., 75.))
+            .and_then(|h| h.vertex)
+            .expect("near the bottom");
+        assert_eq!(bottom.sample, Sample::Cartesian { x: 5., y: 2. });
     }
 
     #[test]
