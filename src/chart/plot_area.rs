@@ -243,7 +243,7 @@ where
     Band(Band<'a, Message, Renderer>),
     Tick(Tick<'a, Message, Renderer>),
     Heatmap(Heatmap<'a, Message, Renderer>),
-    Diagram(&'a crate::Diagram),
+    Diagram(diagram::Diagram<'a>),
     Treemap(Treemap<'a, Message, Renderer>),
     Violin(Violin<'a, Message, Renderer>),
     Text(Text<'a, Message, Renderer>),
@@ -378,6 +378,9 @@ where
             if let Series::Violin(v) = series {
                 v.set_animate(animate);
             }
+            if let Series::Diagram(d) = series {
+                d.set_animate(animate);
+            }
         }
         self
     }
@@ -397,7 +400,7 @@ where
             crate::Mark::Band(band) => Series::Band(Band::new(band)),
             crate::Mark::Tick(tick) => Series::Tick(Tick::new(tick)),
             crate::Mark::Heatmap(hm) => Series::Heatmap(Heatmap::new(hm)),
-            crate::Mark::Diagram(d) => Series::Diagram(d),
+            crate::Mark::Diagram(d) => Series::Diagram(diagram::Diagram::new(d)),
             crate::Mark::Treemap(tm) => Series::Treemap(Treemap::new(tm)),
             crate::Mark::Violin(v) => Series::Violin(Violin::new(v)),
             crate::Mark::Text(t) => Series::Text(Text::new(t)),
@@ -418,7 +421,7 @@ where
                 Series::Xy(_) => 1,
                 Series::Pie(pie) => pie.data.slices.len(),
                 Series::Gauge(_) => 1,
-                Series::Diagram(d) => d.entries.len(),
+                Series::Diagram(d) => d.data.entries.len(),
                 Series::Treemap(tm) => tm.data.items.len(),
                 Series::Waterfall(_) => 3,
                 Series::Heatmap(_) => 0,
@@ -798,7 +801,7 @@ where
                     }
                 },
                 Series::Diagram(d) => {
-                    if let Some(b) = d.bounds() {
+                    if let Some(b) = d.data.bounds() {
                         x_min = x_min.min(b.x_min);
                         x_max = x_max.max(b.x_max);
                         y_min = y_min.min(b.y_min);
@@ -1031,9 +1034,15 @@ where
                 Series::Heatmap(hm) => {
                     hm.layout(series_tree, renderer, limits, use_domain, plot_rect, design);
                 }
-                Series::Diagram(d) => {
-                    diagram::layout(d, series_tree, renderer, limits.bounds(), use_domain, plot_rect, design)
-                }
+                Series::Diagram(d) => diagram::layout(
+                    d.data,
+                    series_tree,
+                    renderer,
+                    limits.bounds(),
+                    use_domain,
+                    plot_rect,
+                    design,
+                ),
                 Series::Treemap(tm) => {
                     tm.layout(series_tree, renderer, limits, use_domain, plot_rect, design);
                 }
@@ -1720,7 +1729,7 @@ where
                         labels,
                         selected,
                     );
-                    color_offset += d.entries.len();
+                    color_offset += d.data.entries.len();
                 }
                 Series::Treemap(tm) => {
                     tm.draw_with_labels(

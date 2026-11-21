@@ -50,9 +50,9 @@ pub(super) fn targets<Message>(plot: &plot_area::PlotArea<'_, Message, Renderer>
                     Point::new(st.center.0 + r * angle.cos(), st.center.1 + r * angle.sin())
                 }));
             }
-            plot_area::Series::Diagram(mark) if !mark.cartesian && !mark.smooth_faces => {
+            plot_area::Series::Diagram(mark) if !mark.data.cartesian && !mark.data.smooth_faces => {
                 let st = child.state.downcast_ref::<plot_area::diagram::State<Paragraph>>();
-                discrete.extend(st.category_targets(mark.entries().len()));
+                discrete.extend(st.category_targets(mark.data.entries().len()));
             }
             _ => {}
         }

@@ -1034,6 +1034,30 @@ pub fn variants() -> Vec<Variant> {
             series_styles::bullet_chart,
             "charts/series_styles.rs"
         ),
+        variant!(
+            150,
+            "Wind rose",
+            Diagram,
+            Flat,
+            diagrams::wind_rose,
+            "charts/diagrams.rs"
+        ),
+        variant!(
+            151,
+            "Radar scale",
+            Diagram,
+            Flat,
+            diagrams::radar_scale,
+            "charts/diagrams.rs"
+        ),
+        variant!(
+            152,
+            "Polar categories",
+            Line,
+            Flat,
+            diagrams::polar_months,
+            "charts/diagrams.rs"
+        ),
     ]
 }
 

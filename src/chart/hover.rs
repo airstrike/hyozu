@@ -49,9 +49,12 @@ pub(crate) enum Highlight {
 #[non_exhaustive]
 #[derive(PartialEq)]
 pub(crate) enum Geometry {
+    /// Hover over a diagram entry. On an open path that records its
+    /// observations, `vertex` is the observation nearest the cursor.
     Diagram {
         mark_idx: usize,
         entry_idx: usize,
+        vertex: Option<crate::chart::plot_area::diagram::Vertex>,
     },
     /// Hover over a Cartesian mark snapped to `data_x`.
     Cartesian {
@@ -125,6 +128,9 @@ pub enum Entry<'a> {
         entry_idx: usize,
         label: &'a str,
         value: Option<f64>,
+        /// The observation nearest the cursor on an open path that records
+        /// them: steps, smooth scatter and polar lines.
+        sample: Option<crate::mark::diagram::Sample>,
     },
     /// Hover over a Cartesian mark (Line / Area / Xy / Bars).
     Cartesian {

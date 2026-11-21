@@ -114,3 +114,66 @@ pub fn exploded() -> Data {
     .legend(hyozu::legend::Anchor::Right)
     .title("Orders by channel")
 }
+
+pub fn wind_rose() -> Data {
+    let axes = hyozu::polar::Axes::compass()
+        .categories(["N", "NE", "E", "SE", "S", "SW", "W", "NW"])
+        .ticks(3)
+        .format(|v| format!("{v:.0}%"));
+    let shares = [12., 7., 9., 5., 14., 21., 18., 14.];
+    let bars: Vec<_> = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+        .into_iter()
+        .zip(shares)
+        .enumerate()
+        .map(|(i, (name, share))| {
+            (name, hyozu::polar::Bar {
+                angle: axes.spoke(i),
+                width: std::f64::consts::TAU / 8. * 0.8,
+                inner: 0.,
+                outer: share,
+            })
+        })
+        .collect();
+    data(axes.bars(&bars).expect("positive shares")).title("Wind direction frequency")
+}
+
+pub fn radar_scale() -> Data {
+    data(
+        hyozu::polar::Axes::compass()
+            .maximum(100.)
+            .ticks(5)
+            .format(|v| format!("{v:.0}%"))
+            .radar(
+                &["Coverage", "Accuracy", "Latency", "Uptime", "Adoption", "Retention"],
+                &[
+                    ("Current", [82., 74., 58., 96., 61., 70.]),
+                    ("Target", [90., 85., 75., 99., 80., 85.]),
+                ],
+                hyozu::RadarStyle::Markers,
+            ),
+    )
+    .legend(hyozu::legend::Anchor::Right)
+    .title("Service scorecard")
+}
+
+pub fn polar_months() -> Data {
+    let axes = hyozu::polar::Axes::compass()
+        .categories([
+            "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+        ])
+        .format(|v| format!("{v:.0} mm"));
+    // Twelve months plus a return to January close each loop.
+    let cycle = |values: [f64; 12]| -> Vec<[f64; 2]> { (0..=12).map(|i| [axes.spoke(i), values[i % 12]]).collect() };
+    data(axes.lines(&[
+        (
+            "2024",
+            cycle([78., 61., 55., 47., 52., 40., 33., 38., 49., 71., 85., 90.]),
+        ),
+        (
+            "2025",
+            cycle([64., 70., 48., 39., 58., 46., 29., 31., 57., 80., 76., 95.]),
+        ),
+    ]))
+    .legend(hyozu::legend::Anchor::Right)
+    .title("Monthly rainfall")
+}

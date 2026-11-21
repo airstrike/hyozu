@@ -397,8 +397,12 @@ fn find_nearest_hover<Message>(
             let state = tree
                 .state
                 .downcast_ref::<plot_area::diagram::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
-            if let Some(entry_idx) = state.pick(local) {
-                return Some(hover::Geometry::Diagram { mark_idx, entry_idx });
+            if let Some(hit) = state.hit(local) {
+                return Some(hover::Geometry::Diagram {
+                    mark_idx,
+                    entry_idx: hit.entry,
+                    vertex: hit.vertex,
+                });
             }
         }
     }
@@ -853,16 +857,21 @@ fn build_hover_entry<'b, Message>(
                 _ => None,
             }
         }
-        hover::Geometry::Diagram { mark_idx, entry_idx } => {
+        hover::Geometry::Diagram {
+            mark_idx,
+            entry_idx,
+            vertex,
+        } => {
             let plot_area::Series::Diagram(draw) = plot_area.series.get(*mark_idx)? else {
                 return None;
             };
-            let entry = draw.entries().get(*entry_idx)?;
+            let entry = draw.data.entries().get(*entry_idx)?;
             Some(hover::Entry::Diagram {
                 mark_idx: *mark_idx,
                 entry_idx: *entry_idx,
                 label: &entry.name,
                 value: entry.quantitative.then_some(entry.value),
+                sample: vertex.map(|v| v.sample),
             })
         }
         hover::Geometry::Pie { mark_idx, slice_idx } => {
@@ -1234,6 +1243,14 @@ fn animation_tick_mut(tree: &mut Tree) -> Option<&mut animation::Tick> {
     if tag == tree::Tag::of::<plot_area::violin::State>() {
         return Some(&mut tree.state.downcast_mut::<plot_area::violin::State>().tick);
     }
+    if tag == tree::Tag::of::<plot_area::diagram::State<<Renderer as crate::core::text::Renderer>::Paragraph>>() {
+        return Some(
+            &mut tree
+                .state
+                .downcast_mut::<plot_area::diagram::State<<Renderer as crate::core::text::Renderer>::Paragraph>>()
+                .tick,
+        );
+    }
     None
 }
 
@@ -1481,6 +1498,25 @@ fn replant_violin(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
     }
 }
 
+/// Carries a diagram's entrance onto the rebuilt tree. Diagrams have no
+/// generic correspondence between old and new geometry to interpolate, so
+/// their entrance plays once per mount and a data change redraws in place
+/// rather than replaying it. The caller confirms both nodes carry a
+/// `diagram::State`.
+fn replant_diagram(old_mark: &Tree, new_mark: &mut Tree) {
+    let old = &old_mark
+        .state
+        .downcast_ref::<plot_area::diagram::State<<Renderer as crate::core::text::Renderer>::Paragraph>>()
+        .tick;
+    let new = &mut new_mark
+        .state
+        .downcast_mut::<plot_area::diagram::State<<Renderer as crate::core::text::Renderer>::Paragraph>>()
+        .tick;
+    new.progress = old.progress.clone();
+    new.pending_start = old.pending_start;
+    new.now = old.now;
+}
+
 /// Walks old/new plot-area children pairwise and dispatches per-tag
 /// to the matching `replant_<mark>` snapshot helper. A no-op when
 /// either tree lacks a plot area.
@@ -1501,6 +1537,8 @@ fn replant_mark_animations(old_children: &[Tree], new_children: &mut [Tree], ani
     let band_tag = tree::Tag::of::<plot_area::band::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
     let boxplot_tag = tree::Tag::of::<plot_area::boxplot::State>();
     let violin_tag = tree::Tag::of::<plot_area::violin::State>();
+    let diagram_tag =
+        tree::Tag::of::<plot_area::diagram::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
     let Some(old_scene) = old_children.first() else {
         return;
     };
@@ -1565,6 +1603,10 @@ fn replant_mark_animations(old_children: &[Tree], new_children: &mut [Tree], ani
         }
         if old_mark.tag == violin_tag && new_mark.tag == violin_tag {
             replant_violin(old_mark, new_mark, animate);
+            continue;
+        }
+        if old_mark.tag == diagram_tag && new_mark.tag == diagram_tag {
+            replant_diagram(old_mark, new_mark);
             continue;
         }
     }
@@ -2610,19 +2652,17 @@ fn draw_tooltip_overlay<Message>(
             draw_box,
             hidden_series,
         ),
-        hover::Geometry::Diagram { mark_idx, entry_idx } => {
+        hover::Geometry::Diagram {
+            mark_idx,
+            entry_idx,
+            vertex,
+        } => {
             let Some(plot_area::Series::Diagram(d)) = scene.plot_area().series.get(*mark_idx) else {
                 return;
             };
-            let Some(e) = d.entries().get(*entry_idx) else {
+            let Some(e) = d.data.entries().get(*entry_idx) else {
                 return;
             };
-            let Some(anchor) = cursor.position() else {
-                return;
-            };
-            if !draw_box || !e.quantitative {
-                return;
-            }
             let bg = design.background_color();
             let text = design.text_pair();
             let palette = scene.resolve_palette(design);
@@ -2630,11 +2670,61 @@ fn draw_tooltip_overlay<Message>(
                 .color
                 .unwrap_or_else(|| palette.get(scene.plot_area().color_offset_for(*mark_idx, *entry_idx)))
                 .resolve(bg, text, &design.seed(), None);
+            use crate::core::renderer::Renderer as _;
+            use crate::widget::canvas::{Frame, Path, Stroke};
+            use crate::widget::renderer::geometry;
+            let plot_bounds = compute_plot_bounds(chart_bounds, padding, plot_area_offset, content_rect);
+            // An observation anchors the box on itself and reports its own
+            // coordinates. Otherwise only an entry with one measured value
+            // has anything to report.
+            let (anchor, x, y, name) = match vertex {
+                Some(v) => {
+                    // Vertices are relative to the whole plot node, like line points.
+                    let pixel = Point::new(
+                        plot_bounds.x + v.pixel.x - content_rect.x,
+                        plot_bounds.y + v.pixel.y - content_rect.y,
+                    );
+                    if tooltip_config.markers {
+                        renderer.with_layer(*viewport, |renderer| {
+                            let mut frame = Frame::new(renderer, chart_bounds.size());
+                            let center = pixel - (chart_bounds.position() - Point::ORIGIN);
+                            frame.fill(&Path::circle(center, 4.), color);
+                            frame.stroke(
+                                &Path::circle(center, 4.),
+                                Stroke::default().with_width(1.5).with_color(crate::core::Color::WHITE),
+                            );
+                            renderer.with_translation(chart_bounds.position() - Point::ORIGIN, |renderer| {
+                                #[allow(clippy::unit_arg)]
+                                geometry::Renderer::draw_geometry(renderer, frame.into_geometry());
+                            });
+                        });
+                    }
+                    let (x, y, at) = match v.sample {
+                        crate::mark::diagram::Sample::Cartesian { x, y } => (x, y, crate::scale::default_f64_format(x)),
+                        crate::mark::diagram::Sample::Polar { angle, radius } => (
+                            angle,
+                            radius,
+                            format!("{}°", crate::scale::default_f64_format(angle.to_degrees())),
+                        ),
+                    };
+                    (pixel, x, y, format!("{} ({at})", e.name))
+                }
+                None if e.quantitative => {
+                    let Some(anchor) = cursor.position() else {
+                        return;
+                    };
+                    (anchor, *entry_idx as f64, e.value, e.name.clone())
+                }
+                None => return,
+            };
+            if !draw_box {
+                return;
+            }
             let entry = hover::Row {
                 tooltip: TooltipEntry {
-                    x: *entry_idx as f64,
-                    y: e.value,
-                    series_name: Some(e.name.clone()),
+                    x,
+                    y,
+                    series_name: Some(name),
                     series_index: 0,
                     mark_index: *mark_idx,
                     color,
@@ -2643,17 +2733,20 @@ fn draw_tooltip_overlay<Message>(
                 color,
                 highlight: hover::Highlight::None,
             };
-            draw_tooltip_box(
-                renderer,
-                design,
-                tooltip_config,
-                &[entry],
-                anchor,
-                chart_bounds.x + chart_bounds.width,
-                chart_bounds,
-                text.resolve(bg, None),
-                viewport,
-            );
+            // Its own layer keeps the box above the diagram's guide labels.
+            renderer.with_layer(*viewport, |renderer| {
+                draw_tooltip_box(
+                    renderer,
+                    design,
+                    tooltip_config,
+                    &[entry],
+                    anchor,
+                    chart_bounds.x + chart_bounds.width,
+                    chart_bounds,
+                    text.resolve(bg, None),
+                    viewport,
+                );
+            });
         }
         hover::Geometry::Pie { mark_idx, slice_idx } => draw_pie_tooltip_overlay(
             renderer,

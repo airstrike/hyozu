@@ -141,6 +141,13 @@ fn stock(quotes: &[Ohlc], width: f64, candlestick: bool) -> Diagram {
     d
 }
 
+/// Hover targets for a path drawn through `run`.
+fn observed(run: &[[f64; 2]]) -> Vec<([f64; 2], crate::mark::diagram::Sample)> {
+    run.iter()
+        .map(|&[x, y]| ([x, y], crate::mark::diagram::Sample::Cartesian { x, y }))
+        .collect()
+}
+
 /// Where each jump occurs between two observation positions.
 #[derive(Clone, Copy, Debug)]
 pub enum Step {
@@ -167,7 +174,7 @@ pub fn steps(samples: &[[f64; 2]], placement: Step) -> Diagram {
             };
             p.extend([[x, a[1]], [x, b[1]], b]);
         }
-        d.path(id, p, false, 1.);
+        d.trace(id, p, observed(run));
     }
     d
 }
@@ -459,7 +466,7 @@ pub fn smooth_scatter(samples: &[[f64; 2]], markers: bool) -> crate::Data {
                 }));
             }
         }
-        d.path(id, path, false, 1.);
+        d.trace(id, path, observed(run));
     }
     let mut marks = vec![crate::Mark::Diagram(d)];
     if markers {
