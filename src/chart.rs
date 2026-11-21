@@ -2694,6 +2694,7 @@ fn draw_tooltip_overlay<Message>(
                                 Stroke::default().with_width(1.5).with_color(crate::core::Color::WHITE),
                             );
                             renderer.with_translation(chart_bounds.position() - Point::ORIGIN, |renderer| {
+                                #[allow(clippy::unit_arg)]
                                 geometry::Renderer::draw_geometry(renderer, frame.into_geometry());
                             });
                         });
