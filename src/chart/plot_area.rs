@@ -5,6 +5,7 @@ use crate::data::Datum;
 
 use crate::widget::renderer::geometry;
 
+pub mod annotation;
 pub mod area;
 pub mod band;
 pub mod bars;
@@ -247,6 +248,7 @@ where
     Treemap(Treemap<'a, Message, Renderer>),
     Violin(Violin<'a, Message, Renderer>),
     Text(Text<'a, Message, Renderer>),
+    Annotation(annotation::Annotation<'a, Message, Renderer>),
 }
 
 /// Which axis pair a mark is plotted against.
@@ -401,6 +403,7 @@ where
             crate::Mark::Treemap(tm) => Series::Treemap(Treemap::new(tm)),
             crate::Mark::Violin(v) => Series::Violin(Violin::new(v)),
             crate::Mark::Text(t) => Series::Text(Text::new(t)),
+            crate::Mark::Annotation(a) => Series::Annotation(annotation::Annotation::new(a)),
         }
     }
 
@@ -428,6 +431,7 @@ where
                 Series::Rule(_) => 0,
                 Series::Band(_) => 0,
                 Series::Text(_) => 0,
+                Series::Annotation(_) => 0,
             };
         }
         offset + series_idx
@@ -457,6 +461,7 @@ where
                 Series::Treemap(tm) => tm.state(),
                 Series::Violin(v) => v.state(),
                 Series::Text(t) => t.state(),
+                Series::Annotation(a) => a.state(),
             })
             .collect();
 
@@ -505,6 +510,7 @@ where
                     Series::Treemap(_) => tree::Tag::of::<treemap::State<Renderer::Paragraph>>(),
                     Series::Violin(_) => tree::Tag::of::<violin::State>(),
                     Series::Text(_) => tree::Tag::of::<text::State<Renderer::Paragraph>>(),
+                    Series::Annotation(_) => tree::Tag::of::<annotation::State<Renderer::Paragraph>>(),
                 };
 
                 if tree.tag != expected_tag {
@@ -526,6 +532,7 @@ where
                         Series::Treemap(tm) => tm.state(),
                         Series::Violin(v) => v.state(),
                         Series::Text(t) => t.state(),
+                        Series::Annotation(a) => a.state(),
                     };
                 } else {
                     match series {
@@ -546,6 +553,7 @@ where
                         Series::Treemap(tm) => tm.diff(tree),
                         Series::Violin(v) => v.diff(tree),
                         Series::Text(t) => t.diff(tree),
+                        Series::Annotation(a) => a.diff(tree),
                     }
                 }
             },
@@ -567,6 +575,7 @@ where
                 Series::Treemap(tm) => tm.state(),
                 Series::Violin(v) => v.state(),
                 Series::Text(t) => t.state(),
+                Series::Annotation(a) => a.state(),
             },
         );
     }
@@ -809,7 +818,13 @@ where
                 // a passive label layer that projects through whatever
                 // plane the underlying point mark uses; its items don't
                 // extend the chart's data range.
-                Series::Pie(_) | Series::Gauge(_) | Series::Treemap(_) | Series::Choropleth(_) | Series::Text(_) => {}
+                // Annotations point into the range; they never extend it.
+                Series::Pie(_)
+                | Series::Gauge(_)
+                | Series::Treemap(_)
+                | Series::Choropleth(_)
+                | Series::Text(_)
+                | Series::Annotation(_) => {}
             }
         }
 
@@ -1051,6 +1066,7 @@ where
                         design,
                     );
                 }
+                Series::Annotation(a) => a.layout(series_tree, renderer, design),
             }
         }
 
@@ -1059,6 +1075,22 @@ where
         state.domain = Some(domain);
         state.secondary_domain = secondary_domain;
         state.content_rect = plot_rect;
+
+        // Annotations place last: an entry target reads the geometry its
+        // mark just laid out. Primary marks come first in `series`, so each
+        // side's marks form one contiguous range.
+        let primary = self.axis_side.iter().filter(|s| **s == AxisSide::Primary).count();
+        let bounds = Rectangle::new(crate::core::Point::ORIGIN, size);
+        for (i, series) in self.series.iter().enumerate() {
+            let Series::Annotation(a) = series else {
+                continue;
+            };
+            let (area, use_domain) = match self.axis_side[i] {
+                AxisSide::Primary => (0..primary, &domain),
+                AxisSide::Secondary => (primary..self.series.len(), secondary_domain.as_ref().unwrap_or(&domain)),
+            };
+            a.place(&mut tree.children, i, &self.series, area, use_domain, plot_rect, bounds);
+        }
 
         tree.size = size;
     }
@@ -1493,6 +1525,7 @@ where
             &mut labels,
         );
         labels.draw(renderer, viewport);
+        self.draw_annotations(tree, renderer, design, layout, viewport);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1755,6 +1788,28 @@ where
                     t.draw_with_labels(series_tree, renderer, design, style, layout, cursor, viewport, labels);
                     // Text labels don't claim a palette slot.
                 }
+                // Drawn by `draw_annotations`, above every mark and label.
+                Series::Annotation(_) => {}
+            }
+        }
+    }
+
+    /// Draws every annotation on top of the marks and their data labels.
+    /// Call after the labels layer from [`PlotArea::draw_with_labels`] has
+    /// been drawn.
+    pub(crate) fn draw_annotations<D>(
+        &self,
+        tree: &crate::core::widget::Tree,
+        renderer: &mut Renderer,
+        design: &D,
+        layout: crate::core::Layout,
+        viewport: &crate::core::Rectangle,
+    ) where
+        D: crate::design::Design + ?Sized,
+    {
+        for (i, series) in self.series.iter().enumerate() {
+            if let Series::Annotation(a) = series {
+                a.draw(&tree.children[i], renderer, design, layout, viewport);
             }
         }
     }
@@ -1772,6 +1827,15 @@ mod tests {
             top,
             bottom,
         }
+    }
+
+    #[test]
+    fn annotations_do_not_extend_plot_bounds() {
+        let plain: Vec<crate::Mark> = vec![crate::line([2.0, 8.0, 5.0]).into()];
+        let mut annotated = plain.clone();
+        annotated.push(crate::annotation(-50.0, 1e6).note("off the chart").into());
+        let bounds = |marks: &[crate::Mark]| PlotArea::<(), crate::widget::Renderer>::new(marks).compute_data_bounds();
+        assert_eq!(bounds(&plain), bounds(&annotated));
     }
 
     #[test]

@@ -62,11 +62,11 @@ pub use data::mark::diagram::{
 };
 pub use data::mark::text::text;
 pub use data::mark::{
-    self, Area, Band, BandOrientation, Bars, BoxPlot, Choropleth, ChoroplethEntry, Gauge, Heatmap, LegendEntry, Line,
-    LineStyle, MapPoint, Mark, Pie, Rule, Text, TextAlign, TextItem, Tick, Treemap, Violin, Waterfall, Xy, area, areas,
-    band, bar, bars, boxplot, bubble_map, bubble_map_with_labels, choropleth, choropleth_entry,
-    choropleth_entry_available, entry, entry_from_data, gauge, heatmap, line, map_point, pie, rule, tick, treemap,
-    violin, violin_entry, violin_from_data, waterfall, xy,
+    self, Annotation, Area, Band, BandOrientation, Bars, BoxPlot, Choropleth, ChoroplethEntry, Gauge, Heatmap,
+    LegendEntry, Line, LineStyle, MapPoint, Mark, Pie, Rule, Text, TextAlign, TextItem, Tick, Treemap, Violin,
+    Waterfall, Xy, annotation, area, areas, band, bar, bars, boxplot, bubble_map, bubble_map_with_labels, choropleth,
+    choropleth_entry, choropleth_entry_available, entry, entry_from_data, gauge, heatmap, line, map_point, pie, rule,
+    tick, treemap, violin, violin_entry, violin_from_data, waterfall, xy,
 };
 pub use data::tooltip::{ColoredText, Swatch, Tooltip, TooltipEntry};
 

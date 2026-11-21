@@ -219,9 +219,17 @@ impl Resolved {
 impl Palette {
     /// Infer the best default palette for a set of marks.
     pub fn default_for(marks: &[Mark]) -> Self {
+        // Annotations decorate the data marks; they don't change which
+        // palette suits them.
+        let mut data_marks = marks.iter().filter(|m| !matches!(m, Mark::Annotation(_)));
+        let only = match (data_marks.next(), data_marks.next()) {
+            (Some(mark), None) => Some(mark),
+            _ => None,
+        };
+
         // Special cases for single marks
-        if marks.len() == 1 {
-            return match &marks[0] {
+        if let Some(mark) = only {
+            return match mark {
                 Mark::Area(area) => {
                     if area.series.len() >= 3 {
                         Palette::TONAL
@@ -266,6 +274,7 @@ impl Palette {
                 // sequential keeps the fallback palette consistent with
                 // Line/Xy if a future caller did render text solo.
                 Mark::Text(_) => Palette::SEQUENTIAL,
+                Mark::Annotation(_) => Palette::SEQUENTIAL,
             };
         }
 
@@ -298,6 +307,7 @@ pub fn count_color_slots(marks: &[Mark]) -> usize {
             // Text uses its own resolved color (or the design's text
             // color), so it never claims a palette slot.
             Mark::Text(_) => 0,
+            Mark::Annotation(_) => 0,
         })
         .sum::<usize>()
         .max(1)

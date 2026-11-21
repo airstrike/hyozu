@@ -1,3 +1,4 @@
+mod annotations;
 mod area_basic;
 mod area_stacked;
 mod axes;
@@ -1033,6 +1034,22 @@ pub fn variants() -> Vec<Variant> {
             Flat,
             series_styles::bullet_chart,
             "charts/series_styles.rs"
+        ),
+        variant!(
+            157,
+            "Callouts",
+            Bar,
+            Flat,
+            annotations::callouts,
+            "charts/annotations.rs"
+        ),
+        variant!(
+            158,
+            "Log-axis callouts",
+            Scatter,
+            Flat,
+            annotations::log_callouts,
+            "charts/annotations.rs"
         ),
     ]
 }

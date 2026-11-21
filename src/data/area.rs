@@ -388,7 +388,13 @@ impl Area {
                         y_max = y_max.max(b.y_max);
                     }
                 }
-                Mark::Pie(_) | Mark::Gauge(_) | Mark::Treemap(_) | Mark::Choropleth(_) | Mark::Text(_) => {}
+                // Annotations never extend the data range.
+                Mark::Pie(_)
+                | Mark::Gauge(_)
+                | Mark::Treemap(_)
+                | Mark::Choropleth(_)
+                | Mark::Text(_)
+                | Mark::Annotation(_) => {}
             }
         }
 
