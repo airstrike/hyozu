@@ -713,8 +713,8 @@ impl Data {
         let mut out: std::collections::HashMap<legend::Edge, f32> = std::collections::HashMap::new();
         let all = self.primary.marks().iter().chain(self.secondary.marks().iter());
         for mark in all {
-            if let Some((legend_cfg, title)) = mark.scale_legend_config()
-                && let Some((edge, budget)) = crate::chart::scale_legend::reservation(legend_cfg, title)
+            if let Some(scale) = mark.scale_legend_config()
+                && let Some((edge, budget)) = crate::chart::scale_legend::reservation(&scale)
             {
                 *out.entry(edge).or_insert(0.0) += budget;
             }

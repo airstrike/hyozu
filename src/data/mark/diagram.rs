@@ -65,6 +65,15 @@ pub struct Diagram {
     pub(crate) image: Option<crate::core::image::Image>,
     pub(crate) range: Option<crate::data::area::Bounds>,
     pub(crate) color_domain: Option<(f64, f64)>,
+    /// Ascending edges of the value bins a banded field fills, one more
+    /// than its entries. Set by banded constructors such as
+    /// [`crate::field::Mesh::contour_bands`] so a scale legend steps
+    /// through the same levels.
+    pub(crate) bins: Option<Vec<f64>>,
+    /// Scale-legend placement for a scalar diagram.
+    pub(crate) scale_legend: Option<crate::data::legend::Config>,
+    /// Title shown above the scale legend.
+    pub(crate) legend_title: Option<String>,
 }
 
 impl Diagram {
@@ -150,6 +159,22 @@ impl Diagram {
             });
         }
         valid
+    }
+
+    /// Configures a scale legend for a diagram colored by value, such as
+    /// a contour plot, a hexbin or a tile grid: a color bar, or one color
+    /// step per band for filled contours. The legend replaces the
+    /// per-entry swatches in the series legend. Diagrams that color by
+    /// category ignore it.
+    pub fn scale_legend(mut self, legend: impl Into<Option<crate::data::legend::Config>>) -> Self {
+        self.scale_legend = legend.into();
+        self
+    }
+
+    /// Sets the title shown above the scale legend.
+    pub fn legend_title(mut self, title: impl Into<String>) -> Self {
+        self.legend_title = Some(title.into());
+        self
     }
 
     pub fn entries(&self) -> &[Entry] {

@@ -51,7 +51,8 @@ pub enum Orientation {
 /// Configuration for a chart legend.
 ///
 /// A single `Config` drives both the series-key legend (swatches for each
-/// data series) and the choropleth color-scale legend. Pick the edge with
+/// data series) and the scale legends (color bars, color steps and size
+/// keys) that marks with a scale carry. Pick the edge with
 /// [`Config::anchor`] + [`Config::orientation`] and whether the chart should
 /// reserve space for it with [`Config::placement`].
 ///
@@ -315,6 +316,50 @@ pub enum Edge {
 impl From<Anchor> for Config {
     fn from(anchor: Anchor) -> Self {
         Self::overlay(anchor)
+    }
+}
+
+/// A mark's request for a scale legend: the placement it rides, its
+/// title, and the [`Key`] it draws. Returned by
+/// [`crate::Mark::scale_legend_config`].
+#[derive(Debug, Clone, Copy)]
+pub struct Scale<'a> {
+    config: &'a Config,
+    title: Option<&'a str>,
+    key: Key,
+}
+
+/// What a scale legend draws.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Key {
+    /// A continuous color bar, for a color scale over a numeric domain.
+    Gradient,
+    /// One uniform color step per bin, labeled at the bin edges, for
+    /// banded scalar fields such as filled contours.
+    Steps,
+    /// Circles sized like the marks, for a size encoding. `largest` is
+    /// the widest circle the encoding can draw, in pixels.
+    Sizes { largest: f32 },
+}
+
+impl<'a> Scale<'a> {
+    pub(crate) fn new(config: &'a Config, title: Option<&'a str>, key: Key) -> Self {
+        Self { config, title, key }
+    }
+
+    /// The legend's placement and typography.
+    pub fn config(&self) -> &'a Config {
+        self.config
+    }
+
+    /// The title above the key, if any.
+    pub fn title(&self) -> Option<&'a str> {
+        self.title
+    }
+
+    /// The kind of key the legend draws.
+    pub fn key(&self) -> Key {
+        self.key
     }
 }
 

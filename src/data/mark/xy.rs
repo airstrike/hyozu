@@ -1,8 +1,8 @@
 use crate::color::Color;
 use crate::data::axis::{self, Axis, Kind, Orientation, Placement};
 use crate::data::mark::line::marker;
-use crate::data::{Datum, IntoDatums};
-use crate::encoding::{Encoding, channel};
+use crate::data::{Datum, IntoDatums, legend};
+use crate::encoding::{self, Encoding, channel};
 use crate::feature;
 
 pub use marker::Marker;
@@ -65,6 +65,11 @@ pub struct Xy {
     /// `MapPoint::id` so map clicks can emit the same
     /// [`crate::target::Target::Feature`] shape as choropleths.
     pub(crate) feature_ids: Vec<Option<feature::Id>>,
+    /// Size-key legend placement for [`Self::size_by`]. `None` (the
+    /// default) draws no size key.
+    pub(crate) size_legend: Option<legend::Config>,
+    /// Title shown above the size key.
+    pub(crate) size_legend_title: Option<String>,
 }
 
 /// Creates an XY scatter chart from point data.
@@ -93,6 +98,8 @@ pub fn xy(data: impl IntoDatums) -> Xy {
         labels: Vec::new(),
         tooltip_values: Vec::new(),
         feature_ids: Vec::new(),
+        size_legend: None,
+        size_legend_title: None,
     }
 }
 
@@ -134,6 +141,56 @@ impl Xy {
     pub fn size_by(mut self, encoding: Encoding<channel::Size>) -> Self {
         self.size_by = Some(encoding);
         self
+    }
+
+    /// Configures a size key for the [`Self::size_by`] encoding: a row
+    /// (horizontal) or column (vertical) of circles at round values, each
+    /// drawn at the diameter a point with that value gets.
+    ///
+    /// Pass a [`legend::Config`] to place it, or `None` to remove it. No
+    /// key draws without a size encoding.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use hyozu::{encoding, legend, xy};
+    ///
+    /// let bubbles = xy([(1.0, 10.0), (2.0, 40.0), (3.0, 25.0)])
+    ///     .size_by(encoding::size_by(|_, d| d.y).range(4.0..=24.0))
+    ///     .size_legend(legend::Config::right())
+    ///     .size_legend_title("Orders");
+    /// ```
+    pub fn size_legend(mut self, legend: impl Into<Option<legend::Config>>) -> Self {
+        self.size_legend = legend.into();
+        self
+    }
+
+    /// Sets the title shown above the size key.
+    pub fn size_legend_title(mut self, title: impl Into<String>) -> Self {
+        self.size_legend_title = Some(title.into());
+        self
+    }
+
+    /// Returns the size-key legend configuration, if any.
+    pub fn size_legend_config(&self) -> Option<&legend::Config> {
+        self.size_legend.as_ref()
+    }
+
+    /// Returns the size-key title, if any.
+    pub fn size_legend_title_value(&self) -> Option<&str> {
+        self.size_legend_title.as_deref()
+    }
+
+    /// The size encoding's mapping over this mark's points, which the
+    /// marks and the size key share. `None` without a size encoding or
+    /// without a finite value to infer its domain from.
+    pub(crate) fn diameters(&self) -> Option<encoding::Diameters> {
+        self.size_by.as_ref()?.diameters(&self.points)
+    }
+
+    /// The widest circle the size encoding can draw, in pixels.
+    pub(crate) fn largest_diameter(&self) -> Option<f32> {
+        self.size_by.as_ref().map(Encoding::largest_diameter)
     }
 
     /// Sets `(x, y)` interpretation to `(longitude, latitude)`. Renders

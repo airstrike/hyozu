@@ -356,6 +356,26 @@ impl Area {
     }
 }
 
+/// Where `value` falls along a scalar diagram's color `domain`, clamped to
+/// the unit interval. A collapsed domain maps to its middle.
+pub(crate) fn scalar_unit((lo, hi): (f64, f64), value: f64) -> f64 {
+    let unit = if hi > lo { (value - lo) / (hi - lo) } else { 0.5 };
+    unit.clamp(0., 1.)
+}
+
+/// The color a scalar diagram paints at `unit`: its palette slots spread
+/// evenly over the unit interval and blended pairwise. The scale legend
+/// samples the same ramp.
+pub(crate) fn scalar_color(slots: &[Color], unit: f64) -> Color {
+    let Some(last) = slots.len().checked_sub(1) else {
+        return Color::TRANSPARENT;
+    };
+    let position = unit.clamp(0., 1.) * last as f64;
+    let a = position.floor() as usize;
+    let b = (a + 1).min(last);
+    slots[a].mix(slots[b], position.fract() as f32)
+}
+
 /// Whether the segment from `a` to `b` passes through `rect` (Liang–Barsky).
 fn crosses(a: Point, b: Point, rect: Rectangle) -> bool {
     let d = b - a;
@@ -571,6 +591,10 @@ pub(super) fn draw<'p, R, D: Design + ?Sized>(
     let seed = theme.seed();
     let ink = text.resolve(background, None);
     let resolve = |j| palette.get(offset + j).resolve(background, text, &seed, None);
+    let slots: Vec<Color> = match data.color_domain {
+        Some(_) => (0..data.entries.len()).map(resolve).collect(),
+        None => Vec::new(),
+    };
     let colors: Vec<Color> = data
         .entries
         .iter()
@@ -578,12 +602,8 @@ pub(super) fn draw<'p, R, D: Design + ?Sized>(
         .map(|(i, entry)| {
             if let Some(color) = entry.color {
                 color.resolve(background, text, &seed, None)
-            } else if let Some((lo, hi)) = data.color_domain {
-                let unit = if hi > lo { (entry.value - lo) / (hi - lo) } else { 0.5 };
-                let position = unit.clamp(0., 1.) * (data.entries.len() - 1) as f64;
-                let a = position.floor() as usize;
-                let b = (a + 1).min(data.entries.len() - 1);
-                resolve(a).mix(resolve(b), position.fract() as f32)
+            } else if let Some(domain) = data.color_domain {
+                scalar_color(&slots, scalar_unit(domain, entry.value))
             } else {
                 resolve(i)
             }

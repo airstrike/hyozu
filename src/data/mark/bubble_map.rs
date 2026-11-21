@@ -202,6 +202,8 @@ pub fn bubble_map(points: impl IntoIterator<Item = MapPoint>) -> Xy {
         labels,
         tooltip_values,
         feature_ids,
+        size_legend: None,
+        size_legend_title: None,
     }
 }
 

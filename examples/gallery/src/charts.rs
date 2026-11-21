@@ -1093,6 +1093,14 @@ pub fn variants() -> Vec<Variant> {
             interaction::zoomable,
             "charts/interaction.rs"
         ),
+        variant!(
+            157,
+            "Log color scale",
+            Heatmap,
+            Flat,
+            heatmap_warm::log_scale,
+            "charts/heatmap_warm.rs"
+        ),
     ]
 }
 

@@ -509,80 +509,117 @@ impl Encoding<Size> {
     /// as the domain. A degenerate domain (min == max) maps every point to
     /// the midpoint of the output range.
     pub(crate) fn resolve_size(&self, points: &[Datum]) -> Vec<Option<f32>> {
-        let inputs: Vec<f64> = points.iter().enumerate().map(|(i, d)| (self.extractor)(i, d)).collect();
+        let inputs = self.inputs(points);
+        match self.diameters_over(&inputs) {
+            Some(diameters) => inputs.into_iter().map(|v| diameters.at(v)).collect(),
+            None => vec![None; inputs.len()],
+        }
+    }
 
+    /// The upper end of the output pixel range.
+    pub(crate) fn largest_diameter(&self) -> f32 {
+        let SizeKind::Continuous { range, .. } = &self.kind;
+        range.start().max(*range.end())
+    }
+
+    /// The value-to-diameter mapping this encoding applies to `points`,
+    /// with its domain resolved. `None` when the domain is auto-detected
+    /// and no point has a finite value. A size legend reads the same
+    /// mapping the marks are drawn with.
+    pub(crate) fn diameters(&self, points: &[Datum]) -> Option<Diameters> {
+        self.diameters_over(&self.inputs(points))
+    }
+
+    fn inputs(&self, points: &[Datum]) -> Vec<f64> {
+        points.iter().enumerate().map(|(i, d)| (self.extractor)(i, d)).collect()
+    }
+
+    fn diameters_over(&self, inputs: &[f64]) -> Option<Diameters> {
         let SizeKind::Continuous { domain, range, scale } = &self.kind;
-
-        // Effective domain: explicit, or auto from the inputs.
-        let (d_min, d_max) = if let Some(d) = domain {
-            (*d.start(), *d.end())
-        } else {
-            let mut min = f64::INFINITY;
-            let mut max = f64::NEG_INFINITY;
-            for &v in &inputs {
-                if v.is_finite() {
-                    if v < min {
-                        min = v;
-                    }
-                    if v > max {
-                        max = v;
-                    }
-                }
-            }
-            if min.is_infinite() || max.is_infinite() {
-                // No finite inputs at all — every point falls back.
-                return vec![None; inputs.len()];
-            }
-            (min, max)
-        };
-
-        let r_min = *range.start();
-        let r_max = *range.end();
-        let mid = (r_min + r_max) / 2.0;
-
-        inputs
-            .into_iter()
-            .map(|v| {
-                if !v.is_finite() {
+        let domain = match domain {
+            Some(d) => (*d.start(), *d.end()),
+            None => {
+                let (min, max) = inputs
+                    .iter()
+                    .copied()
+                    .filter(|v| v.is_finite())
+                    .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| (lo.min(v), hi.max(v)));
+                if min.is_infinite() || max.is_infinite() {
                     return None;
                 }
-                if d_max == d_min {
-                    return Some(mid);
+                (min, max)
+            }
+        };
+        Some(Diameters {
+            domain,
+            range: (*range.start(), *range.end()),
+            scale: *scale,
+        })
+    }
+}
+
+/// A size encoding's value-to-diameter mapping with its domain resolved.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Diameters {
+    domain: (f64, f64),
+    range: (f32, f32),
+    scale: SizeScale,
+}
+
+impl Diameters {
+    /// The `(min, max)` input domain.
+    pub(crate) fn domain(&self) -> (f64, f64) {
+        self.domain
+    }
+
+    /// The scale between domain and range.
+    pub(crate) fn scale(&self) -> SizeScale {
+        self.scale
+    }
+
+    /// The pixel diameter for `v`, clamped to the output range. `None` for
+    /// a non-finite input. A degenerate domain maps every value to the
+    /// middle of the range.
+    pub(crate) fn at(&self, v: f64) -> Option<f32> {
+        if !v.is_finite() {
+            return None;
+        }
+        let (d_min, d_max) = self.domain;
+        let (r_min, r_max) = self.range;
+        if d_max == d_min {
+            return Some((r_min + r_max) / 2.0);
+        }
+        let t = match self.scale {
+            SizeScale::Linear => (v - d_min) / (d_max - d_min),
+            SizeScale::Sqrt => {
+                // Stevens' law: linearly interpolate sqrt(value) so
+                // that the resulting diameter, when squared into an
+                // area, is linear in the original value. Inputs are
+                // clamped to >= 0 because sqrt of a negative is NaN.
+                let v_s = v.max(0.0).sqrt();
+                let lo_s = d_min.max(0.0).sqrt();
+                let hi_s = d_max.max(0.0).sqrt();
+                if hi_s == lo_s {
+                    0.5
+                } else {
+                    (v_s - lo_s) / (hi_s - lo_s)
                 }
-                let t = match scale {
-                    SizeScale::Linear => (v - d_min) / (d_max - d_min),
-                    SizeScale::Sqrt => {
-                        // Stevens' law: linearly interpolate sqrt(value) so
-                        // that the resulting diameter, when squared into an
-                        // area, is linear in the original value. Inputs are
-                        // clamped to >= 0 because sqrt of a negative is NaN.
-                        let v_s = v.max(0.0).sqrt();
-                        let lo_s = d_min.max(0.0).sqrt();
-                        let hi_s = d_max.max(0.0).sqrt();
-                        if hi_s == lo_s {
-                            0.5
-                        } else {
-                            (v_s - lo_s) / (hi_s - lo_s)
-                        }
-                    }
-                    SizeScale::Log => {
-                        // Log requires positive inputs; clamp to MIN_POSITIVE
-                        // so a 0 or negative input maps to the bottom of the
-                        // range rather than producing NaN.
-                        let v_l = v.max(f64::MIN_POSITIVE).ln();
-                        let lo_l = d_min.max(f64::MIN_POSITIVE).ln();
-                        let hi_l = d_max.max(f64::MIN_POSITIVE).ln();
-                        if hi_l == lo_l {
-                            0.5
-                        } else {
-                            (v_l - lo_l) / (hi_l - lo_l)
-                        }
-                    }
-                };
-                let t_clamped = t.clamp(0.0, 1.0) as f32;
-                Some(r_min + (r_max - r_min) * t_clamped)
-            })
-            .collect()
+            }
+            SizeScale::Log => {
+                // Log requires positive inputs; clamp to MIN_POSITIVE
+                // so a 0 or negative input maps to the bottom of the
+                // range rather than producing NaN.
+                let v_l = v.max(f64::MIN_POSITIVE).ln();
+                let lo_l = d_min.max(f64::MIN_POSITIVE).ln();
+                let hi_l = d_max.max(f64::MIN_POSITIVE).ln();
+                if hi_l == lo_l {
+                    0.5
+                } else {
+                    (v_l - lo_l) / (hi_l - lo_l)
+                }
+            }
+        };
+        Some(r_min + (r_max - r_min) * t.clamp(0.0, 1.0) as f32)
     }
 }
 

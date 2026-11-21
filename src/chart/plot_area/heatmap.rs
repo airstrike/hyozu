@@ -7,7 +7,6 @@ use crate::core::layout::Limits;
 use crate::core::widget::{Tree, tree};
 use crate::core::{Color, Point, Rectangle, Size};
 use crate::data::Datum;
-use crate::palette::Palette;
 use crate::widget::canvas::{Frame, Path};
 use crate::widget::renderer::geometry;
 
@@ -22,49 +21,6 @@ fn lerp_color(prev: Color, cur: Color, progress: f32) -> Color {
         b: prev.b + (cur.b - prev.b) * progress,
         a: prev.a + (cur.a - prev.a) * progress,
     }
-}
-
-/// Default palette for a Heatmap when the user hasn't set one. A
-/// sequential blue gradient matching the historical
-/// [`crate::mark::heatmap::sequential_stops`] preset that the renderer
-/// previously baked inline.
-fn default_heatmap_palette() -> Palette {
-    Palette::Gradient(
-        crate::mark::heatmap::sequential_stops()
-            .into_iter()
-            .map(Into::into)
-            .collect(),
-    )
-}
-
-/// Compute the data-derived `(min, max)` value range for a Heatmap.
-/// Skips non-finite values so the gradient sampler never sees NaN or Inf.
-/// When all values are filtered out or the range collapses, returns a
-/// `(min, min + 1.0)` degenerate range so downstream mapping has a
-/// non-zero span.
-fn compute_value_range(values: &[f64]) -> (f64, f64) {
-    let mut lo = f64::INFINITY;
-    let mut hi = f64::NEG_INFINITY;
-    for &v in values {
-        if v.is_finite() {
-            if v < lo {
-                lo = v;
-            }
-            if v > hi {
-                hi = v;
-            }
-        }
-    }
-    if lo.is_infinite() {
-        lo = 0.0;
-    }
-    if hi.is_infinite() {
-        hi = 1.0;
-    }
-    if (hi - lo).abs() < f64::EPSILON {
-        hi = lo + 1.0;
-    }
-    (lo, hi)
 }
 
 /// State for Heatmap - stores positioned cell rectangles, the cached
@@ -182,10 +138,7 @@ where
         let rows = self.data.rows();
         let cols = self.data.cols();
 
-        state.value_range = self
-            .data
-            .color
-            .resolved_domain(|| compute_value_range(&self.data.values));
+        state.value_range = self.data.value_range();
 
         if rows == 0 || cols == 0 {
             state.labels.clear();
@@ -343,10 +296,8 @@ where
         // ── Resolve color scale ───────────────────────────────────
         // Theme-dependent (a palette referencing seed slots resolves
         // through the active theme's hues), so it stays in draw. The
-        // user's explicit palette wins; otherwise the closure produces
-        // the mark's default sequential gradient.
-        let palette = self.data.color.resolved_palette(default_heatmap_palette);
-        let stops: Vec<Color> = palette_to_continuous_stops(&palette, &seed);
+        // mark resolves the palette, so the color bar samples the same one.
+        let stops: Vec<Color> = palette_to_continuous_stops(&self.data.resolved_palette(), &seed);
         let transform = self.data.color.transform;
         let (v_min, v_max) = state.value_range;
 
