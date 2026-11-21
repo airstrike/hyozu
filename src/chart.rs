@@ -1333,6 +1333,14 @@ fn animation_tick_mut(tree: &mut Tree) -> Option<&mut animation::Tick> {
                 .tick,
         );
     }
+    if tag == tree::Tag::of::<plot_area::annotation::State<<Renderer as crate::core::text::Renderer>::Paragraph>>() {
+        return Some(
+            &mut tree
+                .state
+                .downcast_mut::<plot_area::annotation::State<<Renderer as crate::core::text::Renderer>::Paragraph>>()
+                .tick,
+        );
+    }
     None
 }
 
@@ -1599,6 +1607,24 @@ fn replant_diagram(old_mark: &Tree, new_mark: &mut Tree) {
     new.now = old.now;
 }
 
+/// Carries an annotation's anchor onto the rebuilt tree so it glides to
+/// its new placement. One that wasn't placed before fades in again. The
+/// caller confirms both nodes carry an `annotation::State`.
+fn replant_annotation(old_mark: &Tree, new_mark: &mut Tree, animate: bool) {
+    let old_state = old_mark
+        .state
+        .downcast_ref::<plot_area::annotation::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
+    let new_state = new_mark
+        .state
+        .downcast_mut::<plot_area::annotation::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
+    if animate {
+        new_state.previous_anchor = old_state.placement.map(|placement| placement.anchor);
+        new_state.tick.pending_start = true;
+    } else {
+        new_state.tick.pending_start = false;
+    }
+}
+
 /// Walks old/new plot-area children pairwise and dispatches per-tag
 /// to the matching `replant_<mark>` snapshot helper. A no-op when
 /// either tree lacks a plot area.
@@ -1621,6 +1647,8 @@ fn replant_mark_animations(old_children: &[Tree], new_children: &mut [Tree], ani
     let violin_tag = tree::Tag::of::<plot_area::violin::State>();
     let diagram_tag =
         tree::Tag::of::<plot_area::diagram::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
+    let annotation_tag =
+        tree::Tag::of::<plot_area::annotation::State<<Renderer as crate::core::text::Renderer>::Paragraph>>();
     let Some(old_scene) = old_children.first() else {
         return;
     };
@@ -1689,6 +1717,10 @@ fn replant_mark_animations(old_children: &[Tree], new_children: &mut [Tree], ani
         }
         if old_mark.tag == diagram_tag && new_mark.tag == diagram_tag {
             replant_diagram(old_mark, new_mark);
+            continue;
+        }
+        if old_mark.tag == annotation_tag && new_mark.tag == annotation_tag {
+            replant_annotation(old_mark, new_mark, animate);
             continue;
         }
     }
@@ -4498,6 +4530,33 @@ pub fn filled(design: &dyn design::Design) -> Style {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn replanted_annotation_glides_from_its_old_anchor() {
+        use crate::chart::plot_area::annotation::{self, Placement};
+        type Paragraph = <Renderer as crate::core::text::Renderer>::Paragraph;
+
+        let note = crate::annotation(1.0, 2.0).note("Peak");
+        let marks = vec![crate::Mark::Annotation(note.clone())];
+        let plot = plot_area::PlotArea::<(), Renderer>::new(&marks);
+        let (mut old, mut new) = (plot.state(), plot.state());
+        let content = Rectangle::new(Point::ORIGIN, Size::new(200.0, 100.0));
+        let anchor = Point::new(40.0, 30.0);
+        old.children[0]
+            .state
+            .downcast_mut::<annotation::State<Paragraph>>()
+            .placement = Placement::new(&note, anchor, annotation::Text::default(), content, content);
+
+        replant_annotation(&old.children[0], &mut new.children[0], true);
+        let state = new.children[0].state.downcast_ref::<annotation::State<Paragraph>>();
+        assert_eq!(state.previous_anchor, Some(anchor));
+        assert!(state.tick.pending_start);
+
+        let mut still = plot.state();
+        replant_annotation(&old.children[0], &mut still.children[0], false);
+        let state = still.children[0].state.downcast_ref::<annotation::State<Paragraph>>();
+        assert!(!state.tick.pending_start, "a static chart doesn't replay");
+    }
 
     #[test]
     fn clicks_reach_the_overhanging_part_of_a_stacked_bar_label() {

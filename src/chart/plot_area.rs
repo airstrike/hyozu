@@ -383,6 +383,9 @@ where
             if let Series::Diagram(d) = series {
                 d.set_animate(animate);
             }
+            if let Series::Annotation(a) = series {
+                a.set_animate(animate);
+            }
         }
         self
     }

@@ -6,6 +6,11 @@
 //! domain's per-axis mappings, or through the rendered geometry of the
 //! targeted mark) and computes a [`Placement`]: the subject, the connector
 //! route and the note box. `draw` only paints the cached placement.
+//!
+//! Annotations move with the marks' [`crate::animation::Tick`]: on mount
+//! they fade in over the end of the entrance, once the marks they point at
+//! have mostly drawn, and on a data change they glide from their previous
+//! anchor to the new one (see [`Motion`]).
 use super::{Domain, Series, to_pixel};
 use crate::core::text::{self, paragraph};
 use crate::core::widget::{Tree, tree};
@@ -34,6 +39,8 @@ const ARROW_HALF_WIDTH: f32 = 3.5;
 const DOT_RADIUS: f32 = 2.5;
 /// Tolerance for an anchor sitting exactly on the data rectangle's edge.
 const EDGE_TOLERANCE: f32 = 0.5;
+/// Entrance progress at which a mounting annotation starts to fade in.
+const FADE_START: f32 = 0.6;
 
 /// State for an annotation: the shaped note text and its placement.
 pub struct State<P>
@@ -46,6 +53,46 @@ where
     pub body: paragraph::Plain<P>,
     /// Where everything lands, or `None` when the target is hidden.
     pub placement: Option<Placement>,
+    /// Entrance and transition lifecycle, shared with the marks.
+    pub tick: crate::animation::Tick,
+    /// The anchor before a data change, which the annotation glides from.
+    /// `None` on mount, when it fades in instead.
+    pub previous_anchor: Option<Point>,
+}
+
+/// How far into its animation an annotation is drawn: a shift from its
+/// placement and an opacity.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Motion {
+    /// Added to every part of the placement.
+    pub offset: Vector,
+    /// Multiplies the annotation's colors.
+    pub alpha: f32,
+}
+
+impl Motion {
+    /// Fully arrived: no shift, fully opaque.
+    pub const SETTLED: Self = Self {
+        offset: Vector::ZERO,
+        alpha: 1.0,
+    };
+
+    /// The motion at eased `progress` toward `anchor`. With a `previous`
+    /// anchor the annotation glides from it, fully opaque; without one it
+    /// stays put and fades in over the last stretch of the entrance.
+    pub fn new(progress: f32, previous: Option<Point>, anchor: Point) -> Self {
+        let progress = progress.clamp(0.0, 1.0);
+        match previous {
+            Some(from) => Self {
+                offset: (from - anchor) * (1.0 - progress),
+                alpha: 1.0,
+            },
+            None => Self {
+                offset: Vector::ZERO,
+                alpha: ((progress - FADE_START) / (1.0 - FADE_START)).clamp(0.0, 1.0),
+            },
+        }
+    }
 }
 
 /// The resolved pixel geometry of one annotation, in plot-local
@@ -96,6 +143,9 @@ where
     Renderer: text::Renderer + geometry::Renderer,
 {
     pub(super) data: &'a crate::mark::Annotation,
+    /// Mirrors [`crate::Data::animate`]; `false` draws the annotation
+    /// settled from the first frame.
+    animate: bool,
     _marker: std::marker::PhantomData<(Message, Renderer)>,
 }
 
@@ -203,8 +253,14 @@ where
     pub fn new(data: &'a crate::mark::Annotation) -> Self {
         Self {
             data,
+            animate: true,
             _marker: std::marker::PhantomData,
         }
+    }
+
+    /// Set from [`super::PlotArea::with_animate`].
+    pub(crate) fn set_animate(&mut self, animate: bool) {
+        self.animate = animate;
     }
 
     /// Returns the initial tree state.
@@ -215,6 +271,8 @@ where
                 title: paragraph::Plain::default(),
                 body: paragraph::Plain::default(),
                 placement: None,
+                tick: crate::animation::Tick::new(),
+                previous_anchor: None,
             }),
             children: Vec::new(),
             ..Tree::empty()
@@ -312,21 +370,32 @@ where
         let Some(placement) = state.placement else {
             return;
         };
+        let motion = if self.animate {
+            Motion::new(state.tick.progress(), state.previous_anchor, placement.anchor)
+        } else {
+            Motion::SETTLED
+        };
+        if motion.alpha <= 0.0 {
+            return;
+        }
 
         let background = theme.background_color();
         let text_pair = theme.text_pair();
         let seed = theme.seed();
-        let text_color = theme.text_color().resolve(background, text_pair, &seed, None);
-        let color = self
-            .data
-            .color
-            .map_or(text_color, |c| c.resolve(background, text_pair, &seed, None));
+        let text_color = theme
+            .text_color()
+            .resolve(background, text_pair, &seed, None)
+            .scale_alpha(motion.alpha);
+        let color = self.data.color.map_or(text_color, |c| {
+            c.resolve(background, text_pair, &seed, None).scale_alpha(motion.alpha)
+        });
 
         let bounds = layout.bounds();
-        let translation = Vector::new(bounds.x, bounds.y);
+        let translation = Vector::new(bounds.x, bounds.y) + motion.offset;
 
-        // The subject stays inside the data rectangle.
-        if let Some(clip) = (placement.content + translation).intersection(viewport) {
+        // The subject stays inside the data rectangle, which holds still
+        // while the annotation glides.
+        if let Some(clip) = (placement.content + Vector::new(bounds.x, bounds.y)).intersection(viewport) {
             let mut frame = Frame::new(renderer, bounds.size());
             draw_subject(&mut frame, &placement, color);
             let geometry = frame.into_geometry();
@@ -344,7 +413,9 @@ where
             draw_route(&mut frame, route, self.data.end, color);
         }
         if let Some(fill) = self.data.note.background {
-            let fill = fill.resolve(background, text_pair, &seed, None);
+            let fill = fill
+                .resolve(background, text_pair, &seed, None)
+                .scale_alpha(motion.alpha);
             let plate = Path::rounded_rectangle(placement.note.position(), placement.note.size(), 4.0.into());
             frame.fill(&plate, fill);
             frame.stroke(
@@ -835,6 +906,33 @@ mod tests {
             value_end(rect, Point::new(10.0, 0.0), Direction::Horizontal),
             Point::new(30.0, 90.0)
         );
+    }
+}
+
+#[cfg(test)]
+mod motion_tests {
+    use super::*;
+
+    const ANCHOR: Point = Point::new(100.0, 50.0);
+
+    #[test]
+    fn mounting_annotation_waits_then_fades_in_with_the_entrance() {
+        assert_eq!(Motion::new(0.0, None, ANCHOR).alpha, 0.0);
+        assert_eq!(Motion::new(FADE_START, None, ANCHOR).alpha, 0.0);
+        let halfway = Motion::new((FADE_START + 1.0) / 2.0, None, ANCHOR);
+        assert!((halfway.alpha - 0.5).abs() < 1e-5);
+        assert_eq!(halfway.offset, Vector::ZERO);
+        assert_eq!(Motion::new(1.0, None, ANCHOR), Motion::SETTLED);
+    }
+
+    #[test]
+    fn moved_annotation_glides_from_its_previous_anchor() {
+        let from = Point::new(60.0, 90.0);
+        let start = Motion::new(0.0, Some(from), ANCHOR);
+        assert_eq!(start.offset, Vector::new(-40.0, 40.0));
+        assert_eq!(start.alpha, 1.0);
+        assert_eq!(Motion::new(0.75, Some(from), ANCHOR).offset, Vector::new(-10.0, 10.0));
+        assert_eq!(Motion::new(1.0, Some(from), ANCHOR), Motion::SETTLED);
     }
 }
 
