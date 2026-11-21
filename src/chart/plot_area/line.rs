@@ -730,21 +730,47 @@ fn draw_group<R: geometry::Renderer>(
         return;
     }
     let resolve = |c: &crate::color::Color| c.resolve(background, text_pair, seed, None);
-    let up = bars.up_value().map_or(background, resolve);
-    let down = bars.down_value().map_or(ink, resolve);
-    let border = bars.border_value().map_or(ink, resolve);
+    let Paint { up, down, border } = Paint::new(bars, ink, resolve);
     for c in columns {
         let Some((first, last, rising)) = c.ends.filter(|(a, b, _)| finite(*a) && finite(*b)) else {
             continue;
         };
-        let fill = if rising { up } else { down };
+        let fill = if rising { up } else { Some(down) };
         let top = first.min(last);
         let outline = Path::rectangle(
             Point::new(c.x - bar_width / 2.0, top),
             crate::core::Size::new(bar_width, (first - last).abs().max(1.0)),
         );
-        frame.fill(&outline, fill);
+        if let Some(fill) = fill {
+            frame.fill(&outline, fill);
+        }
         frame.stroke(&outline, Stroke::default().with_width(1.0).with_color(border));
+    }
+}
+
+/// Resolved colors of up/down bars.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Paint {
+    /// Up bar fill; `None` leaves the bar hollow.
+    up: Option<crate::core::Color>,
+    down: crate::core::Color,
+    border: crate::core::Color,
+}
+
+impl Paint {
+    /// Resolves `bars`' colors, defaulting to `ink`. Unset up bars stay
+    /// hollow rather than fill with the theme background, which isn't the
+    /// surface a transparent chart sits on.
+    fn new(
+        bars: &crate::line::UpDown,
+        ink: crate::core::Color,
+        resolve: impl Fn(&crate::color::Color) -> crate::core::Color,
+    ) -> Self {
+        Self {
+            up: bars.up_value().map(&resolve),
+            down: bars.down_value().map_or(ink, &resolve),
+            border: bars.border_value().map_or(ink, &resolve),
+        }
     }
 }
 
@@ -1190,6 +1216,20 @@ fn animate_pixel_points(cur: &[Point], prev: &[Point], progress: f32) -> Vec<Poi
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_up_bars_stay_hollow_on_any_surface() {
+        use crate::core::Color;
+        let ink = Color::WHITE;
+        let resolve = |_: &crate::color::Color| Color::from_rgb(1.0, 0.0, 0.0);
+        let plain = Paint::new(&crate::line::UpDown::new(), ink, resolve);
+        assert_eq!(plain.up, None);
+        assert_eq!((plain.down, plain.border), (ink, ink));
+        let styled = Paint::new(&crate::line::UpDown::new().up(0x00ff00).down(0x0000ff), ink, resolve);
+        assert_eq!(styled.up, Some(Color::from_rgb(1.0, 0.0, 0.0)));
+        assert_eq!(styled.down, Color::from_rgb(1.0, 0.0, 0.0));
+        assert_eq!(styled.border, ink);
+    }
 
     #[test]
     fn traced_line_follows_the_null_policy() {

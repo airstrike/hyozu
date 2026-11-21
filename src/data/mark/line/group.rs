@@ -35,9 +35,9 @@ pub struct Group {
 /// marks a position where the last series ends above the first; a down bar,
 /// below.
 ///
-/// Unset, up bars fill with the chart background and down bars with the
-/// theme's text color, both outlined in that ink: Excel's white and black
-/// bars, adapted to the theme.
+/// Unset, up bars are hollow and down bars fill with the theme's text
+/// color, both outlined in that ink: Excel's white and black bars, adapted
+/// to whatever surface the chart sits on.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct UpDown {
     up: Option<Color>,
