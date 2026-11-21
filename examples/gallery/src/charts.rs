@@ -23,6 +23,7 @@ mod pie_basic;
 mod pie_donut;
 mod scatter_basic;
 mod scatter_multi;
+mod series_styles;
 mod spatial;
 mod specialty;
 mod spectra;
@@ -969,6 +970,70 @@ pub fn variants() -> Vec<Variant> {
         ),
         variant!(140, "Rotated labels", Bar, Flat, axes::rotated_labels, "charts/axes.rs"),
         variant!(141, "Origin axes", Line, Flat, axes::origin_axes, "charts/axes.rs"),
+        variant!(
+            142,
+            "Line interpolation",
+            Line,
+            Flat,
+            series_styles::interpolation,
+            "charts/series_styles.rs"
+        ),
+        variant!(
+            143,
+            "Empty cells",
+            Line,
+            Flat,
+            series_styles::empty_cells,
+            "charts/series_styles.rs"
+        ),
+        variant!(
+            144,
+            "Hatched bars",
+            Bar,
+            Flat,
+            series_styles::hatched_bars,
+            "charts/series_styles.rs"
+        ),
+        variant!(
+            145,
+            "Hatched areas",
+            Area,
+            Flat,
+            series_styles::hatched_area,
+            "charts/series_styles.rs"
+        ),
+        variant!(
+            146,
+            "Hatched pie",
+            Pie,
+            Flat,
+            series_styles::hatched_pie,
+            "charts/series_styles.rs"
+        ),
+        variant!(
+            147,
+            "Drop and high-low lines",
+            Line,
+            Flat,
+            series_styles::drop_and_high_low,
+            "charts/series_styles.rs"
+        ),
+        variant!(
+            148,
+            "Up/down bars",
+            Financial,
+            Flat,
+            series_styles::up_down_bars,
+            "charts/series_styles.rs"
+        ),
+        variant!(
+            149,
+            "Bullet chart",
+            Bar,
+            Flat,
+            series_styles::bullet_chart,
+            "charts/series_styles.rs"
+        ),
     ]
 }
 

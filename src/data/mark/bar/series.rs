@@ -25,6 +25,8 @@ pub struct Series {
     pub(crate) label: Option<Label>,
     /// Optional name for this series (used in legends).
     pub(crate) name: Option<String>,
+    /// Hatched fill in place of the solid series color.
+    pub(crate) pattern: Option<crate::pattern::Pattern>,
 }
 
 impl Series {
@@ -38,7 +40,25 @@ impl Series {
             point_labels: Vec::new(),
             label: Some(Label::default()),
             name: None,
+            pattern: None,
         }
+    }
+
+    /// Fills this series' bars with a hatch. The lines default to the bar's
+    /// resolved color and the background to a tint of it.
+    pub fn pattern(mut self, pattern: impl Into<crate::pattern::Pattern>) -> Self {
+        self.pattern = Some(pattern.into());
+        self
+    }
+
+    /// Sets or clears the hatched fill in place.
+    pub fn set_pattern(&mut self, pattern: Option<crate::pattern::Pattern>) {
+        self.pattern = pattern;
+    }
+
+    /// Returns the hatched fill, if any.
+    pub fn pattern_value(&self) -> Option<&crate::pattern::Pattern> {
+        self.pattern.as_ref()
     }
 
     /// Sets the color for this series.

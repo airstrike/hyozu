@@ -3,7 +3,7 @@
 use crate::color::Color;
 use crate::core::Pixels;
 use crate::data::mark::Line;
-use crate::data::mark::line::label;
+use crate::data::mark::line::{self, label};
 use crate::map::Map;
 
 /// A property of a line chart.
@@ -29,6 +29,12 @@ pub enum Property {
     LabelStyle(Option<crate::core::font::Style>),
     /// Label background fill color
     LabelFill(Option<Color>),
+    /// Path interpolation
+    Interpolation(line::Interpolation),
+    /// What the path does at a missing value
+    Nulls(line::Nulls),
+    /// Excel drop lines; `None` removes them
+    DropLines(Option<line::Connector>),
 }
 
 impl Map for Property {}
@@ -47,6 +53,9 @@ impl Property {
             Property::LabelWeight(w) => set_label_with(line, |lbl| lbl.set_weight(*w)),
             Property::LabelStyle(s) => set_label_with(line, |lbl| lbl.set_style(*s)),
             Property::LabelFill(f) => set_label_with(line, |lbl| lbl.set_fill(*f)),
+            Property::Interpolation(i) => line.interpolation = *i,
+            Property::Nulls(n) => line.nulls = *n,
+            Property::DropLines(c) => line.drop_lines = c.clone(),
         }
     }
 }
@@ -109,4 +118,22 @@ pub fn LabelStyle(value: Option<crate::core::font::Style>) -> Property {
 #[allow(non_snake_case)]
 pub fn LabelFill(value: Option<Color>) -> Property {
     Property::LabelFill(value)
+}
+
+/// Wraps a path interpolation into a line property.
+#[allow(non_snake_case)]
+pub fn Interpolation(value: line::Interpolation) -> Property {
+    Property::Interpolation(value)
+}
+
+/// Wraps a missing-value policy into a line property.
+#[allow(non_snake_case)]
+pub fn Nulls(value: line::Nulls) -> Property {
+    Property::Nulls(value)
+}
+
+/// Wraps a drop line stroke into a line property.
+#[allow(non_snake_case)]
+pub fn DropLines(value: Option<line::Connector>) -> Property {
+    Property::DropLines(value)
 }

@@ -236,6 +236,13 @@ impl Area {
                         y_min = y_min.min(point.y);
                         y_max = y_max.max(point.y);
                     }
+                    // A missing value drawn as zero has to land on the plot.
+                    if line.nulls == crate::line::Nulls::Zero
+                        && line.points.iter().any(|p| p.x.is_finite() && !p.y.is_finite())
+                    {
+                        y_min = y_min.min(0.0);
+                        y_max = y_max.max(0.0);
+                    }
                 }
                 Mark::Waterfall(wf) => {
                     let mut running: f64 = 0.0;

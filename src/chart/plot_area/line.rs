@@ -10,16 +10,31 @@ use crate::core::text::{self, paragraph};
 use crate::widget::renderer::geometry;
 
 use crate::core::{Point, Rectangle};
+use crate::data::Datum;
 use crate::line::label::{Position, Show};
-use crate::line::marker;
+use crate::line::{Connector, Interpolation, Nulls, marker};
 
 /// State for a Line - stores positioned line points and label info
 pub struct State<P>
 where
     P: text::Paragraph,
 {
-    /// Pixel coordinates of line points (relative to plane origin)
+    /// Pixel coordinates of line points (relative to plane origin), one per
+    /// datum, non-finite where a value is missing. Hover, markers and labels
+    /// read these.
     pub pixel_points: Vec<Point>,
+    /// The drawn path: the runs the missing-value policy keeps, each traced
+    /// by the line's interpolation.
+    pub path: Vec<Vec<Point>>,
+    /// Pixel y of the value zero, where [`Nulls::Zero`] drops a missing
+    /// value. Falls back to the plot floor when the scale has no zero.
+    pub zero_y: f32,
+    /// Pixel y of the plot floor, where drop lines end.
+    pub floor_y: f32,
+    /// Group decorations at each x position, in pixels.
+    pub columns: Vec<Column>,
+    /// Width of one up/down bar in pixels.
+    pub bar_width: f32,
     /// Label texts for points that have labels
     pub label_texts: Vec<String>,
     /// Data-label paragraphs, shaped once in `layout` and rendered in `draw`
@@ -40,6 +55,18 @@ where
     /// Per-frame entrance/transition lifecycle (progress, pending-start
     /// flag, latest captured `Instant`) advanced by the chart widget.
     pub tick: animation::Tick,
+}
+
+/// A group summary column placed on the plot.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Column {
+    /// Pixel x of the position.
+    x: f32,
+    /// Pixel y of the low and high values.
+    range: Option<(f32, f32)>,
+    /// Pixel y of the first and last series' values, and whether the last
+    /// ends above the first.
+    ends: Option<(f32, f32, bool)>,
 }
 
 /// A Line series that renders connected line segments.
@@ -84,6 +111,11 @@ where
             tag: tree::Tag::of::<State<Renderer::Paragraph>>(),
             state: tree::State::new(State::<Renderer::Paragraph> {
                 pixel_points: Vec::new(),
+                path: Vec::new(),
+                zero_y: 0.0,
+                floor_y: 0.0,
+                columns: Vec::new(),
+                bar_width: 0.0,
                 label_texts: Vec::new(),
                 labels: Vec::new(),
                 label_positions: Vec::new(),
@@ -118,6 +150,19 @@ where
 
         // Transform all data points to pixel coordinates
         state.pixel_points = self.data.points.iter().map(|p| to_pixel(domain, rect, *p)).collect();
+        state.floor_y = floor_y(domain, rect);
+        let zero = to_pixel(domain, rect, Datum::ORIGIN).y;
+        state.zero_y = if zero.is_finite() { zero } else { state.floor_y };
+        state.path = trace(
+            &state.pixel_points,
+            state.zero_y,
+            self.data.nulls,
+            self.data.interpolation,
+        );
+        (state.columns, state.bar_width) = match self.data.group.as_deref() {
+            Some(group) => place_columns(group, domain, rect),
+            None => (Vec::new(), 0.0),
+        };
 
         // Build label info if configured
         state.label_texts.clear();
@@ -174,8 +219,12 @@ where
                 _ => vec![],
             };
 
-            // Collect line segments for hit-testing
-            let segments: Vec<(Point, Point)> = state.pixel_points.windows(2).map(|w| (w[0], w[1])).collect();
+            // Collect the drawn segments for hit-testing
+            let segments: Vec<(Point, Point)> = state
+                .path
+                .iter()
+                .flat_map(|run| run.windows(2).map(|w| (w[0], w[1])))
+                .collect();
 
             for (idx, (pixel_point, data_point)) in state.pixel_points.iter().zip(self.data.points.iter()).enumerate() {
                 // Non-finite coordinates are gaps — no label, no placement
@@ -346,28 +395,52 @@ where
 
         let mut frame = Frame::new(renderer, layout_bounds.size());
 
-        // Build a path from all points, breaking the line at any non-finite
-        // coordinate. A NaN y (from a missing or error cell flowing through
-        // the series unchanged) used to panic lyon_path's `move_to`; now it
-        // ends the current segment and the next finite point starts a fresh
-        // one.
-        let path = Path::new(|builder| {
-            let mut in_segment = false;
-            for point in &animated_pixel_points {
-                let finite = point.x.is_finite() && point.y.is_finite();
-                if !finite {
-                    in_segment = false;
-                    continue;
-                }
-                let p = crate::core::Point::new(point.x, point.y);
-                if in_segment {
-                    builder.line_to(p);
-                } else {
-                    builder.move_to(p);
-                    in_segment = true;
-                }
+        // Mid-sweep the vertices move, so the path is traced afresh from
+        // them; settled, it is the one laid out. Missing values (a NaN from
+        // an error cell flowing through the series) never reach the
+        // tessellator: the policy has already split or bridged them.
+        let swept;
+        let runs = if animating {
+            swept = trace(
+                &animated_pixel_points,
+                state.zero_y,
+                self.data.nulls,
+                self.data.interpolation,
+            );
+            &swept
+        } else {
+            &state.path
+        };
+
+        // Group decorations and drop lines sit behind the series, and wait
+        // for the sweep to settle like markers do.
+        if !animating {
+            let ink = text_pair.resolve(background, None);
+            if let Some(group) = self.data.group.as_deref() {
+                draw_group(
+                    &mut frame,
+                    group,
+                    &state.columns,
+                    state.bar_width,
+                    ink,
+                    background,
+                    text_pair,
+                    &seed,
+                );
             }
-        });
+            if let Some(connector) = &self.data.drop_lines {
+                draw_drop_lines(
+                    &mut frame,
+                    &state.pixel_points,
+                    state.floor_y,
+                    connector,
+                    ink,
+                    text_pair,
+                    &seed,
+                    background,
+                );
+            }
+        }
 
         let dash_stack = dash_segments(&self.data.style);
         let mut stroke = Stroke::default().with_width(self.data.width).with_color(color);
@@ -383,7 +456,7 @@ where
             }
         }
 
-        frame.stroke(&path, stroke);
+        stroke_runs(&mut frame, runs, stroke);
 
         // Draw the geometry at the layout position
         let geometry = frame.into_geometry();
@@ -497,6 +570,181 @@ pub(super) fn dash_segments(style: &LineStyle) -> &[f32] {
         LineStyle::Dashed => &[8.0, 4.0],
         LineStyle::Dotted => &[1.0, 3.0],
         LineStyle::Custom { segments } => segments.as_slice(),
+    }
+}
+
+/// Traces a line's drawn runs from its per-datum pixel points.
+///
+/// The floor under each point is the zero baseline, where [`Nulls::Zero`]
+/// drops a missing value. A run of one point draws no stroke and is dropped.
+pub(super) fn trace(points: &[Point], zero_y: f32, nulls: Nulls, interpolation: Interpolation) -> Vec<Vec<Point>> {
+    let floor: Vec<Point> = points.iter().map(|p| Point::new(p.x, zero_y)).collect();
+    nulls
+        .runs(points, &floor)
+        .into_iter()
+        .filter(|run| run.upper.len() >= 2)
+        .map(|run| interpolation.trace(&run.upper))
+        .collect()
+}
+
+/// One open subpath per run.
+pub(super) fn polyline(runs: &[Vec<Point>]) -> Path {
+    Path::new(|builder| {
+        for run in runs {
+            let Some((first, rest)) = run.split_first() else {
+                continue;
+            };
+            builder.move_to(*first);
+            for p in rest {
+                builder.line_to(*p);
+            }
+        }
+    })
+}
+
+/// Strokes each run as its own subpath. A dashed stroke goes run by run:
+/// iced's dasher walks a path as one polyline and would otherwise draw the
+/// jump between subpaths.
+pub(super) fn stroke_runs<R: geometry::Renderer>(frame: &mut Frame<R>, runs: &[Vec<Point>], stroke: Stroke<'_>) {
+    if stroke.line_dash.segments.is_empty() {
+        frame.stroke(&polyline(runs), stroke);
+    } else {
+        for run in runs {
+            frame.stroke(&polyline(std::slice::from_ref(run)), stroke);
+        }
+    }
+}
+
+/// The stroke for a drop line or high-low line, in its color or the
+/// softened theme ink.
+fn connector_stroke<'a>(
+    connector: &'a Connector,
+    ink: crate::core::Color,
+    background: crate::core::Color,
+    text_pair: crate::color::Pair,
+    seed: &crate::palette::Seed,
+) -> Stroke<'a> {
+    let color = connector
+        .color_value()
+        .map_or(ink.scale_alpha(0.6), |c| c.resolve(background, text_pair, seed, None));
+    let mut stroke = Stroke::default()
+        .with_width(connector.width_value())
+        .with_color(color)
+        .with_line_cap(LineCap::Butt);
+    stroke.line_dash = LineDash {
+        segments: dash_segments(connector.style_value()),
+        offset: 0,
+    };
+    stroke
+}
+
+/// Pixel y of the value axis minimum, where the category axis sits and drop
+/// lines end. On a reversed axis it is the top edge.
+pub(super) fn floor_y(domain: &Domain, rect: Rectangle) -> f32 {
+    let y = to_pixel(domain, rect, Datum::new(domain.x.min, domain.y.min)).y;
+    if y.is_finite() { y } else { rect.y + rect.height }
+}
+
+/// Draws a drop line from each finite point to the plot floor.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn draw_drop_lines<R: geometry::Renderer>(
+    frame: &mut Frame<R>,
+    points: &[Point],
+    floor: f32,
+    connector: &Connector,
+    ink: crate::core::Color,
+    text_pair: crate::color::Pair,
+    seed: &crate::palette::Seed,
+    background: crate::core::Color,
+) {
+    let drops: Vec<Vec<Point>> = points
+        .iter()
+        .filter(|p| p.x.is_finite() && p.y.is_finite() && p.y != floor)
+        .map(|p| vec![*p, Point::new(p.x, floor)])
+        .collect();
+    stroke_runs(
+        frame,
+        &drops,
+        connector_stroke(connector, ink, background, text_pair, seed),
+    );
+}
+
+/// Places a group's columns on the plot and sizes its up/down bars from the
+/// narrowest step between neighboring positions.
+fn place_columns(group: &crate::line::group::Decorations, domain: &Domain, rect: Rectangle) -> (Vec<Column>, f32) {
+    let at = |x: f64, y: f64| to_pixel(domain, rect, Datum::new(x, y));
+    let columns: Vec<Column> = group
+        .columns
+        .iter()
+        .map(|c| Column {
+            x: at(c.x, 0.0).x,
+            range: c.range.map(|(lo, hi)| (at(c.x, lo).y, at(c.x, hi).y)),
+            ends: c
+                .ends
+                .map(|(first, last)| (at(c.x, first).y, at(c.x, last).y, last >= first)),
+        })
+        .filter(|c| c.x.is_finite())
+        .collect();
+    let step = columns
+        .windows(2)
+        .map(|w| (w[1].x - w[0].x).abs())
+        .filter(|d| *d > 0.0)
+        .fold(f32::INFINITY, f32::min);
+    let step = if step.is_finite() { step } else { rect.width };
+    let share = group.up_down.as_ref().map_or(0.0, |u| u.gap_value().bar_share());
+    (columns, step * share)
+}
+
+/// Draws a group's high-low lines, then its up/down bars over them, so a
+/// bar hides the stretch of line it spans as Excel's do.
+#[allow(clippy::too_many_arguments)]
+fn draw_group<R: geometry::Renderer>(
+    frame: &mut Frame<R>,
+    group: &crate::line::group::Decorations,
+    columns: &[Column],
+    bar_width: f32,
+    ink: crate::core::Color,
+    background: crate::core::Color,
+    text_pair: crate::color::Pair,
+    seed: &crate::palette::Seed,
+) {
+    let finite = |v: f32| v.is_finite();
+    if let Some(connector) = &group.high_low {
+        let lines: Vec<Vec<Point>> = columns
+            .iter()
+            .filter_map(|c| {
+                let (lo, hi) = c.range.filter(|(lo, hi)| finite(*lo) && finite(*hi))?;
+                Some(vec![Point::new(c.x, lo), Point::new(c.x, hi)])
+            })
+            .collect();
+        stroke_runs(
+            frame,
+            &lines,
+            connector_stroke(connector, ink, background, text_pair, seed),
+        );
+    }
+    let Some(bars) = &group.up_down else {
+        return;
+    };
+    if bar_width <= 0.0 {
+        return;
+    }
+    let resolve = |c: &crate::color::Color| c.resolve(background, text_pair, seed, None);
+    let up = bars.up_value().map_or(background, resolve);
+    let down = bars.down_value().map_or(ink, resolve);
+    let border = bars.border_value().map_or(ink, resolve);
+    for c in columns {
+        let Some((first, last, rising)) = c.ends.filter(|(a, b, _)| finite(*a) && finite(*b)) else {
+            continue;
+        };
+        let fill = if rising { up } else { down };
+        let top = first.min(last);
+        let outline = Path::rectangle(
+            Point::new(c.x - bar_width / 2.0, top),
+            crate::core::Size::new(bar_width, (first - last).abs().max(1.0)),
+        );
+        frame.fill(&outline, fill);
+        frame.stroke(&outline, Stroke::default().with_width(1.0).with_color(border));
     }
 }
 
@@ -942,6 +1190,30 @@ fn animate_pixel_points(cur: &[Point], prev: &[Point], progress: f32) -> Vec<Poi
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn traced_line_follows_the_null_policy() {
+        let points = [
+            Point::new(0.0, 50.0),
+            Point::new(10.0, 40.0),
+            Point::new(20.0, f32::NAN),
+            Point::new(30.0, 30.0),
+            Point::new(40.0, 20.0),
+        ];
+        assert_eq!(trace(&points, 100.0, Nulls::Gap, Interpolation::Linear).len(), 2);
+        let connected = trace(&points, 100.0, Nulls::Connect, Interpolation::Linear);
+        assert_eq!(connected.len(), 1);
+        assert_eq!(connected[0].len(), 4);
+        let zeroed = trace(&points, 100.0, Nulls::Zero, Interpolation::Linear);
+        assert_eq!(zeroed[0][2], Point::new(20.0, 100.0));
+        // A lone point between gaps strokes nothing.
+        let lone = [
+            Point::new(0.0, f32::NAN),
+            Point::new(10.0, 5.0),
+            Point::new(20.0, f32::NAN),
+        ];
+        assert!(trace(&lone, 100.0, Nulls::Gap, Interpolation::Monotone).is_empty());
+    }
 
     const LABEL_WIDTH: f32 = 20.0;
     const LABEL_HEIGHT: f32 = 14.0;

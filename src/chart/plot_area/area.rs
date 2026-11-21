@@ -1,4 +1,6 @@
-use super::line::{alignment_for_position, compute_label_rect, dash_segments, draw_markers, place_label};
+use super::line::{
+    alignment_for_position, compute_label_rect, dash_segments, draw_drop_lines, draw_markers, place_label, stroke_runs,
+};
 use super::{Domain, to_pixel};
 use crate::animation;
 use crate::core::layout::Limits;
@@ -6,8 +8,8 @@ use crate::core::text::{self, paragraph};
 use crate::core::widget::{Tree, tree};
 use crate::core::{Point, Rectangle, Size};
 use crate::data::Datum;
-use crate::line::LineStyle;
 use crate::line::label::{Position, Show};
+use crate::line::{Interpolation, LineStyle, Nulls};
 use crate::widget::canvas::gradient::Linear;
 use crate::widget::canvas::{Fill, Frame, LineCap, LineDash, Path, Stroke};
 use crate::widget::renderer::geometry;
@@ -20,6 +22,12 @@ where
     pub series_points: Vec<Vec<Point>>,
     /// Baseline pixel points per series (for fill polygon)
     pub series_baselines: Vec<Vec<Point>>,
+    /// The drawn upper edge per series: the runs the missing-value policy
+    /// keeps, traced by the chart's interpolation.
+    pub series_strokes: Vec<Vec<Vec<Point>>>,
+    /// The fill per series: one closed ring per run, along the traced upper
+    /// edge and back along the traced floor.
+    pub series_rings: Vec<Vec<Vec<Point>>>,
     /// Label texts per series
     pub series_label_texts: Vec<Vec<String>>,
     /// Data-label paragraphs, shaped once in `layout` and rendered in `draw`
@@ -35,6 +43,8 @@ where
     /// transparent end of vertical fill gradients so they respect the
     /// axis scale even when 0 is outside it.
     pub axis_floor_y: f32,
+    /// Pixel y of the value axis minimum, where drop lines end.
+    pub drop_floor_y: f32,
     /// Upper envelope points from the most recent layout before the current
     /// one, captured by [`crate::chart::Chart::diff`] when data changes so
     /// the next sweep can interpolate from previous positions to current
@@ -88,11 +98,14 @@ where
             state: tree::State::new(State::<Renderer::Paragraph> {
                 series_points: Vec::new(),
                 series_baselines: Vec::new(),
+                series_strokes: Vec::new(),
+                series_rings: Vec::new(),
                 series_label_texts: Vec::new(),
                 series_labels: Vec::new(),
                 series_label_positions: Vec::new(),
                 series_label_rects: Vec::new(),
                 axis_floor_y: 0.0,
+                drop_floor_y: 0.0,
                 previous_series_points: Vec::new(),
                 previous_series_baselines: Vec::new(),
                 tick: animation::Tick::new(),
@@ -119,6 +132,7 @@ where
 
         let zero_y = to_pixel(domain, rect, Datum::ORIGIN).y;
         state.axis_floor_y = rect.y + rect.height;
+        state.drop_floor_y = super::line::floor_y(domain, rect);
 
         match self.data.layout {
             crate::mark::area::Layout::Overlaid => {
@@ -186,6 +200,13 @@ where
             }
         }
 
+        (state.series_strokes, state.series_rings) = envelopes(
+            &state.series_points,
+            &state.series_baselines,
+            self.data.nulls,
+            self.data.interpolation,
+        );
+
         // Build label info per series. Labels avoid:
         //   - every series' upper envelope (so a later series' label does
         //     not overlap an earlier series' line)
@@ -212,9 +233,10 @@ where
         let hint_factor = renderer.hint_factor();
 
         let all_segments: Vec<(Point, Point)> = state
-            .series_points
+            .series_strokes
             .iter()
-            .flat_map(|pts| pts.windows(2).map(|w| (w[0], w[1])))
+            .flatten()
+            .flat_map(|run| run.windows(2).map(|w| (w[0], w[1])))
             .collect();
 
         let mut placed_rects: Vec<Rectangle> = Vec::new();
@@ -445,11 +467,26 @@ where
             animated_series_baselines = baselines_out;
         }
 
-        for (series_idx, series) in self.data.series.iter().enumerate() {
-            let upper = &animated_series_points[series_idx];
-            let baseline = &animated_series_baselines[series_idx];
+        // Settled, the traced envelopes are the ones laid out; mid-sweep
+        // they are traced afresh from the moving vertices.
+        let swept;
+        let (strokes, rings) = if animating {
+            swept = envelopes(
+                &animated_series_points,
+                &animated_series_baselines,
+                self.data.nulls,
+                self.data.interpolation,
+            );
+            (&swept.0, &swept.1)
+        } else {
+            (&state.series_strokes, &state.series_rings)
+        };
 
-            if upper.len() < 2 {
+        for (series_idx, series) in self.data.series.iter().enumerate() {
+            let (Some(series_strokes), Some(series_rings)) = (strokes.get(series_idx), rings.get(series_idx)) else {
+                continue;
+            };
+            if series_rings.is_empty() && series_strokes.is_empty() {
                 continue;
             }
 
@@ -466,45 +503,31 @@ where
                 ..base_color
             };
 
-            // Build the closed envelope as one or more sub-polygons,
-            // splitting at any non-finite vertex so NaN data renders as a
-            // gap instead of crashing the tessellator. Each contiguous run
-            // of finite (upper, baseline) pairs becomes its own closed
-            // polygon: forward along upper, reverse along baseline.
+            // Each run of finite columns is its own closed polygon, so a
+            // missing value leaves a gap instead of crashing the tessellator.
             let fill_path = Path::new(|builder| {
-                let n = upper.len().min(baseline.len());
-                let finite = |p: &Point| p.x.is_finite() && p.y.is_finite();
-                let mut run_start: Option<usize> = None;
-                for i in 0..n {
-                    if finite(&upper[i]) && finite(&baseline[i]) {
-                        if run_start.is_none() {
-                            run_start = Some(i);
-                            builder.move_to(upper[i]);
-                        } else {
-                            builder.line_to(upper[i]);
-                        }
-                    } else if let Some(start) = run_start.take() {
-                        for j in (start..i).rev() {
-                            builder.line_to(baseline[j]);
-                        }
-                        builder.close();
-                    }
-                }
-                if let Some(start) = run_start.take() {
-                    for j in (start..n).rev() {
-                        builder.line_to(baseline[j]);
+                for ring in series_rings {
+                    let Some((first, rest)) = ring.split_first() else {
+                        continue;
+                    };
+                    builder.move_to(*first);
+                    for p in rest {
+                        builder.line_to(*p);
                     }
                     builder.close();
                 }
             });
 
-            if self.data.gradient {
+            if let Some(pattern) = &series.pattern {
+                let ink = crate::pattern::Ink::resolve(pattern, base_color, background, text_pair, &seed);
+                pattern.fill(&mut fill_frame, &fill_path, ink);
+            } else if self.data.gradient {
                 // Vertical linear gradient: series color at the top of the
                 // upper envelope, fully transparent at the y-axis floor.
                 // Anchoring to the axis floor (not the polygon baseline)
                 // keeps the gradient aligned with the visible scale when
                 // 0 is outside the y-axis range.
-                let top_y = upper.iter().map(|p| p.y).fold(f32::INFINITY, f32::min);
+                let top_y = series_rings.iter().flatten().map(|p| p.y).fold(f32::INFINITY, f32::min);
                 let bottom_y = state.axis_floor_y;
 
                 let gradient = Linear::new(Point::new(0.0, top_y), Point::new(0.0, bottom_y))
@@ -517,31 +540,33 @@ where
             }
 
             if let Some(stroke_width) = series.stroke {
-                // Mirror line.rs: break the stroke at any non-finite vertex
-                // so a NaN-y upper produces a real gap rather than a NaN
-                // line_to into the tessellator.
-                let stroke_path = Path::new(|builder| {
-                    let mut in_segment = false;
-                    for p in upper {
-                        if !p.x.is_finite() || !p.y.is_finite() {
-                            in_segment = false;
-                            continue;
-                        }
-                        if in_segment {
-                            builder.line_to(*p);
-                        } else {
-                            builder.move_to(*p);
-                            in_segment = true;
-                        }
-                    }
-                });
                 let segments = dash_segments(&series.style);
                 let mut stroke = Stroke::default().with_width(stroke_width).with_color(base_color);
                 stroke.line_dash = LineDash { segments, offset: 0 };
                 if matches!(series.style, LineStyle::Dotted) {
                     stroke = stroke.with_line_cap(LineCap::Round);
                 }
-                stroke_frame.stroke(&stroke_path, stroke);
+                stroke_runs(&mut stroke_frame, series_strokes, stroke);
+            }
+        }
+
+        // Drop lines run from each settled point to the plot floor, over the
+        // fills and under the strokes.
+        if let Some(connector) = &self.data.drop_lines
+            && !animating
+        {
+            let ink = text_pair.resolve(background, None);
+            for upper in &state.series_points {
+                draw_drop_lines(
+                    &mut fill_frame,
+                    upper,
+                    state.drop_floor_y,
+                    connector,
+                    ink,
+                    text_pair,
+                    &seed,
+                    background,
+                );
             }
         }
 
@@ -687,6 +712,41 @@ where
     }
 }
 
+/// Traces every series' drawn edge and fill from its upper and baseline
+/// pixel points: the runs the missing-value policy keeps, each traced by the
+/// chart's interpolation. A fill ring runs along the traced top and back
+/// along the traced floor; a run of one column draws nothing.
+#[allow(clippy::type_complexity)]
+fn envelopes(
+    uppers: &[Vec<Point>],
+    baselines: &[Vec<Point>],
+    nulls: Nulls,
+    interpolation: Interpolation,
+) -> (Vec<Vec<Vec<Point>>>, Vec<Vec<Vec<Point>>>) {
+    uppers
+        .iter()
+        .zip(baselines)
+        .map(|(upper, baseline)| {
+            let runs: Vec<_> = nulls
+                .runs(upper, baseline)
+                .into_iter()
+                .filter(|run| run.upper.len() >= 2)
+                .collect();
+            let strokes: Vec<Vec<Point>> = runs.iter().map(|run| interpolation.trace(&run.upper)).collect();
+            let rings = runs
+                .iter()
+                .zip(&strokes)
+                .map(|(run, top)| {
+                    let mut ring = top.clone();
+                    ring.extend(interpolation.trace(&run.lower).into_iter().rev());
+                    ring
+                })
+                .collect();
+            (strokes, rings)
+        })
+        .unzip()
+}
+
 /// Returns the upper and baseline polylines for one series at the
 /// current sweep progress.
 ///
@@ -779,4 +839,63 @@ fn animate_envelope(
     baseline_out.push(partial_endpoint(cur_baseline, cur_baseline[len_visible]));
 
     (upper_out, baseline_out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(ys: &[f32]) -> Vec<Point> {
+        ys.iter()
+            .enumerate()
+            .map(|(i, &y)| Point::new(i as f32 * 30.0, y))
+            .collect()
+    }
+
+    #[test]
+    fn stacked_layers_share_their_traced_edge() {
+        let floor = row(&[200.0; 5]);
+        let lower = row(&[150.0, 120.0, 160.0, 90.0, 140.0]);
+        let upper = row(&[100.0, 60.0, 110.0, 40.0, 80.0]);
+        for interpolation in [
+            Interpolation::Monotone,
+            Interpolation::Natural,
+            Interpolation::Step(crate::line::Step::Mid),
+        ] {
+            let (strokes, rings) = envelopes(
+                &[lower.clone(), upper.clone()],
+                &[floor.clone(), lower.clone()],
+                Nulls::Gap,
+                interpolation,
+            );
+            let edge = &strokes[0][0];
+            let ring = &rings[1][0];
+            let floor_of_upper: Vec<Point> = ring[ring.len() - edge.len()..].iter().rev().copied().collect();
+            assert_eq!(&floor_of_upper, edge, "{interpolation:?} opens a seam");
+        }
+    }
+
+    #[test]
+    fn gaps_split_fills_and_connect_bridges_them() {
+        let floor = row(&[200.0; 5]);
+        let upper = row(&[100.0, 90.0, f32::NAN, 80.0, 70.0]);
+        let (_, gap) = envelopes(
+            std::slice::from_ref(&upper),
+            std::slice::from_ref(&floor),
+            Nulls::Gap,
+            Interpolation::Linear,
+        );
+        assert_eq!(gap[0].len(), 2);
+        let (_, connect) = envelopes(
+            std::slice::from_ref(&upper),
+            std::slice::from_ref(&floor),
+            Nulls::Connect,
+            Interpolation::Linear,
+        );
+        assert_eq!(connect[0].len(), 1);
+        assert_eq!(connect[0][0].len(), 8);
+        let (strokes, zero) = envelopes(&[upper], &[floor], Nulls::Zero, Interpolation::Linear);
+        assert_eq!(zero[0].len(), 1);
+        assert_eq!(strokes[0][0][2], Point::new(60.0, 200.0));
+    }
 }

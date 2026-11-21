@@ -6,6 +6,7 @@ use crate::data::mark::area::Series;
 use crate::data::mark::line::label::{self, Label};
 use crate::data::mark::line::{LineStyle, marker};
 use crate::map::Map;
+use crate::pattern::Pattern;
 
 /// A property of an area series.
 #[derive(Debug, Clone, PartialEq)]
@@ -36,6 +37,8 @@ pub enum Property {
     LabelStyle(Option<crate::core::font::Style>),
     /// Series-level label background fill.
     LabelFill(Option<Color>),
+    /// Hatched fill; `None` restores the translucent fill.
+    Pattern(Option<Pattern>),
 }
 
 impl Map for Property {}
@@ -57,6 +60,7 @@ impl Property {
             Property::LabelWeight(w) => series.set_label_weight(*w),
             Property::LabelStyle(s) => series.set_label_style(*s),
             Property::LabelFill(f) => series.set_label_fill(*f),
+            Property::Pattern(p) => series.set_pattern(p.clone()),
         }
     }
 }
@@ -124,4 +128,10 @@ pub fn LabelStyle(value: Option<crate::core::font::Style>) -> Property {
 #[allow(non_snake_case)]
 pub fn LabelFill(value: Option<Color>) -> Property {
     Property::LabelFill(value)
+}
+
+/// Wraps a hatched fill into a series property.
+#[allow(non_snake_case)]
+pub fn Pattern(value: Option<Pattern>) -> Property {
+    Property::Pattern(value)
 }

@@ -1,7 +1,8 @@
 use crate::color::Color;
 use crate::data::axis::{self, Axis, Kind, Orientation, Placement};
-pub use crate::data::mark::line::LineStyle;
+pub use crate::data::mark::line::{Connector, Interpolation, LineStyle, Nulls, Step};
 use crate::data::{Datum, IntoDatums};
+use crate::pattern::Pattern;
 
 pub mod label {
     pub use crate::data::mark::line::label::*;
@@ -34,6 +35,8 @@ pub struct Series {
     /// placement semantics are identical (labels sit above/around points on a
     /// polyline envelope).
     pub(crate) label: Option<label::Label>,
+    /// Hatched fill in place of the translucent or gradient fill.
+    pub(crate) pattern: Option<Pattern>,
 }
 
 impl Series {
@@ -47,7 +50,24 @@ impl Series {
             style: LineStyle::Solid,
             marker: None,
             label: None,
+            pattern: None,
         }
+    }
+
+    /// Fills this series with a hatch instead of its translucent color.
+    pub fn pattern(mut self, pattern: impl Into<Pattern>) -> Self {
+        self.pattern = Some(pattern.into());
+        self
+    }
+
+    /// Sets or clears the hatched fill in place.
+    pub fn set_pattern(&mut self, pattern: Option<Pattern>) {
+        self.pattern = pattern;
+    }
+
+    /// Returns the hatched fill, if any.
+    pub fn pattern_value(&self) -> Option<&Pattern> {
+        self.pattern.as_ref()
     }
 
     pub fn color(mut self, color: impl Into<Color>) -> Self {
@@ -274,6 +294,13 @@ pub struct Area {
     /// (fill color at the top, transparent at the baseline) instead of a flat
     /// translucent color.
     pub(crate) gradient: bool,
+    /// Envelope shape between points, shared by every series so stacked
+    /// layers keep sharing their edges.
+    pub(crate) interpolation: Interpolation,
+    /// What the envelopes do at a missing value.
+    pub(crate) nulls: Nulls,
+    /// Excel drop lines from each point to the plot floor.
+    pub(crate) drop_lines: Option<Connector>,
 }
 
 /// Creates a single area series.
@@ -296,6 +323,9 @@ impl IntoAreas for Series {
             series: vec![self],
             layout: Layout::default(),
             gradient: true,
+            interpolation: Interpolation::Linear,
+            nulls: Nulls::Gap,
+            drop_lines: None,
         }
     }
 }
@@ -306,6 +336,9 @@ impl<const N: usize> IntoAreas for [Series; N] {
             series: self.into(),
             layout: Layout::default(),
             gradient: true,
+            interpolation: Interpolation::Linear,
+            nulls: Nulls::Gap,
+            drop_lines: None,
         }
     }
 }
@@ -316,6 +349,9 @@ impl IntoAreas for Vec<Series> {
             series: self,
             layout: Layout::default(),
             gradient: true,
+            interpolation: Interpolation::Linear,
+            nulls: Nulls::Gap,
+            drop_lines: None,
         }
     }
 }
@@ -326,6 +362,9 @@ impl Area {
             series,
             layout: Layout::default(),
             gradient: true,
+            interpolation: Interpolation::Linear,
+            nulls: Nulls::Gap,
+            drop_lines: None,
         }
     }
 
@@ -337,6 +376,58 @@ impl Area {
     pub fn gradient(mut self, enabled: bool) -> Self {
         self.gradient = enabled;
         self
+    }
+
+    /// Sets how every series' envelope travels between points.
+    ///
+    /// One interpolation serves the whole chart: a stacked layer's floor is
+    /// the layer below's top, traced through the same points the same way,
+    /// so the two stay joined.
+    pub fn interpolation(mut self, interpolation: impl Into<Interpolation>) -> Self {
+        self.interpolation = interpolation.into();
+        self
+    }
+
+    /// Sets what the envelopes do at a missing (non-finite) value.
+    pub fn nulls(mut self, nulls: Nulls) -> Self {
+        self.nulls = nulls;
+        self
+    }
+
+    /// Draws Excel drop lines from each point of each series to the plot floor.
+    pub fn drop_lines(mut self, connector: impl Into<Option<Connector>>) -> Self {
+        self.drop_lines = connector.into();
+        self
+    }
+
+    /// Sets the interpolation in place.
+    pub fn set_interpolation(&mut self, interpolation: Interpolation) {
+        self.interpolation = interpolation;
+    }
+
+    /// Sets the missing-value policy in place.
+    pub fn set_nulls(&mut self, nulls: Nulls) {
+        self.nulls = nulls;
+    }
+
+    /// Sets or clears the drop lines in place.
+    pub fn set_drop_lines(&mut self, connector: Option<Connector>) {
+        self.drop_lines = connector;
+    }
+
+    /// Returns the envelope interpolation.
+    pub fn interpolation_value(&self) -> Interpolation {
+        self.interpolation
+    }
+
+    /// Returns the missing-value policy.
+    pub fn nulls_value(&self) -> Nulls {
+        self.nulls
+    }
+
+    /// Returns the drop line stroke, if drop lines are drawn.
+    pub fn drop_lines_value(&self) -> Option<&Connector> {
+        self.drop_lines.as_ref()
     }
 
     pub fn stacked(mut self) -> Self {

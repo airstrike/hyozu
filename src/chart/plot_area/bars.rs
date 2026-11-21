@@ -1112,7 +1112,17 @@ where
 
             // Draw bars: per-bar fill if any per-point override OR any fill
             // encoding is present; otherwise batch into a single Path.
-            if series.has_point_colors() || series.color_by.is_some() {
+            if let Some(pattern) = &series.pattern {
+                // A hatch derives its colors from each bar's resolved color,
+                // so overrides and encodings still show through it.
+                for (rect, &color) in rects.iter().zip(bar_colors.iter()) {
+                    let path = Path::new(|builder| {
+                        push_bar_path(builder, rect, corners, is_horizontal, round_this_series, round_baseline);
+                    });
+                    let ink = crate::pattern::Ink::resolve(pattern, color, background, text_pair, &seed);
+                    pattern.fill(&mut bar_frame, &path, ink);
+                }
+            } else if series.has_point_colors() || series.color_by.is_some() {
                 for (rect, &color) in rects.iter().zip(bar_colors.iter()) {
                     let path = Path::new(|builder| {
                         push_bar_path(builder, rect, corners, is_horizontal, round_this_series, round_baseline);
