@@ -471,7 +471,6 @@ fn place(
             };
             (Some(anchor - Vector::new(dx, bounds.height / 2.)), false)
         }
-        label::Place::Center => (Some(centered), false),
         label::Place::Toward(toward) => (Some(beside(anchor, bounds, *toward)), false),
         label::Place::Inside { region, otherwise } => {
             if plane.area(region).holds(Rectangle::new(centered, bounds).expand(INSET)) {

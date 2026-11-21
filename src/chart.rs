@@ -2732,17 +2732,20 @@ fn draw_tooltip_overlay<Message>(
                 color,
                 highlight: hover::Highlight::None,
             };
-            draw_tooltip_box(
-                renderer,
-                design,
-                tooltip_config,
-                &[entry],
-                anchor,
-                chart_bounds.x + chart_bounds.width,
-                chart_bounds,
-                text.resolve(bg, None),
-                viewport,
-            );
+            // Its own layer keeps the box above the diagram's guide labels.
+            renderer.with_layer(*viewport, |renderer| {
+                draw_tooltip_box(
+                    renderer,
+                    design,
+                    tooltip_config,
+                    &[entry],
+                    anchor,
+                    chart_bounds.x + chart_bounds.width,
+                    chart_bounds,
+                    text.resolve(bg, None),
+                    viewport,
+                );
+            });
         }
         hover::Geometry::Pie { mark_idx, slice_idx } => draw_pie_tooltip_overlay(
             renderer,

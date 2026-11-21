@@ -551,11 +551,17 @@ impl Axes {
             [first, second, ..] => first.0.midpoint(second.0),
             _ => TAU / 16.,
         };
+        // On the bisector a polygonal ring's edge runs inside the circle
+        // through its corners.
+        let edge = match rings {
+            Rings::Polygons if spokes.len() >= 3 => (PI / spokes.len() as f64).cos(),
+            _ => 1.,
+        };
+        // Each tick reads just outside its ring, clear of the ring's line.
         for &tick in &scale.ticks {
-            d.labels.push(Label::center(
-                f32s(self.place(along, tick / scale.maximum)),
-                self.text(tick),
-            ));
+            let anchor = f32s(self.place(along, edge * tick / scale.maximum + 0.01 / RADIUS));
+            d.labels
+                .push(Label::toward(anchor, self.outward(along), self.text(tick)));
         }
         d
     }

@@ -18,8 +18,6 @@ pub(crate) enum Place {
     /// Aligned by the anchor's horizontal position, or centered when the
     /// diagram asks for centered labels.
     Free,
-    /// Centered on the anchor.
-    Center,
     /// On the side of the anchor that a screen-space direction points to.
     Toward([f32; 2]),
     /// Centered on the anchor when the box fits inside `region`.
@@ -64,13 +62,6 @@ impl Label {
             anchor,
             place: Place::Free,
             entry: None,
-        }
-    }
-
-    pub(crate) fn center(anchor: [f32; 2], text: impl Into<String>) -> Self {
-        Self {
-            place: Place::Center,
-            ..Self::free(anchor, text)
         }
     }
 
